@@ -64,9 +64,9 @@ namespace RealisticSoundPlus.Patches
 
                     KnownThrusterEmitters.Add(emitter);
                     float baseVolume = RestoreEmitter(emitter);
-                    float transmission = ExteriorSoundTransmission.Calculate(listenerPosition, emitter.SourcePosition);
-                    if (SettingsManager.Current.SpatialAudioEnabled)
-                        transmission *= SettingsManager.Current.SpatialCentralBlend;
+                    float transmission = SettingsManager.Current.SpatialAudioEnabled
+                        ? 0f
+                        : ExteriorSoundTransmission.Calculate(listenerPosition, emitter.SourcePosition);
 
                     emitter.VolumeMultiplier = baseVolume * transmission;
                     LastTransmissionByEmitter[emitter] = transmission;

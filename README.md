@@ -45,7 +45,9 @@ In-game chat commands:
 - `/rsp ambient on` - also applies the current muffling/filter behavior to ambient ship-motion and interior block loops currently identified as ship rattle, medical bay, air vent, oxygen generator, and gravity generator audio. Use `/rsp ambient off` to leave those ambience cues vanilla.
 - `/rsp spatial on` - enables experimental per-thruster spatial audio. Each thruster emitter is forced 3D, moved to that thruster block location, scaled by that thruster's actual output, and passed through the same XML-backed gain, curve, muffling, distance, and filter settings.
 - `/rsp spatialgain 1.2` - adjusts only the individual thruster emitter layer after the normal engine gain/curve. Raise this if the new localized thrusters are too subtle; lower it if individual nozzles dominate the mix.
-- `/rsp spatialcenter 0.25` - controls how much of Keen's original grid-center thruster layer remains while spatial audio is enabled. `0` removes the centered layer; `1` leaves it at the normal muffled level.
+- `/rsp smooth 100` - sets de-click smoothing time in milliseconds for spatial thruster volume changes. `50..150` is the intended range.
+- `/rsp fade 0.04` - sets the soft thrust-ratio fade width near zero output. Higher values make thrusters fade in/out more gently at very low output.
+- `/rsp spatialcenter 0.25` - legacy setting kept for old XML files. Spatial mode now disables Keen's original grid-center thruster layer so the individual thruster emitters are the source of truth.
 - `/rsp atmfloor 0.5` - sets how much of the configured muffling remains at full planetary air density while the listener is inside a ship. `0.5` means full atmosphere cuts the extra exterior muffling strength in half inside; outside in full atmosphere, the extra muffling fades completely to zero. Vacuum still uses the full configured muffling value.
 - `/rsp save` - writes the current values to the XML config.
 - `/rsp filter off` - leaves vanilla effect selection unchanged for thruster sounds. Filter modes target grouped ship thruster audio, hydrogen jet cues, hydrogen engine block emitters, and individual thruster block emitters.

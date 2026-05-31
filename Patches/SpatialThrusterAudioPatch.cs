@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
 using Sandbox.Game.Entities;
-using Sandbox.ModAPI;
 using VRage.Utils;
 using VRageMath;
 
@@ -12,9 +11,9 @@ namespace RealisticSoundPlus.Patches
     [HarmonyPatch]
     internal static class SpatialThrusterAudioPatch
     {
-        private const float SilentThrustRatio = 0.01f;
         private static readonly FieldInfo SoundEmitterField = AccessTools.Field(typeof(MyThrust), "m_soundEmitter");
         private static readonly Dictionary<MyEntity3DSoundEmitter, float> BaseVolumeByEmitter = new Dictionary<MyEntity3DSoundEmitter, float>();
+        private static readonly Dictionary<MyEntity3DSoundEmitter, SmoothState> SmoothStatesByEmitter = new Dictionary<MyEntity3DSoundEmitter, SmoothState>();
 
         private static bool _disabled;
         private static int _patchHits;
@@ -22,13 +21,6 @@ namespace RealisticSoundPlus.Patches
         [HarmonyPatch(typeof(MyThrust), "UpdateAfterSimulation")]
         [HarmonyPostfix]
         private static void AfterSimulation(MyThrust __instance)
-        {
-            Apply(__instance);
-        }
-
-        [HarmonyPatch(typeof(MyThrust), "UpdateSoundState")]
-        [HarmonyPostfix]
-        private static void AfterSoundState(MyThrust __instance)
         {
             Apply(__instance);
         }
@@ -55,19 +47,15 @@ namespace RealisticSoundPlus.Patches
                 emitter.SetPosition(sourcePosition);
 
                 float scale = CalculateSpatialScale(thruster);
-                if (scale <= 0f)
-                {
-                    emitter.VolumeMultiplier = 0f;
-                    BaseVolumeByEmitter[emitter] = baseVolume;
-                    return;
-                }
-
                 float transmission = CalculateTransmission(sourcePosition);
-                emitter.VolumeMultiplier = baseVolume * scale * transmission;
+                float targetMultiplier = scale * transmission;
+                float smoothedMultiplier = SmoothMultiplier(emitter, targetMultiplier);
+
+                emitter.VolumeMultiplier = baseVolume * smoothedMultiplier;
                 BaseVolumeByEmitter[emitter] = baseVolume;
 
                 if (++_patchHits == 1)
-                    MyLog.Default.WriteLineAndConsole("[RealisticSoundPlus] Per-thruster spatial audio is active.");
+                    MyLog.Default.WriteLineAndConsole("[RealisticSoundPlus] Per-thruster spatial audio is active with de-click smoothing.");
             }
             catch (Exception ex)
             {
@@ -86,13 +74,11 @@ namespace RealisticSoundPlus.Patches
                 maxForce = Math.Max(thruster.ThrustForceLength, 1f);
 
             float thrustRatio = Clamp01(thruster.ThrustForceLength / maxForce);
-            if (thrustRatio < SilentThrustRatio)
-                return 0f;
-
             var settings = SettingsManager.Current;
+            float fade = SmoothStep(thrustRatio / settings.SpatialSoftFadeRatio);
             float shaped = Clamp01((float)Math.Pow(thrustRatio, settings.AudioCurveExponent));
             float thrusterPresence = CalculateThrusterPresence(maxForce, settings);
-            return shaped * thrusterPresence * settings.EngineGain * settings.SpatialEmitterGain;
+            return shaped * fade * thrusterPresence * settings.EngineGain * settings.SpatialEmitterGain;
         }
 
         private static float CalculateThrusterPresence(float maxForce, RealisticSoundPlusSettings settings)
@@ -107,6 +93,38 @@ namespace RealisticSoundPlus.Patches
             return ExteriorSoundTransmission.Calculate(sourcePosition);
         }
 
+        private static float SmoothMultiplier(MyEntity3DSoundEmitter emitter, float targetMultiplier)
+        {
+            var settings = SettingsManager.Current;
+            if (settings.SpatialSmoothingMs <= 0f)
+                return targetMultiplier;
+
+            DateTime now = DateTime.UtcNow;
+            if (!SmoothStatesByEmitter.TryGetValue(emitter, out SmoothState state))
+            {
+                SmoothStatesByEmitter[emitter] = new SmoothState(targetMultiplier, now);
+                return targetMultiplier;
+            }
+
+            double elapsedMs = Math.Max(0.0, (now - state.LastUpdateUtc).TotalMilliseconds);
+            state.LastUpdateUtc = now;
+
+            if (elapsedMs <= 0.0)
+            {
+                SmoothStatesByEmitter[emitter] = state;
+                return state.Value;
+            }
+
+            float factor = Clamp01((float)(1.0 - Math.Exp(-elapsedMs / settings.SpatialSmoothingMs)));
+            state.Value += (targetMultiplier - state.Value) * factor;
+
+            if (targetMultiplier <= 0f && state.Value < 0.0001f)
+                state.Value = 0f;
+
+            SmoothStatesByEmitter[emitter] = state;
+            return state.Value;
+        }
+
         private static float RestoreEmitter(MyEntity3DSoundEmitter emitter)
         {
             float current = emitter.VolumeMultiplier;
@@ -118,6 +136,11 @@ namespace RealisticSoundPlus.Patches
             return baseVolume;
         }
 
+        private static float SmoothStep(float value)
+        {
+            float x = Clamp01(value);
+            return x * x * (3f - 2f * x);
+        }
 
         private static float Clamp01(float value)
         {
@@ -125,6 +148,18 @@ namespace RealisticSoundPlus.Patches
                 return 0f;
 
             return value >= 1f ? 1f : value;
+        }
+
+        private struct SmoothState
+        {
+            public float Value;
+            public DateTime LastUpdateUtc;
+
+            public SmoothState(float value, DateTime lastUpdateUtc)
+            {
+                Value = value;
+                LastUpdateUtc = lastUpdateUtc;
+            }
         }
     }
 }
