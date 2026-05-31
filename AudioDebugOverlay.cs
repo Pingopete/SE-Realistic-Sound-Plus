@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
-using System.Linq;
+using Sandbox.ModAPI;
 using VRage.Audio;
 using VRage.Utils;
 using VRageMath;
@@ -44,15 +44,17 @@ namespace RealisticSoundPlus
                 rows.Sort((left, right) => right.Score.CompareTo(left.Score));
 
                 int shown = Math.Min(rows.Count, MaxRows);
-                float rowHeight = 0.019f;
-                float startY = 0.12f;
+                Vector2 viewportSize = GetViewportSize();
+                float centerX = viewportSize.X * 0.5f;
+                float rowHeight = 22f;
+                float startY = Math.Max(80f, viewportSize.Y * 0.12f);
 
-                DrawLine(0, "Realistic Sound+ audio debug  |  /rsp sounds off", HeaderColor, 0.68f, startY, rowHeight);
-                DrawLine(1, "type  count  volume  cue", HeaderColor, 0.58f, startY, rowHeight);
+                DrawLine(0, "Realistic Sound+ audio debug  |  /rsp sounds off", HeaderColor, 0.68f, centerX, startY, rowHeight);
+                DrawLine(1, "type  count  volume  cue", HeaderColor, 0.58f, centerX, startY, rowHeight);
 
                 if (rows.Count == 0)
                 {
-                    DrawLine(3, "No currently playing source voices reported.", QuietColor, 0.56f, startY, rowHeight);
+                    DrawLine(3, "No currently playing source voices reported.", QuietColor, 0.56f, centerX, startY, rowHeight);
                     return;
                 }
 
@@ -66,11 +68,11 @@ namespace RealisticSoundPlus
                         row.Count,
                         row.Score,
                         row.CueName);
-                    DrawLine(i + 3, text, row.Score > 0.05f ? TextColor : QuietColor, 0.54f, startY, rowHeight);
+                    DrawLine(i + 3, text, row.Score > 0.05f ? TextColor : QuietColor, 0.54f, centerX, startY, rowHeight);
                 }
 
                 if (rows.Count > shown)
-                    DrawLine(shown + 4, "+ " + (rows.Count - shown).ToString(CultureInfo.InvariantCulture) + " more", QuietColor, 0.5f, startY, rowHeight);
+                    DrawLine(shown + 4, "+ " + (rows.Count - shown).ToString(CultureInfo.InvariantCulture) + " more", QuietColor, 0.5f, centerX, startY, rowHeight);
             }
             catch (Exception ex)
             {
@@ -113,10 +115,22 @@ namespace RealisticSoundPlus
             }
         }
 
-        private static void DrawLine(int row, string text, Color color, float scale, float startY, float rowHeight)
+        private static Vector2 GetViewportSize()
+        {
+            Vector2 viewportSize = Vector2.Zero;
+            if (MyAPIGateway.Session?.Camera != null)
+                viewportSize = MyAPIGateway.Session.Camera.ViewportSize;
+
+            if (viewportSize.X < 100f || viewportSize.Y < 100f)
+                viewportSize = new Vector2(1920f, 1080f);
+
+            return viewportSize;
+        }
+
+        private static void DrawLine(int row, string text, Color color, float scale, float centerX, float startY, float rowHeight)
         {
             MyRenderProxy.DebugDrawText2D(
-                new Vector2(0.5f, startY + row * rowHeight),
+                new Vector2(centerX, startY + row * rowHeight),
                 text,
                 color,
                 scale,
