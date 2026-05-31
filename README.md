@@ -19,8 +19,3 @@ The first implementation should be intentionally small:
 4. Replace Keen's coarse `m_shipCurrentPowerTarget` with a continuous thrust scalar.
 5. Preserve realistic-mode and vacuum behavior by only adjusting ship sounds vanilla already allows to play.
 
-## Deployment
-
-Source lives here on the D drive. Built plugin files should be deployed to:
-
-`C:\Users\Pete\Desktop\pulsar\Legacy\Local\RealisticSoundPlus`
