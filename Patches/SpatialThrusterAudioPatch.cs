@@ -48,7 +48,8 @@ namespace RealisticSoundPlus.Patches
 
                 float scale = CalculateSpatialScale(thruster);
                 float transmission = CalculateTransmission(sourcePosition);
-                float targetMultiplier = scale * transmission;
+                float atmosphereGainScale = ExteriorSoundTransmission.CalculateAtmosphericEngineGainScale(sourcePosition);
+                float targetMultiplier = scale * transmission * atmosphereGainScale;
                 float smoothedMultiplier = SmoothMultiplier(emitter, targetMultiplier);
 
                 emitter.VolumeMultiplier = baseVolume * smoothedMultiplier;

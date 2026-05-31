@@ -20,6 +20,7 @@ namespace RealisticSoundPlus
         public float FarDistance { get; set; } = 36f;
         public float FarDistanceTransmission { get; set; } = 1.0f;
         public float AtmosphericMufflingFloor { get; set; } = 0.5f;
+        public float AtmosphericEngineGainScale { get; set; } = 0.35f;
         public float HullVacuumTransmission { get; set; } = 0.12f;
         public string EngineFilter { get; set; } = "RealShip";
         public string SpeedAmbientFilter { get; set; } = "CockpitNoOxy";
@@ -100,7 +101,7 @@ namespace RealisticSoundPlus
         {
             return string.Format(
                 CultureInfo.InvariantCulture,
-                "gain={0:0.00}, curve={1:0.00}, control={2:0.00}, presenceMin={3:0.00}, quietLog={4:0.00}, loudLog={5:0.00}, muffling={6:0.00}, interiorBase={7:0.00}, farTransmission={8:0.00}, filter={9}, speedFilter={10}, ambient={11}, spatial={12}, spatialGain={13:0.00}, largeBoost={14:0.00}, center=off, smoothMs={15:0}, fade={16:0.000}, atmosphereFloor={17:0.00}, hullVacuum={18:0.00}",
+                "gain={0:0.00}, curve={1:0.00}, control={2:0.00}, presenceMin={3:0.00}, quietLog={4:0.00}, loudLog={5:0.00}, muffling={6:0.00}, interiorBase={7:0.00}, farTransmission={8:0.00}, filter={9}, speedFilter={10}, ambient={11}, spatial={12}, spatialGain={13:0.00}, largeBoost={14:0.00}, center=off, smoothMs={15:0}, fade={16:0.000}, atmosphereFloor={17:0.00}, atmoGain={18:0.00}, hullVacuum={19:0.00}",
                 Current.EngineGain,
                 Current.AudioCurveExponent,
                 Current.ControlInfluence,
@@ -119,6 +120,7 @@ namespace RealisticSoundPlus
                 Current.SpatialSmoothingMs,
                 Current.SpatialSoftFadeRatio,
                 Current.AtmosphericMufflingFloor,
+                Current.AtmosphericEngineGainScale,
                 Current.HullVacuumTransmission);
         }
 
@@ -168,6 +170,11 @@ namespace RealisticSoundPlus
                 case "atmosphericfloor":
                 case "atmfloor":
                     Current.AtmosphericMufflingFloor = value;
+                    break;
+                case "atmogain":
+                case "airgain":
+                case "atmosphericgain":
+                    Current.AtmosphericEngineGainScale = value;
                     break;
                 case "hullvacuum":
                 case "hullrumble":
@@ -339,6 +346,7 @@ namespace RealisticSoundPlus
             Current.FarDistance = Math.Max(Current.NearDistance + 1f, Clamp(Current.FarDistance, 1f, 500f));
             Current.FarDistanceTransmission = Clamp(Current.FarDistanceTransmission, 0.05f, 1f);
             Current.AtmosphericMufflingFloor = Clamp(Current.AtmosphericMufflingFloor, 0f, 1f);
+            Current.AtmosphericEngineGainScale = Clamp(Current.AtmosphericEngineGainScale, 0f, 1f);
             Current.HullVacuumTransmission = Clamp(Current.HullVacuumTransmission, 0f, 1f);
             Current.EngineFilter = NormalizeFilter(Current.EngineFilter) ?? "Off";
             Current.SpeedAmbientFilter = NormalizeFilter(Current.SpeedAmbientFilter) ?? "Off";

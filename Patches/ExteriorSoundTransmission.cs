@@ -54,12 +54,27 @@ namespace RealisticSoundPlus.Patches
 
         private static float CalculateEffectiveMufflingStrength(Vector3D listenerPosition, Vector3D sourcePosition, RealisticSoundPlusSettings settings)
         {
-            float pressure = Math.Max(GetAtmosphericPressure(listenerPosition), GetAtmosphericPressure(sourcePosition));
+            float pressure = GetListenerSourceAtmosphericPressure(listenerPosition, sourcePosition);
             float atmosphericFloor = IsListenerInsideShip() ? settings.AtmosphericMufflingFloor : 0f;
             float pressureScale = Lerp(1f, atmosphericFloor, pressure);
             return Clamp01(settings.MufflingStrength * pressureScale);
         }
 
+        public static float CalculateAtmosphericEngineGainScale(Vector3D sourcePosition)
+        {
+            Vector3D listenerPosition = MyAPIGateway.Session?.Camera?.Position ?? Vector3D.Zero;
+            float pressure = listenerPosition == Vector3D.Zero
+                ? GetAtmosphericPressure(sourcePosition)
+                : GetListenerSourceAtmosphericPressure(listenerPosition, sourcePosition);
+
+            float fullAtmosphereScale = SettingsManager.Current.AtmosphericEngineGainScale;
+            return Lerp(1f, fullAtmosphereScale, pressure);
+        }
+
+        public static float GetListenerSourceAtmosphericPressure(Vector3D listenerPosition, Vector3D sourcePosition)
+        {
+            return Math.Max(GetAtmosphericPressure(listenerPosition), GetAtmosphericPressure(sourcePosition));
+        }
         public static bool IsListenerInsideShip()
         {
             if (DateTime.UtcNow - _lastInsideShipReportUtc <= InsideShipReportLifetime)

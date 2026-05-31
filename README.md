@@ -56,6 +56,7 @@ In-game chat commands:
 - `/rsp fade 0.04` - sets the soft thrust-ratio fade width near zero output. Higher values make thrusters fade in/out more gently at very low output.
 - `/rsp spatialcenter 0.25` - legacy setting kept for old XML files. Spatial mode now disables Keen's original grid-center thruster layer so the individual thruster emitters are the source of truth.
 - `/rsp atmfloor 0.5` - sets how much of the configured muffling remains at full planetary air density while the listener is inside a ship. `0.5` means full atmosphere cuts the extra exterior muffling strength in half inside; outside in full atmosphere, the extra muffling fades completely to zero. Vacuum still uses the full configured muffling value.
+- `/rsp atmogain 0.35` - scales the boosted spatial engine gain as atmospheric pressure rises. Vacuum keeps full `gain * spatialgain`; full atmosphere uses this fraction so vacuum-tuned engines do not become wildly loud in air.
 - `/rsp hullvacuum 0.12` - sets the small structural engine-rumble transmission used only while standing near/on the ship exterior in vacuum. This keeps the outside-hull state from becoming total silence while still staying heavily muffled.
 - `/rsp save` - writes the current values to the XML config.
 - `/rsp speedfilter cockpitnooxy` - sets the inside-ship filter for speed/ship-motion wind candidates such as `ShipLargeEngine` and `ArcShipWindSpeed`. Default is `cockpitnooxy`; use `off|helmet|cockpit|cockpitnooxy|realship|deep` to test only that ambient layer without changing engine/thruster filtering. Outside the ship, this layer uses the engine vacuum filter as atmospheric density drops.
@@ -68,3 +69,10 @@ In-game chat commands:
 - `/rsp reload` - reloads the XML config from disk.
 
 - `/rsp sounds` - toggles a centered live overlay of currently playing audio cue names, grouped by sound/music/HUD source voices. The `eng`, `amb`, and `spd` columns mark engine-filter and speed/ship-motion ambient candidates; `amb` and `spd` now point at the same wind/rattle investigation list. Use `/rsp sounds off` to hide it.
+
+
+## Future Idea: Interior Ambience Occlusion
+
+- Use `MyCubeGrid.GridSystems.GasSystem.GetOxygenRoomForCubeGridPosition(ref position)` to compare listener and ambient block emitter rooms.
+- Apply subtle volume reduction and light low-pass filtering to selected non-engine interior ambience, such as medical bay, air vent, oxygen generator, and gravity generator loops, when the listener is in a different airtight room.
+- Keep this separate from engine realism and speed/wind ambience; cache room IDs and update a few times per second for performance.
