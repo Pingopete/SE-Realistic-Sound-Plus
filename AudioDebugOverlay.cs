@@ -51,7 +51,7 @@ namespace RealisticSoundPlus
                 float startY = Math.Max(80f, viewportSize.Y * 0.12f);
 
                 DrawLine(0, "Realistic Sound+ audio debug  |  /rsp sounds off", HeaderColor, 0.68f, centerX, startY, rowHeight);
-                DrawLine(1, "type  eng  amb  count  volume  cue", HeaderColor, 0.58f, centerX, startY, rowHeight);
+                DrawLine(1, "type  eng  amb  spd  count  volume  cue", HeaderColor, 0.58f, centerX, startY, rowHeight);
 
                 if (rows.Count == 0)
                 {
@@ -64,7 +64,7 @@ namespace RealisticSoundPlus
                     Row row = rows[i];
                     string text = string.Format(
                         CultureInfo.InvariantCulture,
-                        "{0}    {1}    {2}   x{3,2}   {4:0.00}   {5}",
+                        "{0}    {1}    {2}    {3}   x{4,2}   {5:0.00}   {6}",
                         row.Kind,
                         row.EngineCandidate ? "*" : "-",
                         row.AmbientCandidate ? "*" : "-",
@@ -107,7 +107,8 @@ namespace RealisticSoundPlus
                         Kind = kind,
                         CueName = cueName,
                         EngineCandidate = EngineAudioClassifier.IsKnownEngineCue(cueName),
-                        AmbientCandidate = EngineAudioClassifier.IsKnownAmbientCue(cueName)
+                        AmbientCandidate = EngineAudioClassifier.IsKnownAmbientCue(cueName),
+                        SpeedAmbientCandidate = EngineAudioClassifier.IsKnownSpeedAmbientCue(cueName)
                     };
                     byCue[key] = row;
                 }
@@ -155,6 +156,7 @@ namespace RealisticSoundPlus
             public float Score;
             public bool EngineCandidate;
             public bool AmbientCandidate;
+            public bool SpeedAmbientCandidate;
         }
     }
 }

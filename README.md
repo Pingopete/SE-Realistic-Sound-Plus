@@ -22,7 +22,7 @@ The first implementation should be intentionally small:
 
 - Ship engine power now blends actual final thrust with control/autopilot demand.
 - Overall engine presence is scaled by available thrust so very small ships should not sound as large as heavy ships at the same throttle percentage.
-- Interior thruster muffling applies an extra distance-based transmission reduction to active thruster emitters when the listener is inside the ship. Optional ambient muffling can also include ship motion loops and selected interior block ambience.
+- Interior thruster muffling applies an extra distance-based transmission reduction to active thruster emitters when the listener is inside the ship. Optional ambient muffling currently covers selected interior block ambience only; speed/ship-motion loops are split out and left unmuffled while we isolate them.
 - Cockpit/control-seat mode is forced to keep ship-engine emitters spatial instead of switching to vanilla louder 2D ship audio.
 - Experimental per-thruster spatial audio can reposition individual thruster emitters at their actual block locations, scale each one by its current thrust output, and reduce the old grid-center thruster layer with a blend control.
 - Exterior weapon/explosion cues use the same vacuum, atmosphere, distance, and filter rules as exterior engine audio.
@@ -42,7 +42,7 @@ In-game chat commands:
 - `/rsp loudlog 8` - sets the log10 thrust-force point treated as the loud/large end of the thruster-size scale. Higher values preserve more separation between very large and normal thrusters.
 - `/rsp interior 0.9` - sets the baseline interior transmission for thruster muffling. Higher values are less muffled/louder inside; lower values are more muffled/quieter inside.
 - `/rsp far 0.6` - sets how much thruster sound transmits at far interior distances. Higher values keep distant engines louder/clearer; lower values reduce distant engines more strongly.
-- `/rsp ambient on` - also applies the current muffling/filter behavior to ambient ship-motion and interior block loops currently identified as ship rattle, medical bay, air vent, oxygen generator, and gravity generator audio. Use `/rsp ambient off` to leave those ambience cues vanilla.
+- `/rsp ambient on` - also applies the current muffling/filter behavior to selected interior block loops currently identified as medical bay, air vent, oxygen generator, and gravity generator audio. Speed/ship-motion loops are not muffled by this toggle while we isolate them separately.
 - `/rsp spatial on` - enables experimental per-thruster spatial audio. Each thruster emitter is forced 3D, moved to that thruster block location, scaled by that thruster's actual output, and passed through the same XML-backed gain, curve, muffling, distance, and filter settings.
 - `/rsp spatialgain 1.2` - adjusts only the individual thruster emitter layer after the normal engine gain/curve. Raise this if the new localized thrusters are too subtle; lower it if individual nozzles dominate the mix.
 - `/rsp smooth 100` - sets de-click smoothing time in milliseconds for spatial thruster volume changes. `50..150` is the intended range.
@@ -58,4 +58,4 @@ In-game chat commands:
 - `/rsp filter deep` - forces Keen's immediate `LowPassNoHelmetNoOxy` effect on known engine emitters. This is the most aggressive/deep test mode.
 - `/rsp reload` - reloads the XML config from disk.
 
-- `/rsp sounds` - toggles a centered live overlay of currently playing audio cue names, grouped by sound/music/HUD source voices. The `eng` and `amb` columns mark engine-filter and ambient-muffling candidates. Use `/rsp sounds off` to hide it.
+- `/rsp sounds` - toggles a centered live overlay of currently playing audio cue names, grouped by sound/music/HUD source voices. The `eng`, `amb`, and `spd` columns mark engine-filter, interior-ambient, and speed/ship-motion ambient candidates. Use `/rsp sounds off` to hide it.

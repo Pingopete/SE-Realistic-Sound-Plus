@@ -33,11 +33,8 @@ namespace RealisticSoundPlus.Patches
             if (cueName.IndexOf("Thuster", StringComparison.OrdinalIgnoreCase) >= 0)
                 return true;
 
-            if (cueName.Equals("ShipLargeEngine", StringComparison.OrdinalIgnoreCase)
-                || cueName.Equals("ShipSmallEngine", StringComparison.OrdinalIgnoreCase))
-                return true;
-
-            return IsKnownShipMotionCue(cueName);
+            return cueName.Equals("ShipLargeEngine", StringComparison.OrdinalIgnoreCase)
+                || cueName.Equals("ShipSmallEngine", StringComparison.OrdinalIgnoreCase);
         }
 
         public static bool IsKnownAmbientCue(MyCueId? cueId)
@@ -52,9 +49,6 @@ namespace RealisticSoundPlus.Patches
         {
             if (string.IsNullOrWhiteSpace(cueName))
                 return false;
-
-            if (IsKnownShipMotionCue(cueName))
-                return true;
 
             return cueName.Equals("ArcBlockMedical", StringComparison.OrdinalIgnoreCase)
                 || cueName.Equals("ArcBlockAirVentIdle", StringComparison.OrdinalIgnoreCase)
@@ -96,7 +90,15 @@ namespace RealisticSoundPlus.Patches
                 || cueName.IndexOf("Explosion", StringComparison.OrdinalIgnoreCase) >= 0
                 || cueName.IndexOf("Expl", StringComparison.OrdinalIgnoreCase) >= 0;
         }
-        private static bool IsKnownShipMotionCue(string cueName)
+        public static bool IsKnownSpeedAmbientCue(MyCueId? cueId)
+        {
+            if (!cueId.HasValue)
+                return false;
+
+            return IsKnownSpeedAmbientCue(cueId.Value.ToString());
+        }
+
+        public static bool IsKnownSpeedAmbientCue(string cueName)
         {
             return cueName.Equals("ShipLargeIdle", StringComparison.OrdinalIgnoreCase)
                 || cueName.Equals("ShipLargeRunLoop", StringComparison.OrdinalIgnoreCase)
