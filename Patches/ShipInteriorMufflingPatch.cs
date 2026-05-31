@@ -13,12 +13,12 @@ namespace RealisticSoundPlus.Patches
     [HarmonyPatch(typeof(MyShipSoundComponent), "UpdateVolumes")]
     internal static class ShipInteriorMufflingPatch
     {
-        private static readonly int[] ShipEmitterIndexes =
+        private static readonly int[] ThrusterEmitterIndexes =
         {
             2, 3, 4,
             5, 6, 7,
-            11,
-            14, 15
+            12, 13,
+            14, 15, 16
         };
 
         private static readonly FieldInfo EmittersField = AccessTools.Field(typeof(MyShipSoundComponent), "m_emitters");
@@ -49,7 +49,7 @@ namespace RealisticSoundPlus.Patches
                 if (listenerPosition == Vector3D.Zero)
                     return;
 
-                foreach (int index in ShipEmitterIndexes)
+                foreach (int index in ThrusterEmitterIndexes)
                 {
                     if (index < 0 || index >= emitters.Length)
                         continue;
@@ -65,7 +65,7 @@ namespace RealisticSoundPlus.Patches
                 }
 
                 if (++_patchHits == 1)
-                    MyLog.Default.WriteLineAndConsole("[RealisticSoundPlus] Interior ship-engine transmission muffling is active.");
+                    MyLog.Default.WriteLineAndConsole("[RealisticSoundPlus] Interior thruster transmission muffling is active.");
             }
             catch (Exception ex)
             {
@@ -76,7 +76,7 @@ namespace RealisticSoundPlus.Patches
 
         private static void RestoreEmitters(MyEntity3DSoundEmitter[] emitters)
         {
-            foreach (int index in ShipEmitterIndexes)
+            foreach (int index in ThrusterEmitterIndexes)
             {
                 if (index < 0 || index >= emitters.Length)
                     continue;

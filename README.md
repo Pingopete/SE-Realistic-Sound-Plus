@@ -22,7 +22,7 @@ The first implementation should be intentionally small:
 
 - Ship engine power now blends actual final thrust with control/autopilot demand.
 - Overall engine presence is scaled by available thrust so very small ships should not sound as large as heavy ships at the same throttle percentage.
-- Interior ship-engine muffling applies an extra distance-based transmission reduction to vanilla ship/thruster emitters when the listener is inside the ship.
+- Interior thruster muffling applies an extra distance-based transmission reduction to active thruster emitters when the listener is inside the ship, leaving vanilla interior movement ambience alone.
 - Cockpit/control-seat mode is forced to keep ship-engine emitters spatial instead of switching to vanilla louder 2D ship audio.
 ## Runtime Tuning
 
@@ -32,7 +32,7 @@ In-game chat commands:
 
 - `/rsp show`
 - `/rsp gain 1.5`
-- `/rsp muffling 0.7`
+- `/rsp muffling 0.7` - controls only thruster/engine thrust muffling, not vanilla interior movement ambience
 - `/rsp curve 0.65`
 - `/rsp control 0.4`
 - `/rsp presence 0.45`
