@@ -33,8 +33,9 @@ namespace RealisticSoundPlus.Patches
             if (cueName.IndexOf("Thuster", StringComparison.OrdinalIgnoreCase) >= 0)
                 return true;
 
-            return cueName.Equals("ShipLargeEngine", StringComparison.OrdinalIgnoreCase)
-                || cueName.Equals("ShipSmallEngine", StringComparison.OrdinalIgnoreCase);
+            // Confirmed in-game: ShipLargeRunLoop is the H2/thruster hiss/spool layer, not the coasting rattle bed.
+            return cueName.Equals("ShipLargeRunLoop", StringComparison.OrdinalIgnoreCase)
+                || cueName.Equals("ShipSmallRunLoop", StringComparison.OrdinalIgnoreCase);
         }
 
         public static bool IsKnownAmbientCue(MyCueId? cueId)
@@ -101,11 +102,11 @@ namespace RealisticSoundPlus.Patches
         public static bool IsKnownSpeedAmbientCue(string cueName)
         {
             return cueName.Equals("ArcShipWindSpeed", StringComparison.OrdinalIgnoreCase)
+                || cueName.Equals("ShipLargeEngine", StringComparison.OrdinalIgnoreCase)
+                || cueName.Equals("ShipSmallEngine", StringComparison.OrdinalIgnoreCase)
                 || cueName.Equals("ShipLargeIdle", StringComparison.OrdinalIgnoreCase)
-                || cueName.Equals("ShipLargeRunLoop", StringComparison.OrdinalIgnoreCase)
                 || cueName.Equals("ShipLargeSpeedDown", StringComparison.OrdinalIgnoreCase)
                 || cueName.Equals("ShipLargeSpeedUp", StringComparison.OrdinalIgnoreCase)
-                || cueName.Equals("ShipSmallRunLoop", StringComparison.OrdinalIgnoreCase)
                 || cueName.Equals("ShipSmallRunSlow", StringComparison.OrdinalIgnoreCase)
                 || cueName.Equals("ShipSmallRunMedium", StringComparison.OrdinalIgnoreCase)
                 || cueName.Equals("ShipSmallRunFast", StringComparison.OrdinalIgnoreCase)

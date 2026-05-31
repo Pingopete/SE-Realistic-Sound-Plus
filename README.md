@@ -26,6 +26,12 @@ The first implementation should be intentionally small:
 - Cockpit/control-seat mode is forced to keep ship-engine emitters spatial instead of switching to vanilla louder 2D ship audio.
 - Experimental per-thruster spatial audio can reposition individual thruster emitters at their actual block locations, scale each one by its current thrust output, and reduce the old grid-center thruster layer with a blend control.
 - Exterior weapon/explosion cues use the same vacuum, atmosphere, distance, and filter rules as exterior engine audio.
+## Confirmed cue mapping
+
+- `ShipLargeRunLoop` is currently treated as the H2/thruster hiss/spool layer and receives engine filtering.
+- `ShipLargeEngine` is currently treated as the speed/coasting/rattle bed and is marked as `spd`, not engine-filtered.
+- `ArcShipWindSpeed` is also marked as `spd` for speed ambient investigation.
+
 ## Runtime Tuning
 
 Settings are saved to `%APPDATA%\SpaceEngineers\RealisticSoundPlus.xml` and hot-reloaded every few seconds while the game is running.
