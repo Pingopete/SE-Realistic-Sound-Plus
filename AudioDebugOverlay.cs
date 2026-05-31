@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using RealisticSoundPlus.Patches;
 using Sandbox.ModAPI;
 using VRage.Audio;
 using VRage.Utils;
@@ -50,7 +51,7 @@ namespace RealisticSoundPlus
                 float startY = Math.Max(80f, viewportSize.Y * 0.12f);
 
                 DrawLine(0, "Realistic Sound+ audio debug  |  /rsp sounds off", HeaderColor, 0.68f, centerX, startY, rowHeight);
-                DrawLine(1, "type  count  volume  cue", HeaderColor, 0.58f, centerX, startY, rowHeight);
+                DrawLine(1, "type  eng  count  volume  cue", HeaderColor, 0.58f, centerX, startY, rowHeight);
 
                 if (rows.Count == 0)
                 {
@@ -63,8 +64,9 @@ namespace RealisticSoundPlus
                     Row row = rows[i];
                     string text = string.Format(
                         CultureInfo.InvariantCulture,
-                        "{0}   x{1,2}   {2:0.00}   {3}",
+                        "{0}    {1}   x{2,2}   {3:0.00}   {4}",
                         row.Kind,
+                        row.EngineCandidate ? "*" : "-",
                         row.Count,
                         row.Score,
                         row.CueName);
@@ -99,7 +101,7 @@ namespace RealisticSoundPlus
                 string key = kind + ":" + cueName;
                 if (!byCue.TryGetValue(key, out Row row))
                 {
-                    row = new Row { Kind = kind, CueName = cueName };
+                    row = new Row { Kind = kind, CueName = cueName, EngineCandidate = EngineAudioClassifier.IsKnownEngineCue(cueName) };
                     byCue[key] = row;
                 }
 
@@ -144,6 +146,7 @@ namespace RealisticSoundPlus
             public string CueName;
             public int Count;
             public float Score;
+            public bool EngineCandidate;
         }
     }
 }

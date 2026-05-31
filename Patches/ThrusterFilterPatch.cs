@@ -2,7 +2,6 @@ using System;
 using HarmonyLib;
 using Sandbox.Game.Entities;
 using SpaceEngineers.Game.Entities.Blocks;
-using VRage.Audio;
 using VRage.Utils;
 
 namespace RealisticSoundPlus.Patches
@@ -47,9 +46,9 @@ namespace RealisticSoundPlus.Patches
             if (IsThrusterAudioEmitter(emitter) || IsHydrogenEngineAudioEmitter(emitter))
                 return true;
 
-            return IsKnownHydrogenEngineCue(emitter.SoundId)
-                || IsKnownHydrogenEngineCue(emitter.Sound?.CueEnum)
-                || IsKnownHydrogenEngineCue(emitter.SecondarySound?.CueEnum);
+            return EngineAudioClassifier.IsKnownEngineCue(emitter.SoundId)
+                || EngineAudioClassifier.IsKnownEngineCue(emitter.Sound?.CueEnum)
+                || EngineAudioClassifier.IsKnownEngineCue(emitter.SecondarySound?.CueEnum);
         }
 
         public static bool IsThrusterAudioEmitter(MyEntity3DSoundEmitter emitter)
@@ -72,16 +71,6 @@ namespace RealisticSoundPlus.Patches
                 return true;
 
             return emitter.Entity is MyHydrogenEngine;
-        }
-
-        private static bool IsKnownHydrogenEngineCue(MyCueId? cueId)
-        {
-            if (!cueId.HasValue)
-                return false;
-
-            string cueName = cueId.Value.ToString();
-            return cueName.StartsWith("ArcBlockHydrogenEngine", StringComparison.OrdinalIgnoreCase)
-                || cueName.IndexOf("HydrogenEngine", StringComparison.OrdinalIgnoreCase) >= 0;
         }
     }
 }
