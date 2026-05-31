@@ -50,7 +50,7 @@ namespace RealisticSoundPlus
                 {
                     case "help":
                     case "?":
-                        Notify("/rsp show | /rsp gain 1.5 | /rsp muffling 0.7 | /rsp curve 0.65 | /rsp control 0.4 | /rsp quietlog 4 | /rsp loudlog 8 | /rsp filter cockpit | /rsp speedfilter cockpitnooxy | /rsp ambient on | /rsp spatial on | /rsp spatialgain 1.2 | /rsp largeboost 2.0 | /rsp spatialcenter 0.25 | /rsp smooth 100 | /rsp fade 0.04 | /rsp atmfloor 0.5 | /rsp sounds | /rsp save | /rsp reload");
+                        Notify("/rsp show | /rsp gain 1.5 | /rsp muffling 0.7 | /rsp curve 0.65 | /rsp control 0.4 | /rsp quietlog 4 | /rsp loudlog 8 | /rsp filter cockpit | /rsp speedfilter cockpitnooxy | /rsp ambient on | /rsp spatial on | /rsp spatialgain 1.2 | /rsp largeboost 2.0 | /rsp spatialcenter 0.25 | /rsp smooth 100 | /rsp fade 0.04 | /rsp atmfloor 0.5 | /rsp hullvacuum 0.12 | /rsp sounds | /rsp save | /rsp reload");
                         break;
                     case "show":
                         Notify(SettingsManager.Summary());

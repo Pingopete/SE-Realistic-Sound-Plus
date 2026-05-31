@@ -26,7 +26,7 @@ namespace RealisticSoundPlus.Patches
         private static readonly FieldInfo EmittersField = AccessTools.Field(typeof(MyShipSoundComponent), "m_emitters");
         private static readonly FieldInfo InsideShipField = AccessTools.Field(typeof(MyShipSoundComponent), "m_insideShip");
         private static readonly FieldInfo ShipGridField = AccessTools.Field(typeof(MyShipSoundComponent), "m_shipGrid");
-        private static readonly Dictionary<MyEntity3DSoundEmitter, float> LastTransmissionByEmitter = new Dictionary<MyEntity3DSoundEmitter, float>();
+        private static readonly Dictionary<MyEntity3DSoundEmitter, float> BaseVolumeByEmitter = new Dictionary<MyEntity3DSoundEmitter, float>();
         private static readonly Dictionary<MyEntity3DSoundEmitter, float> SpeedAmbientBaseVolumeByEmitter = new Dictionary<MyEntity3DSoundEmitter, float>();
         private static readonly HashSet<MyEntity3DSoundEmitter> KnownThrusterEmitters = new HashSet<MyEntity3DSoundEmitter>();
 
@@ -46,8 +46,9 @@ namespace RealisticSoundPlus.Patches
                     return;
 
                 bool insideShip = (bool)InsideShipField.GetValue(__instance);
+                MyCubeGrid grid = (MyCubeGrid)ShipGridField.GetValue(__instance);
                 ExteriorSoundTransmission.ReportListenerInsideShip(insideShip);
-                ApplySpeedAmbientWind(__instance, emitters);
+                ApplySpeedAmbientWind(grid, emitters);
 
                 bool suppressVanillaThrusterLayer = SettingsManager.Current.SpatialAudioEnabled;
                 if (!insideShip && !suppressVanillaThrusterLayer)
@@ -70,11 +71,11 @@ namespace RealisticSoundPlus.Patches
                         continue;
 
                     KnownThrusterEmitters.Add(emitter);
-                    ApplyVanillaEngineLayerTransmission(emitter, suppressVanillaThrusterLayer, listenerPosition);
+                    ApplyVanillaEngineLayerTransmission(emitter, suppressVanillaThrusterLayer, listenerPosition, grid);
                 }
 
                 if (suppressVanillaThrusterLayer)
-                    SuppressKnownVanillaEngineCues(emitters);
+                    SuppressKnownVanillaEngineCues(emitters, grid);
 
                 if (++_patchHits == 1)
                     MyLog.Default.WriteLineAndConsole("[RealisticSoundPlus] Vanilla ship thruster layer suppression/transmission muffling is active.");
@@ -86,7 +87,7 @@ namespace RealisticSoundPlus.Patches
             }
         }
 
-        private static void SuppressKnownVanillaEngineCues(MyEntity3DSoundEmitter[] emitters)
+        private static void SuppressKnownVanillaEngineCues(MyEntity3DSoundEmitter[] emitters, MyCubeGrid grid)
         {
             foreach (MyEntity3DSoundEmitter emitter in emitters)
             {
@@ -94,7 +95,7 @@ namespace RealisticSoundPlus.Patches
                     continue;
 
                 KnownThrusterEmitters.Add(emitter);
-                ApplyVanillaEngineLayerTransmission(emitter, true, Vector3D.Zero);
+                ApplyVanillaEngineLayerTransmission(emitter, true, Vector3D.Zero, grid);
             }
         }
 
@@ -105,19 +106,41 @@ namespace RealisticSoundPlus.Patches
                 || EngineAudioClassifier.IsKnownEngineCue(emitter.SecondarySound?.CueEnum);
         }
 
-        private static void ApplyVanillaEngineLayerTransmission(MyEntity3DSoundEmitter emitter, bool suppress, Vector3D listenerPosition)
+        private static void ApplyVanillaEngineLayerTransmission(MyEntity3DSoundEmitter emitter, bool suppress, Vector3D listenerPosition, MyCubeGrid grid)
         {
             float baseVolume = RestoreEmitter(emitter);
             float transmission = suppress
-                ? 0f
+                ? CalculateHullVacuumStructuralTransmission(grid)
                 : ExteriorSoundTransmission.Calculate(listenerPosition, emitter.SourcePosition);
 
             emitter.VolumeMultiplier = baseVolume * transmission;
-            LastTransmissionByEmitter[emitter] = transmission;
+            BaseVolumeByEmitter[emitter] = baseVolume;
         }
-        private static void ApplySpeedAmbientWind(MyShipSoundComponent component, MyEntity3DSoundEmitter[] emitters)
+
+        private static float CalculateHullVacuumStructuralTransmission(MyCubeGrid grid)
         {
-            MyCubeGrid grid = (MyCubeGrid)ShipGridField.GetValue(component);
+            if (ExteriorSoundTransmission.IsListenerInsideShip() || !IsGridInVacuum(grid) || !IsListenerNearGrid(grid))
+                return 0f;
+
+            return SettingsManager.Current.HullVacuumTransmission;
+        }
+
+        private static bool IsListenerNearGrid(MyCubeGrid grid)
+        {
+            if (grid == null)
+                return false;
+
+            Vector3D listenerPosition = MyAPIGateway.Session?.Camera?.Position ?? Vector3D.Zero;
+            if (listenerPosition == Vector3D.Zero)
+                return false;
+
+            BoundingBoxD box = grid.PositionComp.WorldAABB;
+            box.Inflate(8.0);
+            return box.Contains(listenerPosition) != ContainmentType.Disjoint;
+        }
+
+        private static void ApplySpeedAmbientWind(MyCubeGrid grid, MyEntity3DSoundEmitter[] emitters)
+        {
             float windScale = CalculateAtmosphericSpeedScale(grid);
             bool inVacuum = IsGridInVacuum(grid);
             bool controlSpeedAmbient = SettingsManager.Current.AmbientMufflingEnabled || inVacuum;
@@ -149,6 +172,7 @@ namespace RealisticSoundPlus.Patches
 
             return ExteriorSoundTransmission.GetAtmosphericPressure(grid.WorldMatrix.Translation) < 0.01f;
         }
+
         private static float CalculateAtmosphericSpeedScale(MyCubeGrid grid)
         {
             if (grid == null || grid.Physics == null)
@@ -212,16 +236,12 @@ namespace RealisticSoundPlus.Patches
         private static float RestoreEmitter(MyEntity3DSoundEmitter emitter)
         {
             float volume = emitter.VolumeMultiplier;
-            if (!LastTransmissionByEmitter.TryGetValue(emitter, out float previousTransmission))
+            if (!BaseVolumeByEmitter.TryGetValue(emitter, out float baseVolume))
                 return volume;
 
-            LastTransmissionByEmitter.Remove(emitter);
-            if (previousTransmission <= 0f)
-                return volume;
-
-            float restored = volume / previousTransmission;
-            emitter.VolumeMultiplier = restored;
-            return restored;
+            BaseVolumeByEmitter.Remove(emitter);
+            emitter.VolumeMultiplier = baseVolume;
+            return baseVolume;
         }
 
         private static float RestoreSpeedAmbientEmitter(MyEntity3DSoundEmitter emitter)
