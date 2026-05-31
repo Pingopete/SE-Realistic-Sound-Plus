@@ -21,6 +21,9 @@ namespace RealisticSoundPlus
         public float FarDistanceTransmission { get; set; } = 1.0f;
         public string EngineFilter { get; set; } = "RealShip";
         public bool AmbientMufflingEnabled { get; set; }
+        public bool SpatialAudioEnabled { get; set; } = true;
+        public float SpatialEmitterGain { get; set; } = 1.0f;
+        public float SpatialCentralBlend { get; set; } = 0.25f;
     }
 
     internal static class SettingsManager
@@ -91,7 +94,7 @@ namespace RealisticSoundPlus
         {
             return string.Format(
                 CultureInfo.InvariantCulture,
-                "gain={0:0.00}, curve={1:0.00}, control={2:0.00}, presenceMin={3:0.00}, muffling={4:0.00}, interiorBase={5:0.00}, farTransmission={6:0.00}, filter={7}, ambient={8}",
+                "gain={0:0.00}, curve={1:0.00}, control={2:0.00}, presenceMin={3:0.00}, muffling={4:0.00}, interiorBase={5:0.00}, farTransmission={6:0.00}, filter={7}, ambient={8}, spatial={9}, spatialGain={10:0.00}, central={11:0.00}",
                 Current.EngineGain,
                 Current.AudioCurveExponent,
                 Current.ControlInfluence,
@@ -100,7 +103,10 @@ namespace RealisticSoundPlus
                 Current.InteriorBaseTransmission,
                 Current.FarDistanceTransmission,
                 Current.EngineFilter,
-                Current.AmbientMufflingEnabled ? "on" : "off");
+                Current.AmbientMufflingEnabled ? "on" : "off",
+                Current.SpatialAudioEnabled ? "on" : "off",
+                Current.SpatialEmitterGain,
+                Current.SpatialCentralBlend);
         }
 
         public static bool TrySet(string name, float value)
@@ -135,6 +141,15 @@ namespace RealisticSoundPlus
                 case "fartransmission":
                     Current.FarDistanceTransmission = value;
                     break;
+                case "spatialgain":
+                case "spatialemittergain":
+                    Current.SpatialEmitterGain = value;
+                    break;
+                case "spatialcenter":
+                case "spatialcentral":
+                case "spatialblend":
+                    Current.SpatialCentralBlend = value;
+                    break;
                 default:
                     return false;
             }
@@ -155,6 +170,15 @@ namespace RealisticSoundPlus
         }
 
 
+
+        public static bool TrySetSpatial(string value)
+        {
+            if (!TryParseBool(value, out bool enabled))
+                return false;
+
+            Current.SpatialAudioEnabled = enabled;
+            return true;
+        }
         public static bool TrySetAmbient(string value)
         {
             if (!TryParseBool(value, out bool enabled))
@@ -247,6 +271,8 @@ namespace RealisticSoundPlus
             Current.FarDistance = Math.Max(Current.NearDistance + 1f, Clamp(Current.FarDistance, 1f, 500f));
             Current.FarDistanceTransmission = Clamp(Current.FarDistanceTransmission, 0.05f, 1f);
             Current.EngineFilter = NormalizeFilter(Current.EngineFilter) ?? "Off";
+            Current.SpatialEmitterGain = Clamp(Current.SpatialEmitterGain, 0f, 4f);
+            Current.SpatialCentralBlend = Clamp(Current.SpatialCentralBlend, 0f, 1f);
         }
 
         private static float Clamp(float value, float min, float max)
