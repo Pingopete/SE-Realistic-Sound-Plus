@@ -12,11 +12,12 @@ namespace RealisticSoundPlus.Patches
         private static bool _pressureLookupDisabled;
         private static int _pressureLookupErrors;
         private static DateTime _lastInsideShipReportUtc = DateTime.MinValue;
+        private static bool _lastInsideShipReport;
 
         public static void ReportListenerInsideShip(bool insideShip)
         {
-            if (insideShip)
-                _lastInsideShipReportUtc = DateTime.UtcNow;
+            _lastInsideShipReport = insideShip;
+            _lastInsideShipReportUtc = DateTime.UtcNow;
         }
 
         public static float Calculate(Vector3D sourcePosition)
@@ -62,9 +63,9 @@ namespace RealisticSoundPlus.Patches
         public static bool IsListenerInsideShip()
         {
             if (DateTime.UtcNow - _lastInsideShipReportUtc <= InsideShipReportLifetime)
-                return true;
+                return _lastInsideShipReport;
 
-            return MyAPIGateway.Session?.ControlledObject is IMyShipController;
+            return false;
         }
 
         public static float GetAtmosphericPressure(Vector3D position)

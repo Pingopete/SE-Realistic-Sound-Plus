@@ -38,15 +38,12 @@ namespace RealisticSoundPlus.Patches
                 if (!IsEngineAudioEmitter(__instance) && !ExteriorWeaponAudioPatch.IsExteriorWeaponAudioEmitter(__instance))
                     return;
 
-                if (ExteriorSoundTransmission.CalculateEffectiveMufflingStrength(__instance.SourcePosition) <= 0f)
+                string effectSubtype = GetExteriorEffectSubtype(__instance);
+                if (string.IsNullOrEmpty(effectSubtype))
                 {
                     __result = MyStringHash.NullOrEmpty;
                     return;
                 }
-
-                string effectSubtype = GetExteriorEffectSubtype(__instance);
-                if (string.IsNullOrEmpty(effectSubtype))
-                    return;
 
                 __result = MyStringHash.GetOrCompute(effectSubtype);
 
@@ -63,36 +60,49 @@ namespace RealisticSoundPlus.Patches
         private static string GetSpeedAmbientEffectSubtype(MyEntity3DSoundEmitter emitter)
         {
             if (ExteriorSoundTransmission.IsListenerInsideShip())
-                return SettingsManager.GetSpeedAmbientFilterEffectSubtype();
+                return SelectAtmosphereAwareFilter(SettingsManager.GetSpeedAmbientFilterEffectSubtype(), emitter.SourcePosition, true);
 
-            if (ExteriorSoundTransmission.CalculateEffectiveMufflingStrength(emitter.SourcePosition) <= 0f)
-                return null;
-
-            return IsExteriorVacuum(emitter.SourcePosition)
-                ? "LowPassNoHelmetNoOxy"
-                : SettingsManager.GetEngineFilterEffectSubtype();
+            return SelectAtmosphereAwareFilter(SettingsManager.GetEngineFilterEffectSubtype(), emitter.SourcePosition, false);
         }
 
         private static string GetExteriorEffectSubtype(MyEntity3DSoundEmitter emitter)
         {
-            return IsExteriorVacuum(emitter.SourcePosition)
-                ? "LowPassNoHelmetNoOxy"
-                : SettingsManager.GetEngineFilterEffectSubtype();
+            return SelectAtmosphereAwareFilter(SettingsManager.GetEngineFilterEffectSubtype(), emitter.SourcePosition, ExteriorSoundTransmission.IsListenerInsideShip());
         }
 
-        private static bool IsExteriorVacuum(Vector3D sourcePosition)
+        private static string SelectAtmosphereAwareFilter(string configuredFilter, Vector3D sourcePosition, bool listenerInside)
         {
-            if (ExteriorSoundTransmission.IsListenerInsideShip())
-                return false;
+            float pressure = GetListenerSourcePressure(sourcePosition);
+            if (!listenerInside && pressure >= 0.95f)
+                return null;
 
+            if (!listenerInside && pressure < 0.1f)
+                return "LowPassNoHelmetNoOxy";
+
+            if (listenerInside)
+            {
+                if (pressure >= 0.75f)
+                    return "LowPassCockpit";
+
+                if (pressure >= 0.35f)
+                    return "LowPassCockpitNoOxy";
+            }
+
+            if (ExteriorSoundTransmission.CalculateEffectiveMufflingStrength(sourcePosition) <= 0f)
+                return null;
+
+            return configuredFilter;
+        }
+
+        private static float GetListenerSourcePressure(Vector3D sourcePosition)
+        {
             Vector3D listenerPosition = Sandbox.ModAPI.MyAPIGateway.Session?.Camera?.Position ?? Vector3D.Zero;
             if (listenerPosition == Vector3D.Zero)
-                return true;
+                return ExteriorSoundTransmission.GetAtmosphericPressure(sourcePosition);
 
-            float pressure = Math.Max(
+            return Math.Max(
                 ExteriorSoundTransmission.GetAtmosphericPressure(listenerPosition),
                 ExteriorSoundTransmission.GetAtmosphericPressure(sourcePosition));
-            return pressure < 0.1f;
         }
         public static bool IsEngineAudioEmitter(MyEntity3DSoundEmitter emitter)
         {
