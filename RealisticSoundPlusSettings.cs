@@ -95,11 +95,13 @@ namespace RealisticSoundPlus
         {
             return string.Format(
                 CultureInfo.InvariantCulture,
-                "gain={0:0.00}, curve={1:0.00}, control={2:0.00}, presenceMin={3:0.00}, muffling={4:0.00}, interiorBase={5:0.00}, farTransmission={6:0.00}, filter={7}, ambient={8}, spatial={9}, spatialGain={10:0.00}, central={11:0.00}, atmosphereFloor={12:0.00}",
+                "gain={0:0.00}, curve={1:0.00}, control={2:0.00}, presenceMin={3:0.00}, quietLog={4:0.00}, loudLog={5:0.00}, muffling={6:0.00}, interiorBase={7:0.00}, farTransmission={8:0.00}, filter={9}, ambient={10}, spatial={11}, spatialGain={12:0.00}, central={13:0.00}, atmosphereFloor={14:0.00}",
                 Current.EngineGain,
                 Current.AudioCurveExponent,
                 Current.ControlInfluence,
                 Current.MinimumShipPresence,
+                Current.QuietShipForceLog10,
+                Current.LoudShipForceLog10,
                 Current.MufflingStrength,
                 Current.InteriorBaseTransmission,
                 Current.FarDistanceTransmission,
@@ -130,6 +132,16 @@ namespace RealisticSoundPlus
                 case "presence":
                 case "minpresence":
                     Current.MinimumShipPresence = value;
+                    break;
+                case "quietlog":
+                case "quietforce":
+                case "smallforce":
+                    Current.QuietShipForceLog10 = value;
+                    break;
+                case "loudlog":
+                case "loudforce":
+                case "largeforce":
+                    Current.LoudShipForceLog10 = value;
                     break;
                 case "muffling":
                 case "muffle":
@@ -267,7 +279,7 @@ namespace RealisticSoundPlus
         private static void Clamp()
         {
             Current.EngineGain = Clamp(Current.EngineGain, 0f, 4f);
-            Current.AudioCurveExponent = Clamp(Current.AudioCurveExponent, 0.25f, 2f);
+            Current.AudioCurveExponent = Clamp(Current.AudioCurveExponent, 0.25f, 10f);
             Current.ControlInfluence = Clamp(Current.ControlInfluence, 0f, 1f);
             Current.MinimumShipPresence = Clamp(Current.MinimumShipPresence, 0f, 1f);
             Current.QuietShipForceLog10 = Clamp(Current.QuietShipForceLog10, 1f, 10f);

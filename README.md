@@ -35,9 +35,11 @@ In-game chat commands:
 - `/rsp show` - prints the current runtime settings.
 - `/rsp gain 1.5` - scales the overall thruster/engine loudness after the thrust curve is calculated. This is the main control for making active engine thrust louder or quieter while keeping the same curve and muffling behavior.
 - `/rsp muffling 0.7` - controls extra interior muffling for thruster-family emitters only. `0` disables extra engine/ambient low-pass override and interior attenuation for matched cues; `1` is maximum extra muffling. Values are clamped to `0..1`.
-- `/rsp curve 0.65` - changes the shape of the thrust-to-volume curve. Lower values make low and medium thrust become audible sooner; higher values keep engines quieter until thrust output is higher.
+- `/rsp curve 0.65` - changes the shape of each thruster's output-to-volume curve. Lower values make low and medium thrust become audible sooner; higher values keep engines quieter until that specific thruster output is higher. This does not directly make large thrusters louder than small ones; use `presence`, `quietlog`, and `loudlog` for that.
 - `/rsp control 0.4` - blends player/autopilot control demand into the audio response. `0` follows only actual produced thrust; higher values make the sound react more immediately to input while still being constrained by real thrust output.
-- `/rsp presence 0.45` - sets the minimum ship-size presence. Higher values make small ships less quiet relative to large ships; lower values make tiny ships more subtle.
+- `/rsp presence 0.45` - sets the minimum thruster-size presence. Higher values make small thrusters less quiet relative to large thrusters; lower values make small thrusters more subtle.
+- `/rsp quietlog 4` - sets the log10 thrust-force point treated as the quiet/small end of the thruster-size scale. Higher values make more thrusters count as small/quiet.
+- `/rsp loudlog 8` - sets the log10 thrust-force point treated as the loud/large end of the thruster-size scale. Higher values preserve more separation between very large and normal thrusters.
 - `/rsp interior 0.9` - sets the baseline interior transmission for thruster muffling. Higher values are less muffled/louder inside; lower values are more muffled/quieter inside.
 - `/rsp far 0.6` - sets how much thruster sound transmits at far interior distances. Higher values keep distant engines louder/clearer; lower values reduce distant engines more strongly.
 - `/rsp ambient on` - also applies the current muffling/filter behavior to ambient ship-motion and interior block loops currently identified as ship rattle, medical bay, air vent, oxygen generator, and gravity generator audio. Use `/rsp ambient off` to leave those ambience cues vanilla.
