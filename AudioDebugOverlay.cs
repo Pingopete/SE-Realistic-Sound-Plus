@@ -68,6 +68,7 @@ namespace RealisticSoundPlus
                         row.Kind,
                         row.EngineCandidate ? "*" : "-",
                         row.AmbientCandidate ? "*" : "-",
+                        row.SpeedAmbientCandidate ? "*" : "-",
                         row.Count,
                         row.Score,
                         row.CueName);

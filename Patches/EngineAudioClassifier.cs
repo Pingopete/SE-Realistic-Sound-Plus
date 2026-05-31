@@ -100,7 +100,8 @@ namespace RealisticSoundPlus.Patches
 
         public static bool IsKnownSpeedAmbientCue(string cueName)
         {
-            return cueName.Equals("ShipLargeIdle", StringComparison.OrdinalIgnoreCase)
+            return cueName.Equals("ArcShipWindSpeed", StringComparison.OrdinalIgnoreCase)
+                || cueName.Equals("ShipLargeIdle", StringComparison.OrdinalIgnoreCase)
                 || cueName.Equals("ShipLargeRunLoop", StringComparison.OrdinalIgnoreCase)
                 || cueName.Equals("ShipLargeSpeedDown", StringComparison.OrdinalIgnoreCase)
                 || cueName.Equals("ShipLargeSpeedUp", StringComparison.OrdinalIgnoreCase)
