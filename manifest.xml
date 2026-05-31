@@ -1,0 +1,7 @@
+﻿<?xml version="1.0"?>
+<CacheManifest xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <Commit>local-realistic-sound-plus</Commit>
+  <Runtime>.NET Framework 4.8</Runtime>
+  <GameVersion>1.209.24</GameVersion>
+  <AssetFiles />
+</CacheManifest>

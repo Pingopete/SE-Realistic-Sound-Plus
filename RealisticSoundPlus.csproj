@@ -1,0 +1,54 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <AssemblyName>plugin</AssemblyName>
+    <RootNamespace>RealisticSoundPlus</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>false</ImplicitUsings>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <GameBin>C:\Program Files (x86)\Steam\steamapps\common\SpaceEngineers\Bin64</GameBin>
+    <PulsarLocal>C:\Users\Pete\Desktop\pulsar\Legacy\Local\RealisticSoundPlus</PulsarLocal>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="0Harmony">
+      <HintPath>$(GameBin)\0Harmony.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Sandbox.Common">
+      <HintPath>$(GameBin)\Sandbox.Common.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Sandbox.Game">
+      <HintPath>$(GameBin)\Sandbox.Game.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="SpaceEngineers.Game">
+      <HintPath>$(GameBin)\SpaceEngineers.Game.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="VRage">
+      <HintPath>$(GameBin)\VRage.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="VRage.Game">
+      <HintPath>$(GameBin)\VRage.Game.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="VRage.Library">
+      <HintPath>$(GameBin)\VRage.Library.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="VRage.Math">
+      <HintPath>$(GameBin)\VRage.Math.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <Target Name="DeployToPulsar" AfterTargets="Build">
+    <MakeDir Directories="$(PulsarLocal)" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFiles="$(PulsarLocal)\plugin.dll" />
+    <Copy SourceFiles="manifest.xml" DestinationFiles="$(PulsarLocal)\manifest.xml" Condition="Exists('manifest.xml')" />
+  </Target>
+</Project>
