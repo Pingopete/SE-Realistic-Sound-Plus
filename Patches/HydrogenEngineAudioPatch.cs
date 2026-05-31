@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using HarmonyLib;
 using Sandbox.Game.Entities;
+using Sandbox.Game.Entities.Cube;
 using Sandbox.ModAPI;
 using SpaceEngineers.Game.Entities.Blocks;
 using VRage.Utils;
@@ -9,17 +11,17 @@ using VRageMath;
 
 namespace RealisticSoundPlus.Patches
 {
-    [HarmonyPatch(typeof(MyGasFueledPowerProducer), "UpdateSoundEmitters")]
+    [HarmonyPatch(typeof(MyFunctionalBlock), "UpdateSoundEmitters")]
     internal static class HydrogenEngineAudioPatch
     {
-        private static readonly System.Reflection.FieldInfo SoundEmitterField = AccessTools.Field(typeof(MyGasFueledPowerProducer), "m_soundEmitter");
+        private static readonly FieldInfo SoundEmitterField = AccessTools.Field(typeof(MyFunctionalBlock), "m_soundEmitter");
         private static readonly Dictionary<MyEntity3DSoundEmitter, float> LastTransmissionByEmitter = new Dictionary<MyEntity3DSoundEmitter, float>();
         private static readonly HashSet<MyEntity3DSoundEmitter> KnownHydrogenEngineEmitters = new HashSet<MyEntity3DSoundEmitter>();
 
         private static bool _disabled;
         private static int _patchHits;
 
-        private static void Postfix(MyGasFueledPowerProducer __instance)
+        private static void Postfix(MyFunctionalBlock __instance)
         {
             if (_disabled)
                 return;
