@@ -1,6 +1,8 @@
 using System;
 using HarmonyLib;
 using Sandbox.Game.Entities;
+using SpaceEngineers.Game.Entities.Blocks;
+using VRage.Audio;
 using VRage.Utils;
 
 namespace RealisticSoundPlus.Patches
@@ -18,7 +20,7 @@ namespace RealisticSoundPlus.Patches
 
             try
             {
-                if (!IsThrusterAudioEmitter(__instance))
+                if (!IsEngineAudioEmitter(__instance))
                     return;
 
                 string effectSubtype = SettingsManager.GetEngineFilterEffectSubtype();
@@ -28,13 +30,26 @@ namespace RealisticSoundPlus.Patches
                 __result = MyStringHash.GetOrCompute(effectSubtype);
 
                 if (++_patchHits == 1)
-                    MyLog.Default.WriteLineAndConsole("[RealisticSoundPlus] Thruster low-pass filter override is active: " + effectSubtype);
+                    MyLog.Default.WriteLineAndConsole("[RealisticSoundPlus] Engine low-pass filter override is active: " + effectSubtype);
             }
             catch (Exception ex)
             {
                 _disabled = true;
-                MyLog.Default.WriteLineAndConsole("[RealisticSoundPlus] Disabling thruster filter patch after error: " + ex);
+                MyLog.Default.WriteLineAndConsole("[RealisticSoundPlus] Disabling engine filter patch after error: " + ex);
             }
+        }
+
+        public static bool IsEngineAudioEmitter(MyEntity3DSoundEmitter emitter)
+        {
+            if (emitter == null)
+                return false;
+
+            if (IsThrusterAudioEmitter(emitter) || IsHydrogenEngineAudioEmitter(emitter))
+                return true;
+
+            return IsKnownHydrogenEngineCue(emitter.SoundId)
+                || IsKnownHydrogenEngineCue(emitter.Sound?.CueEnum)
+                || IsKnownHydrogenEngineCue(emitter.SecondarySound?.CueEnum);
         }
 
         public static bool IsThrusterAudioEmitter(MyEntity3DSoundEmitter emitter)
@@ -46,6 +61,27 @@ namespace RealisticSoundPlus.Patches
                 return true;
 
             return emitter.Entity is MyThrust;
+        }
+
+        public static bool IsHydrogenEngineAudioEmitter(MyEntity3DSoundEmitter emitter)
+        {
+            if (emitter == null)
+                return false;
+
+            if (HydrogenEngineAudioPatch.IsKnownHydrogenEngineEmitter(emitter))
+                return true;
+
+            return emitter.Entity is MyHydrogenEngine;
+        }
+
+        private static bool IsKnownHydrogenEngineCue(MyCueId? cueId)
+        {
+            if (!cueId.HasValue)
+                return false;
+
+            string cueName = cueId.Value.ToString();
+            return cueName.StartsWith("ArcBlockHydrogenEngine", StringComparison.OrdinalIgnoreCase)
+                || cueName.IndexOf("HydrogenEngine", StringComparison.OrdinalIgnoreCase) >= 0;
         }
     }
 }
