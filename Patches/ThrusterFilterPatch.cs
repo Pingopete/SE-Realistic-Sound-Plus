@@ -23,9 +23,6 @@ namespace RealisticSoundPlus.Patches
             {
                 if (IsSpeedAmbientAudioEmitter(__instance))
                 {
-                    if (!SettingsManager.Current.AmbientMufflingEnabled)
-                        return;
-
                     string speedEffectSubtype = GetSpeedAmbientEffectSubtype(__instance);
                     if (!string.IsNullOrEmpty(speedEffectSubtype))
                     {

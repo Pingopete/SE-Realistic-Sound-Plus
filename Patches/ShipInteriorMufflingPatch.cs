@@ -70,14 +70,11 @@ namespace RealisticSoundPlus.Patches
                         continue;
 
                     KnownThrusterEmitters.Add(emitter);
-                    float baseVolume = RestoreEmitter(emitter);
-                    float transmission = suppressVanillaThrusterLayer
-                        ? 0f
-                        : ExteriorSoundTransmission.Calculate(listenerPosition, emitter.SourcePosition);
-
-                    emitter.VolumeMultiplier = baseVolume * transmission;
-                    LastTransmissionByEmitter[emitter] = transmission;
+                    ApplyVanillaEngineLayerTransmission(emitter, suppressVanillaThrusterLayer, listenerPosition);
                 }
+
+                if (suppressVanillaThrusterLayer)
+                    SuppressKnownVanillaEngineCues(emitters);
 
                 if (++_patchHits == 1)
                     MyLog.Default.WriteLineAndConsole("[RealisticSoundPlus] Vanilla ship thruster layer suppression/transmission muffling is active.");
@@ -89,16 +86,47 @@ namespace RealisticSoundPlus.Patches
             }
         }
 
+        private static void SuppressKnownVanillaEngineCues(MyEntity3DSoundEmitter[] emitters)
+        {
+            foreach (MyEntity3DSoundEmitter emitter in emitters)
+            {
+                if (emitter == null || !IsKnownVanillaEngineCue(emitter))
+                    continue;
+
+                KnownThrusterEmitters.Add(emitter);
+                ApplyVanillaEngineLayerTransmission(emitter, true, Vector3D.Zero);
+            }
+        }
+
+        private static bool IsKnownVanillaEngineCue(MyEntity3DSoundEmitter emitter)
+        {
+            return EngineAudioClassifier.IsKnownEngineCue(emitter.SoundId)
+                || EngineAudioClassifier.IsKnownEngineCue(emitter.Sound?.CueEnum)
+                || EngineAudioClassifier.IsKnownEngineCue(emitter.SecondarySound?.CueEnum);
+        }
+
+        private static void ApplyVanillaEngineLayerTransmission(MyEntity3DSoundEmitter emitter, bool suppress, Vector3D listenerPosition)
+        {
+            float baseVolume = RestoreEmitter(emitter);
+            float transmission = suppress
+                ? 0f
+                : ExteriorSoundTransmission.Calculate(listenerPosition, emitter.SourcePosition);
+
+            emitter.VolumeMultiplier = baseVolume * transmission;
+            LastTransmissionByEmitter[emitter] = transmission;
+        }
         private static void ApplySpeedAmbientWind(MyShipSoundComponent component, MyEntity3DSoundEmitter[] emitters)
         {
-            if (!SettingsManager.Current.AmbientMufflingEnabled)
+            MyCubeGrid grid = (MyCubeGrid)ShipGridField.GetValue(component);
+            float windScale = CalculateAtmosphericSpeedScale(grid);
+            bool inVacuum = IsGridInVacuum(grid);
+            bool controlSpeedAmbient = SettingsManager.Current.AmbientMufflingEnabled || inVacuum;
+
+            if (!controlSpeedAmbient)
             {
                 RestoreSpeedAmbientEmitters(emitters);
                 return;
             }
-
-            MyCubeGrid grid = (MyCubeGrid)ShipGridField.GetValue(component);
-            float windScale = CalculateAtmosphericSpeedScale(grid);
 
             foreach (MyEntity3DSoundEmitter emitter in emitters)
             {
@@ -111,9 +139,16 @@ namespace RealisticSoundPlus.Patches
             }
 
             if (++_speedAmbientPatchHits == 1)
-                MyLog.Default.WriteLineAndConsole("[RealisticSoundPlus] Speed ambient wind volume is controlled by ship speed and atmospheric density.");
+                MyLog.Default.WriteLineAndConsole("[RealisticSoundPlus] Speed ambient wind volume is controlled by ship speed and atmospheric density; vacuum ship-speed loops are suppressed.");
         }
 
+        private static bool IsGridInVacuum(MyCubeGrid grid)
+        {
+            if (grid == null)
+                return true;
+
+            return ExteriorSoundTransmission.GetAtmosphericPressure(grid.WorldMatrix.Translation) < 0.01f;
+        }
         private static float CalculateAtmosphericSpeedScale(MyCubeGrid grid)
         {
             if (grid == null || grid.Physics == null)
