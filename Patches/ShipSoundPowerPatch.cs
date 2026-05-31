@@ -14,8 +14,13 @@ namespace RealisticSoundPlus.Patches
         private const float PowerChangeSpeedUp = 0.006666667f;
         private const float PowerChangeSpeedDown = 0.01f;
         private const float MinimumAudibleForce = 10f;
-        private const float AudioCurveExponent = 0.65f;
-        private const float PerceptualGain = 1.25f;
+        private const float AudioCurveExponent = 0.72f;
+        private const float ControlInfluence = 0.3f;
+        private const float ThrustInfluence = 0.7f;
+        private const float MinimumShipPresence = 0.35f;
+        private const float QuietShipForceLog10 = 4.0f;
+        private const float LoudShipForceLog10 = 7.0f;
+        private const float NormalizedVectorMagnitude = 1.7320508f;
 
         private static readonly FieldInfo ShipThrustersField = AccessTools.Field(typeof(MyShipSoundComponent), "m_shipThrusters");
         private static readonly FieldInfo CurrentPowerField = AccessTools.Field(typeof(MyShipSoundComponent), "m_shipCurrentPower");
@@ -67,8 +72,39 @@ namespace RealisticSoundPlus.Patches
             if (maxForce <= MinimumAudibleForce)
                 return 0f;
 
-            float normalized = Clamp01(activeForce / maxForce * PerceptualGain);
-            return Clamp01((float)Math.Pow(normalized, AudioCurveExponent));
+            float thrustLoad = Clamp01(activeForce / maxForce);
+            float controlLoad = GetControlLoad(thrusters, maxForce);
+            float requestedLoad = Clamp01(thrustLoad * ThrustInfluence + Math.Max(thrustLoad, controlLoad) * ControlInfluence);
+            float shapedLoad = Clamp01((float)Math.Pow(requestedLoad, AudioCurveExponent));
+            float shipPresence = CalculateShipPresence(maxForce);
+
+            return Clamp01(shapedLoad * shipPresence);
+        }
+
+        private static float GetControlLoad(MyEntityThrustComponent thrusters, float maxForce)
+        {
+            float control = NormalizeCommandVector(thrusters.ControlThrust, maxForce);
+            float autopilot = thrusters.AutopilotEnabled ? NormalizeCommandVector(thrusters.AutoPilotControlThrust, maxForce) : 0f;
+            return Math.Max(control, autopilot);
+        }
+
+        private static float NormalizeCommandVector(Vector3 command, float maxForce)
+        {
+            float magnitude = command.Length();
+            if (magnitude <= 0f)
+                return 0f;
+
+            if (magnitude > NormalizedVectorMagnitude * 2f)
+                return Clamp01(magnitude / maxForce);
+
+            return Clamp01(magnitude / NormalizedVectorMagnitude);
+        }
+
+        private static float CalculateShipPresence(float maxForce)
+        {
+            float forceLog = (float)Math.Log10(Math.Max(maxForce, 1f));
+            float normalized = Clamp01((forceLog - QuietShipForceLog10) / (LoudShipForceLog10 - QuietShipForceLog10));
+            return MinimumShipPresence + (1f - MinimumShipPresence) * normalized;
         }
 
         private static float CombinedAxisMagnitude(Vector3 positive, Vector3 negative)
