@@ -59,7 +59,7 @@ namespace RealisticSoundPlus.Patches
             return Clamp01(settings.MufflingStrength * pressureScale);
         }
 
-        private static bool IsListenerInsideShip()
+        public static bool IsListenerInsideShip()
         {
             if (DateTime.UtcNow - _lastInsideShipReportUtc <= InsideShipReportLifetime)
                 return true;

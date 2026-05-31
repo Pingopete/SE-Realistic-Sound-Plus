@@ -48,18 +48,7 @@ namespace RealisticSoundPlus.Patches
 
         public static bool IsKnownAmbientCue(string cueName)
         {
-            if (string.IsNullOrWhiteSpace(cueName))
-                return false;
-
-            return cueName.Equals("ArcBlockMedical", StringComparison.OrdinalIgnoreCase)
-                || cueName.Equals("ArcBlockAirVentIdle", StringComparison.OrdinalIgnoreCase)
-                || cueName.Equals("BlockOxyGenIdle", StringComparison.OrdinalIgnoreCase)
-                || cueName.Equals("ArcBlockGravityGen", StringComparison.OrdinalIgnoreCase)
-                || cueName.IndexOf("Medical", StringComparison.OrdinalIgnoreCase) >= 0
-                || cueName.IndexOf("AirVent", StringComparison.OrdinalIgnoreCase) >= 0
-                || cueName.IndexOf("OxyGen", StringComparison.OrdinalIgnoreCase) >= 0
-                || cueName.IndexOf("OxygenGenerator", StringComparison.OrdinalIgnoreCase) >= 0
-                || cueName.IndexOf("GravityGen", StringComparison.OrdinalIgnoreCase) >= 0;
+            return IsKnownSpeedAmbientCue(cueName);
         }
 
 

@@ -3,6 +3,7 @@ using HarmonyLib;
 using Sandbox.Game.Entities;
 using SpaceEngineers.Game.Entities.Blocks;
 using VRage.Utils;
+using VRageMath;
 
 namespace RealisticSoundPlus.Patches
 {
@@ -22,7 +23,10 @@ namespace RealisticSoundPlus.Patches
             {
                 if (IsSpeedAmbientAudioEmitter(__instance))
                 {
-                    string speedEffectSubtype = SettingsManager.GetSpeedAmbientFilterEffectSubtype();
+                    if (!SettingsManager.Current.AmbientMufflingEnabled)
+                        return;
+
+                    string speedEffectSubtype = GetSpeedAmbientEffectSubtype(__instance);
                     if (!string.IsNullOrEmpty(speedEffectSubtype))
                     {
                         __result = MyStringHash.GetOrCompute(speedEffectSubtype);
@@ -43,7 +47,7 @@ namespace RealisticSoundPlus.Patches
                     return;
                 }
 
-                string effectSubtype = SettingsManager.GetEngineFilterEffectSubtype();
+                string effectSubtype = GetExteriorEffectSubtype(__instance);
                 if (string.IsNullOrEmpty(effectSubtype))
                     return;
 
@@ -59,6 +63,40 @@ namespace RealisticSoundPlus.Patches
             }
         }
 
+        private static string GetSpeedAmbientEffectSubtype(MyEntity3DSoundEmitter emitter)
+        {
+            if (ExteriorSoundTransmission.IsListenerInsideShip())
+                return SettingsManager.GetSpeedAmbientFilterEffectSubtype();
+
+            if (ExteriorSoundTransmission.CalculateEffectiveMufflingStrength(emitter.SourcePosition) <= 0f)
+                return null;
+
+            return IsExteriorVacuum(emitter.SourcePosition)
+                ? "LowPassNoHelmetNoOxy"
+                : SettingsManager.GetEngineFilterEffectSubtype();
+        }
+
+        private static string GetExteriorEffectSubtype(MyEntity3DSoundEmitter emitter)
+        {
+            return IsExteriorVacuum(emitter.SourcePosition)
+                ? "LowPassNoHelmetNoOxy"
+                : SettingsManager.GetEngineFilterEffectSubtype();
+        }
+
+        private static bool IsExteriorVacuum(Vector3D sourcePosition)
+        {
+            if (ExteriorSoundTransmission.IsListenerInsideShip())
+                return false;
+
+            Vector3D listenerPosition = Sandbox.ModAPI.MyAPIGateway.Session?.Camera?.Position ?? Vector3D.Zero;
+            if (listenerPosition == Vector3D.Zero)
+                return true;
+
+            float pressure = Math.Max(
+                ExteriorSoundTransmission.GetAtmosphericPressure(listenerPosition),
+                ExteriorSoundTransmission.GetAtmosphericPressure(sourcePosition));
+            return pressure < 0.1f;
+        }
         public static bool IsEngineAudioEmitter(MyEntity3DSoundEmitter emitter)
         {
             if (emitter == null)

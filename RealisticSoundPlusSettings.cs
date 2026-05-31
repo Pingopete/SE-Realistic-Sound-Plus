@@ -21,10 +21,11 @@ namespace RealisticSoundPlus
         public float FarDistanceTransmission { get; set; } = 1.0f;
         public float AtmosphericMufflingFloor { get; set; } = 0.5f;
         public string EngineFilter { get; set; } = "RealShip";
-        public string SpeedAmbientFilter { get; set; } = "Off";
+        public string SpeedAmbientFilter { get; set; } = "CockpitNoOxy";
         public bool AmbientMufflingEnabled { get; set; }
         public bool SpatialAudioEnabled { get; set; } = true;
         public float SpatialEmitterGain { get; set; } = 1.0f;
+        public float LargeThrusterBoost { get; set; } = 1.0f;
         public float SpatialCentralBlend { get; set; } = 0.25f;
         public float SpatialSmoothingMs { get; set; } = 100f;
         public float SpatialSoftFadeRatio { get; set; } = 0.04f;
@@ -98,7 +99,7 @@ namespace RealisticSoundPlus
         {
             return string.Format(
                 CultureInfo.InvariantCulture,
-                "gain={0:0.00}, curve={1:0.00}, control={2:0.00}, presenceMin={3:0.00}, quietLog={4:0.00}, loudLog={5:0.00}, muffling={6:0.00}, interiorBase={7:0.00}, farTransmission={8:0.00}, filter={9}, speedFilter={10}, ambient={11}, spatial={12}, spatialGain={13:0.00}, center=off, smoothMs={14:0}, fade={15:0.000}, atmosphereFloor={16:0.00}",
+                "gain={0:0.00}, curve={1:0.00}, control={2:0.00}, presenceMin={3:0.00}, quietLog={4:0.00}, loudLog={5:0.00}, muffling={6:0.00}, interiorBase={7:0.00}, farTransmission={8:0.00}, filter={9}, speedFilter={10}, ambient={11}, spatial={12}, spatialGain={13:0.00}, largeBoost={14:0.00}, center=off, smoothMs={15:0}, fade={16:0.000}, atmosphereFloor={17:0.00}",
                 Current.EngineGain,
                 Current.AudioCurveExponent,
                 Current.ControlInfluence,
@@ -113,6 +114,7 @@ namespace RealisticSoundPlus
                 Current.AmbientMufflingEnabled ? "on" : "off",
                 Current.SpatialAudioEnabled ? "on" : "off",
                 Current.SpatialEmitterGain,
+                Current.LargeThrusterBoost,
                 Current.SpatialSmoothingMs,
                 Current.SpatialSoftFadeRatio,
                 Current.AtmosphericMufflingFloor);
@@ -168,6 +170,11 @@ namespace RealisticSoundPlus
                 case "spatialgain":
                 case "spatialemittergain":
                     Current.SpatialEmitterGain = value;
+                    break;
+                case "largeboost":
+                case "largeengineboost":
+                case "largethrusterboost":
+                    Current.LargeThrusterBoost = value;
                     break;
                 case "spatialcenter":
                 case "spatialcentral":
@@ -328,6 +335,7 @@ namespace RealisticSoundPlus
             Current.EngineFilter = NormalizeFilter(Current.EngineFilter) ?? "Off";
             Current.SpeedAmbientFilter = NormalizeFilter(Current.SpeedAmbientFilter) ?? "Off";
             Current.SpatialEmitterGain = Clamp(Current.SpatialEmitterGain, 0f, 4f);
+            Current.LargeThrusterBoost = Clamp(Current.LargeThrusterBoost, 0.25f, 8f);
             Current.SpatialCentralBlend = Clamp(Current.SpatialCentralBlend, 0f, 1f);
             Current.SpatialSmoothingMs = Clamp(Current.SpatialSmoothingMs, 0f, 500f);
             Current.SpatialSoftFadeRatio = Clamp(Current.SpatialSoftFadeRatio, 0.001f, 0.25f);

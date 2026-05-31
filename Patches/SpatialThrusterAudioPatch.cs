@@ -85,7 +85,10 @@ namespace RealisticSoundPlus.Patches
         {
             float forceLog = (float)Math.Log10(Math.Max(maxForce, 1f));
             float normalized = Clamp01((forceLog - settings.QuietShipForceLog10) / (settings.LoudShipForceLog10 - settings.QuietShipForceLog10));
-            return settings.MinimumShipPresence + (1f - settings.MinimumShipPresence) * normalized;
+            float presence = settings.MinimumShipPresence + (1f - settings.MinimumShipPresence) * normalized;
+            float largeOnly = normalized * normalized;
+            float boost = 1f + (settings.LargeThrusterBoost - 1f) * largeOnly;
+            return presence * boost;
         }
 
         private static float CalculateTransmission(Vector3D sourcePosition)
