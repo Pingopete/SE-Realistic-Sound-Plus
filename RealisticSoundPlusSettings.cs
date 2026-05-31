@@ -21,6 +21,7 @@ namespace RealisticSoundPlus
         public float FarDistanceTransmission { get; set; } = 1.0f;
         public float AtmosphericMufflingFloor { get; set; } = 0.5f;
         public string EngineFilter { get; set; } = "RealShip";
+        public string SpeedAmbientFilter { get; set; } = "Off";
         public bool AmbientMufflingEnabled { get; set; }
         public bool SpatialAudioEnabled { get; set; } = true;
         public float SpatialEmitterGain { get; set; } = 1.0f;
@@ -97,7 +98,7 @@ namespace RealisticSoundPlus
         {
             return string.Format(
                 CultureInfo.InvariantCulture,
-                "gain={0:0.00}, curve={1:0.00}, control={2:0.00}, presenceMin={3:0.00}, quietLog={4:0.00}, loudLog={5:0.00}, muffling={6:0.00}, interiorBase={7:0.00}, farTransmission={8:0.00}, filter={9}, ambient={10}, spatial={11}, spatialGain={12:0.00}, center=off, smoothMs={13:0}, fade={14:0.000}, atmosphereFloor={15:0.00}",
+                "gain={0:0.00}, curve={1:0.00}, control={2:0.00}, presenceMin={3:0.00}, quietLog={4:0.00}, loudLog={5:0.00}, muffling={6:0.00}, interiorBase={7:0.00}, farTransmission={8:0.00}, filter={9}, speedFilter={10}, ambient={11}, spatial={12}, spatialGain={13:0.00}, center=off, smoothMs={14:0}, fade={15:0.000}, atmosphereFloor={16:0.00}",
                 Current.EngineGain,
                 Current.AudioCurveExponent,
                 Current.ControlInfluence,
@@ -108,6 +109,7 @@ namespace RealisticSoundPlus
                 Current.InteriorBaseTransmission,
                 Current.FarDistanceTransmission,
                 Current.EngineFilter,
+                Current.SpeedAmbientFilter,
                 Current.AmbientMufflingEnabled ? "on" : "off",
                 Current.SpatialAudioEnabled ? "on" : "off",
                 Current.SpatialEmitterGain,
@@ -201,6 +203,16 @@ namespace RealisticSoundPlus
             return true;
         }
 
+        public static bool TrySetSpeedAmbientFilter(string value)
+        {
+            string normalized = NormalizeFilter(value);
+            if (normalized == null)
+                return false;
+
+            Current.SpeedAmbientFilter = normalized;
+            return true;
+        }
+
 
 
         public static bool TrySetSpatial(string value)
@@ -243,7 +255,17 @@ namespace RealisticSoundPlus
         }
         public static string GetEngineFilterEffectSubtype()
         {
-            switch (NormalizeFilter(Current.EngineFilter))
+            return GetFilterEffectSubtype(Current.EngineFilter);
+        }
+
+        public static string GetSpeedAmbientFilterEffectSubtype()
+        {
+            return GetFilterEffectSubtype(Current.SpeedAmbientFilter);
+        }
+
+        private static string GetFilterEffectSubtype(string filter)
+        {
+            switch (NormalizeFilter(filter))
             {
                 case "Helmet":
                     return "LowPassHelmet";
@@ -304,6 +326,7 @@ namespace RealisticSoundPlus
             Current.FarDistanceTransmission = Clamp(Current.FarDistanceTransmission, 0.05f, 1f);
             Current.AtmosphericMufflingFloor = Clamp(Current.AtmosphericMufflingFloor, 0f, 1f);
             Current.EngineFilter = NormalizeFilter(Current.EngineFilter) ?? "Off";
+            Current.SpeedAmbientFilter = NormalizeFilter(Current.SpeedAmbientFilter) ?? "Off";
             Current.SpatialEmitterGain = Clamp(Current.SpatialEmitterGain, 0f, 4f);
             Current.SpatialCentralBlend = Clamp(Current.SpatialCentralBlend, 0f, 1f);
             Current.SpatialSmoothingMs = Clamp(Current.SpatialSmoothingMs, 0f, 500f);

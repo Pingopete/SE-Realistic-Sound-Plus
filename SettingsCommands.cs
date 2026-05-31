@@ -50,7 +50,7 @@ namespace RealisticSoundPlus
                 {
                     case "help":
                     case "?":
-                        Notify("/rsp show | /rsp gain 1.5 | /rsp muffling 0.7 | /rsp curve 0.65 | /rsp control 0.4 | /rsp quietlog 4 | /rsp loudlog 8 | /rsp filter cockpit | /rsp ambient on | /rsp spatial on | /rsp spatialgain 1.2 | /rsp spatialcenter 0.25 | /rsp smooth 100 | /rsp fade 0.04 | /rsp atmfloor 0.5 | /rsp sounds | /rsp save | /rsp reload");
+                        Notify("/rsp show | /rsp gain 1.5 | /rsp muffling 0.7 | /rsp curve 0.65 | /rsp control 0.4 | /rsp quietlog 4 | /rsp loudlog 8 | /rsp filter cockpit | /rsp speedfilter deep | /rsp ambient on | /rsp spatial on | /rsp spatialgain 1.2 | /rsp spatialcenter 0.25 | /rsp smooth 100 | /rsp fade 0.04 | /rsp atmfloor 0.5 | /rsp sounds | /rsp save | /rsp reload");
                         break;
                     case "show":
                         Notify(SettingsManager.Summary());
@@ -65,6 +65,10 @@ namespace RealisticSoundPlus
                         break;
                     case "filter":
                         SetFilter(parts);
+                        break;
+                    case "speedfilter":
+                    case "ambientfilter":
+                        SetSpeedAmbientFilter(parts);
                         break;
                     case "ambient":
                         SetAmbient(parts);
@@ -162,6 +166,22 @@ namespace RealisticSoundPlus
             Notify(SettingsManager.Summary());
         }
 
+        private static void SetSpeedAmbientFilter(string[] parts)
+        {
+            if (parts.Length < 2)
+            {
+                Notify("Usage: /rsp speedfilter <" + SettingsManager.FilterOptions + ">");
+                return;
+            }
+
+            if (!SettingsManager.TrySetSpeedAmbientFilter(parts[1]))
+            {
+                Notify("Unknown speed ambient filter. Options: " + SettingsManager.FilterOptions);
+                return;
+            }
+
+            Notify(SettingsManager.Summary());
+        }
         private static void SetValue(string name, string[] parts)
         {
             if (parts.Length < 2 || !float.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out float value))

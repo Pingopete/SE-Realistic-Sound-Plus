@@ -11,6 +11,7 @@ namespace RealisticSoundPlus.Patches
     {
         private static bool _disabled;
         private static int _patchHits;
+        private static int _speedAmbientFilterHits;
 
         private static void Postfix(MyEntity3DSoundEmitter __instance, ref MyStringHash __result)
         {
@@ -19,6 +20,20 @@ namespace RealisticSoundPlus.Patches
 
             try
             {
+                if (IsSpeedAmbientAudioEmitter(__instance))
+                {
+                    string speedEffectSubtype = SettingsManager.GetSpeedAmbientFilterEffectSubtype();
+                    if (!string.IsNullOrEmpty(speedEffectSubtype))
+                    {
+                        __result = MyStringHash.GetOrCompute(speedEffectSubtype);
+
+                        if (++_speedAmbientFilterHits == 1)
+                            MyLog.Default.WriteLineAndConsole("[RealisticSoundPlus] Speed ambient filter override is active: " + speedEffectSubtype);
+                    }
+
+                    return;
+                }
+
                 if (!IsEngineAudioEmitter(__instance) && !ExteriorWeaponAudioPatch.IsExteriorWeaponAudioEmitter(__instance))
                     return;
 
@@ -93,6 +108,16 @@ namespace RealisticSoundPlus.Patches
                 return true;
 
             return emitter.Entity is MyHydrogenEngine;
+        }
+
+        public static bool IsSpeedAmbientAudioEmitter(MyEntity3DSoundEmitter emitter)
+        {
+            if (emitter == null)
+                return false;
+
+            return EngineAudioClassifier.IsKnownSpeedAmbientCue(emitter.SoundId)
+                || EngineAudioClassifier.IsKnownSpeedAmbientCue(emitter.Sound?.CueEnum)
+                || EngineAudioClassifier.IsKnownSpeedAmbientCue(emitter.SecondarySound?.CueEnum);
         }
     }
 }
