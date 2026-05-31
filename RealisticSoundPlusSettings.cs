@@ -208,7 +208,7 @@ namespace RealisticSoundPlus
             Current.MinimumShipPresence = Clamp(Current.MinimumShipPresence, 0f, 1f);
             Current.QuietShipForceLog10 = Clamp(Current.QuietShipForceLog10, 1f, 10f);
             Current.LoudShipForceLog10 = Math.Max(Current.QuietShipForceLog10 + 0.1f, Clamp(Current.LoudShipForceLog10, 1f, 12f));
-            Current.MufflingStrength = Clamp(Current.MufflingStrength, 0f, 3f);
+            Current.MufflingStrength = Clamp(Current.MufflingStrength, 0f, 1f);
             Current.InteriorBaseTransmission = Clamp(Current.InteriorBaseTransmission, 0.05f, 1f);
             Current.NearDistance = Clamp(Current.NearDistance, 0f, 100f);
             Current.FarDistance = Math.Max(Current.NearDistance + 1f, Clamp(Current.FarDistance, 1f, 500f));

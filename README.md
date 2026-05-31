@@ -32,7 +32,7 @@ In-game chat commands:
 
 - `/rsp show` - prints the current runtime settings.
 - `/rsp gain 1.5` - scales the overall thruster/engine loudness after the thrust curve is calculated. This is the main control for making active engine thrust louder or quieter while keeping the same curve and muffling behavior.
-- `/rsp muffling 0.7` - controls extra interior muffling for thruster-family emitters only. `0` disables the plugin's extra interior thruster attenuation, `1` is normal, and values above `1` make the extra muffling stronger.
+- `/rsp muffling 0.7` - controls extra interior muffling for thruster-family emitters only. `0` disables the plugin's extra interior thruster attenuation and `1` is maximum extra muffling. Values are clamped to `0..1`.
 - `/rsp curve 0.65` - changes the shape of the thrust-to-volume curve. Lower values make low and medium thrust become audible sooner; higher values keep engines quieter until thrust output is higher.
 - `/rsp control 0.4` - blends player/autopilot control demand into the audio response. `0` follows only actual produced thrust; higher values make the sound react more immediately to input while still being constrained by real thrust output.
 - `/rsp presence 0.45` - sets the minimum ship-size presence. Higher values make small ships less quiet relative to large ships; lower values make tiny ships more subtle.
