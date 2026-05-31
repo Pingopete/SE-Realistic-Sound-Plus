@@ -24,6 +24,9 @@ namespace RealisticSoundPlus.Patches
             if (cueName.IndexOf("HydrogenEngine", StringComparison.OrdinalIgnoreCase) >= 0)
                 return true;
 
+            if (cueName.IndexOf("JetHydrogen", StringComparison.OrdinalIgnoreCase) >= 0)
+                return true;
+
             if (cueName.IndexOf("Thruster", StringComparison.OrdinalIgnoreCase) >= 0)
                 return true;
 
@@ -66,11 +69,15 @@ namespace RealisticSoundPlus.Patches
 
         private static bool IsKnownShipMotionCue(string cueName)
         {
-            return cueName.Equals("ShipLargeRunLoop", StringComparison.OrdinalIgnoreCase)
-                || cueName.Equals("ShipSmallRunLoop", StringComparison.OrdinalIgnoreCase)
+            return cueName.Equals("ShipLargeIdle", StringComparison.OrdinalIgnoreCase)
+                || cueName.Equals("ShipLargeRunLoop", StringComparison.OrdinalIgnoreCase)
                 || cueName.Equals("ShipLargeSpeedDown", StringComparison.OrdinalIgnoreCase)
-                || cueName.Equals("ShipSmallSpeedDown", StringComparison.OrdinalIgnoreCase)
                 || cueName.Equals("ShipLargeSpeedUp", StringComparison.OrdinalIgnoreCase)
+                || cueName.Equals("ShipSmallRunLoop", StringComparison.OrdinalIgnoreCase)
+                || cueName.Equals("ShipSmallRunSlow", StringComparison.OrdinalIgnoreCase)
+                || cueName.Equals("ShipSmallRunMedium", StringComparison.OrdinalIgnoreCase)
+                || cueName.Equals("ShipSmallRunFast", StringComparison.OrdinalIgnoreCase)
+                || cueName.Equals("ShipSmallSpeedDown", StringComparison.OrdinalIgnoreCase)
                 || cueName.Equals("ShipSmallSpeedUp", StringComparison.OrdinalIgnoreCase);
         }
     }

@@ -8,18 +8,18 @@ namespace RealisticSoundPlus
 {
     public sealed class RealisticSoundPlusSettings
     {
-        public float EngineGain { get; set; } = 1.35f;
-        public float AudioCurveExponent { get; set; } = 0.72f;
-        public float ControlInfluence { get; set; } = 0.3f;
+        public float EngineGain { get; set; } = 1.0f;
+        public float AudioCurveExponent { get; set; } = 1.0f;
+        public float ControlInfluence { get; set; } = 0.0f;
         public float MinimumShipPresence { get; set; } = 0.35f;
         public float QuietShipForceLog10 { get; set; } = 4.0f;
         public float LoudShipForceLog10 { get; set; } = 7.0f;
         public float MufflingStrength { get; set; } = 1.0f;
-        public float InteriorBaseTransmission { get; set; } = 0.82f;
+        public float InteriorBaseTransmission { get; set; } = 0.2f;
         public float NearDistance { get; set; } = 4f;
         public float FarDistance { get; set; } = 36f;
-        public float FarDistanceTransmission { get; set; } = 0.52f;
-        public string EngineFilter { get; set; } = "Off";
+        public float FarDistanceTransmission { get; set; } = 1.0f;
+        public string EngineFilter { get; set; } = "RealShip";
         public bool AmbientMufflingEnabled { get; set; }
     }
 
@@ -198,7 +198,7 @@ namespace RealisticSoundPlus
                 case "RealShip":
                     return "realShipFilter";
                 case "Deep":
-                    return "LowPass";
+                    return "LowPassNoHelmetNoOxy";
                 default:
                     return null;
             }

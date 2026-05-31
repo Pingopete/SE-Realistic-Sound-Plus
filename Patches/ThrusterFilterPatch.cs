@@ -22,6 +22,12 @@ namespace RealisticSoundPlus.Patches
                 if (!IsEngineAudioEmitter(__instance))
                     return;
 
+                if (SettingsManager.Current.MufflingStrength <= 0f)
+                {
+                    __result = MyStringHash.NullOrEmpty;
+                    return;
+                }
+
                 string effectSubtype = SettingsManager.GetEngineFilterEffectSubtype();
                 if (string.IsNullOrEmpty(effectSubtype))
                     return;
