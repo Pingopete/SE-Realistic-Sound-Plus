@@ -1,5 +1,7 @@
 using System;
 using HarmonyLib;
+using RealisticSoundPlus.Patches;
+using Sandbox.ModAPI;
 using VRage.Plugins;
 using VRage.Utils;
 
@@ -12,12 +14,14 @@ namespace RealisticSoundPlus
         private Harmony _harmony;
         private bool _disposed;
         private int _settingsPollFrame;
+        private object _lastSession;
 
         public void Init(object gameInstance)
         {
             MyLog.Default.WriteLineAndConsole("[RealisticSoundPlus] Loading realistic-audio correction plugin.");
 
             SettingsManager.LoadOrCreate();
+            AudioPatchRuntime.ResetForSession("plugin init");
 
             _harmony = new Harmony(HarmonyId);
             _harmony.PatchAll(typeof(Plugin).Assembly);
@@ -27,6 +31,7 @@ namespace RealisticSoundPlus
 
         public void Update()
         {
+            ResetAudioRuntimeIfSessionChanged();
             SettingsCommands.TryRegister();
             AudioDebugOverlay.Draw();
 
@@ -35,6 +40,16 @@ namespace RealisticSoundPlus
                 _settingsPollFrame = 0;
                 SettingsManager.ReloadIfChanged();
             }
+        }
+
+        private void ResetAudioRuntimeIfSessionChanged()
+        {
+            object session = MyAPIGateway.Session;
+            if (ReferenceEquals(session, _lastSession))
+                return;
+
+            _lastSession = session;
+            AudioPatchRuntime.ResetForSession(session == null ? "session cleared" : "session started");
         }
 
         public void Dispose()
@@ -48,6 +63,7 @@ namespace RealisticSoundPlus
             {
                 SettingsCommands.Unregister();
                 _harmony?.UnpatchAll(HarmonyId);
+                AudioPatchRuntime.ResetForSession("plugin dispose");
                 MyLog.Default.WriteLineAndConsole("[RealisticSoundPlus] Unloaded.");
             }
             catch (Exception ex)

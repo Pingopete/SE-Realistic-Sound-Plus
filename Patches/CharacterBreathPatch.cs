@@ -57,6 +57,12 @@ namespace RealisticSoundPlus.Patches
             }
         }
 
+
+        public static void ResetRuntimeState()
+        {
+            _disabled = false;
+            _patchHits = 0;
+        }
         private static bool ShouldSuppressBreath(MyCharacterBreath breath)
         {
             MyCharacter character = (MyCharacter)CharacterField.GetValue(breath);

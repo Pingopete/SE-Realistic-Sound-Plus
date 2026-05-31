@@ -80,6 +80,29 @@ namespace RealisticSoundPlus.Patches
                 || cueName.IndexOf("Explosion", StringComparison.OrdinalIgnoreCase) >= 0
                 || cueName.IndexOf("Expl", StringComparison.OrdinalIgnoreCase) >= 0;
         }
+        public static bool IsKnownEngineAdjacentSpeedCue(MyCueId? cueId)
+        {
+            if (!cueId.HasValue)
+                return false;
+
+            return IsKnownEngineAdjacentSpeedCue(cueId.Value.ToString());
+        }
+
+        public static bool IsKnownEngineAdjacentSpeedCue(string cueName)
+        {
+            if (string.IsNullOrWhiteSpace(cueName))
+                return false;
+
+            return cueName.Equals("ShipLargeRunLoop", StringComparison.OrdinalIgnoreCase)
+                || cueName.Equals("ShipSmallRunLoop", StringComparison.OrdinalIgnoreCase)
+                || cueName.Equals("ShipSmallRunSlow", StringComparison.OrdinalIgnoreCase)
+                || cueName.Equals("ShipSmallRunMedium", StringComparison.OrdinalIgnoreCase)
+                || cueName.Equals("ShipSmallRunFast", StringComparison.OrdinalIgnoreCase)
+                || cueName.Equals("ShipSmallSpeedDown", StringComparison.OrdinalIgnoreCase)
+                || cueName.Equals("ShipSmallSpeedUp", StringComparison.OrdinalIgnoreCase)
+                || cueName.Equals("ShipLargeSpeedDown", StringComparison.OrdinalIgnoreCase)
+                || cueName.Equals("ShipLargeSpeedUp", StringComparison.OrdinalIgnoreCase);
+        }
         public static bool IsKnownSpeedAmbientCue(MyCueId? cueId)
         {
             if (!cueId.HasValue)

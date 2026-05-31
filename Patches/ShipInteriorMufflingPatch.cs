@@ -26,6 +26,7 @@ namespace RealisticSoundPlus.Patches
         private static readonly FieldInfo EmittersField = AccessTools.Field(typeof(MyShipSoundComponent), "m_emitters");
         private static readonly FieldInfo InsideShipField = AccessTools.Field(typeof(MyShipSoundComponent), "m_insideShip");
         private static readonly FieldInfo ShipGridField = AccessTools.Field(typeof(MyShipSoundComponent), "m_shipGrid");
+        private static readonly FieldInfo ShipCurrentPowerField = AccessTools.Field(typeof(MyShipSoundComponent), "m_shipCurrentPower");
         private static readonly Dictionary<MyEntity3DSoundEmitter, float> BaseVolumeByEmitter = new Dictionary<MyEntity3DSoundEmitter, float>();
         private static readonly Dictionary<MyEntity3DSoundEmitter, float> SpeedAmbientBaseVolumeByEmitter = new Dictionary<MyEntity3DSoundEmitter, float>();
         private static readonly HashSet<MyEntity3DSoundEmitter> KnownThrusterEmitters = new HashSet<MyEntity3DSoundEmitter>();
@@ -48,9 +49,9 @@ namespace RealisticSoundPlus.Patches
                 bool insideShip = (bool)InsideShipField.GetValue(__instance);
                 MyCubeGrid grid = (MyCubeGrid)ShipGridField.GetValue(__instance);
                 ExteriorSoundTransmission.ReportListenerInsideShip(insideShip);
-                ApplySpeedAmbientWind(grid, emitters);
+                ApplySpeedAmbientWind(__instance, grid, emitters);
 
-                bool suppressVanillaThrusterLayer = SettingsManager.Current.SpatialAudioEnabled;
+                bool suppressVanillaThrusterLayer = SpatialThrusterAudioPatch.CanOwnVanillaShipLayer();
                 if (!insideShip && !suppressVanillaThrusterLayer)
                 {
                     RestoreEmitters(emitters);
@@ -87,6 +88,16 @@ namespace RealisticSoundPlus.Patches
             }
         }
 
+
+        public static void ResetRuntimeState()
+        {
+            BaseVolumeByEmitter.Clear();
+            SpeedAmbientBaseVolumeByEmitter.Clear();
+            KnownThrusterEmitters.Clear();
+            _disabled = false;
+            _patchHits = 0;
+            _speedAmbientPatchHits = 0;
+        }
         private static void SuppressKnownVanillaEngineCues(MyEntity3DSoundEmitter[] emitters, MyCubeGrid grid)
         {
             foreach (MyEntity3DSoundEmitter emitter in emitters)
@@ -139,11 +150,12 @@ namespace RealisticSoundPlus.Patches
             return box.Contains(listenerPosition) != ContainmentType.Disjoint;
         }
 
-        private static void ApplySpeedAmbientWind(MyCubeGrid grid, MyEntity3DSoundEmitter[] emitters)
+        private static void ApplySpeedAmbientWind(MyShipSoundComponent component, MyCubeGrid grid, MyEntity3DSoundEmitter[] emitters)
         {
             float windScale = CalculateAtmosphericSpeedScale(grid);
             bool inVacuum = IsGridInVacuum(grid);
             bool lowSpeed = IsGridBelowSpeedAmbientThreshold(grid);
+            bool hasEnginePower = GetShipCurrentPower(component) > 0.02f;
             bool controlSpeedAmbient = SettingsManager.Current.AmbientMufflingEnabled || inVacuum;
 
             foreach (MyEntity3DSoundEmitter emitter in emitters)
@@ -151,7 +163,20 @@ namespace RealisticSoundPlus.Patches
                 if (!ThrusterFilterPatch.IsSpeedAmbientAudioEmitter(emitter))
                     continue;
 
-                bool suppressStuckMotionLoop = lowSpeed && IsMovingSpeedAmbientEmitter(emitter);
+                bool movingSpeedLoop = IsMovingSpeedAmbientEmitter(emitter);
+                bool engineAdjacentSpeedLoop = IsEngineAdjacentSpeedAmbientEmitter(emitter);
+                bool suppressStuckMotionLoop = movingSpeedLoop && !hasEnginePower && (lowSpeed || engineAdjacentSpeedLoop);
+                bool routeAsPoweredEngineLoop = hasEnginePower && engineAdjacentSpeedLoop;
+                if (routeAsPoweredEngineLoop)
+                {
+                    float engineLoopBaseVolume = RestoreSpeedAmbientEmitter(emitter);
+                    float engineTransmission = ExteriorSoundTransmission.Calculate(emitter.SourcePosition);
+                    float atmosphereGainScale = ExteriorSoundTransmission.CalculateAtmosphericEngineGainScale(emitter.SourcePosition);
+                    float poweredLoopFloor = Math.Max(engineLoopBaseVolume, SettingsManager.Current.MinimumShipPresence);
+                    emitter.VolumeMultiplier = poweredLoopFloor * engineTransmission * atmosphereGainScale;
+                    SpeedAmbientBaseVolumeByEmitter[emitter] = engineLoopBaseVolume;
+                    continue;
+                }
                 if (!controlSpeedAmbient && !suppressStuckMotionLoop)
                 {
                     RestoreSpeedAmbientEmitter(emitter);
@@ -167,6 +192,23 @@ namespace RealisticSoundPlus.Patches
                 MyLog.Default.WriteLineAndConsole("[RealisticSoundPlus] Speed ambient wind volume is controlled by ship speed and atmospheric density; vacuum and near-stationary movement speed loops are suppressed.");
         }
 
+        private static float GetShipCurrentPower(MyShipSoundComponent component)
+        {
+            try
+            {
+                return component != null ? (float)ShipCurrentPowerField.GetValue(component) : 0f;
+            }
+            catch
+            {
+                return 0f;
+            }
+        }
+        private static bool IsEngineAdjacentSpeedAmbientEmitter(MyEntity3DSoundEmitter emitter)
+        {
+            return EngineAudioClassifier.IsKnownEngineAdjacentSpeedCue(emitter.SoundId)
+                || EngineAudioClassifier.IsKnownEngineAdjacentSpeedCue(emitter.Sound?.CueEnum)
+                || EngineAudioClassifier.IsKnownEngineAdjacentSpeedCue(emitter.SecondarySound?.CueEnum);
+        }
         private static bool IsMovingSpeedAmbientEmitter(MyEntity3DSoundEmitter emitter)
         {
             return IsMovingSpeedAmbientCue(emitter.SoundId.ToString())

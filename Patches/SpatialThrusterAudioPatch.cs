@@ -16,6 +16,7 @@ namespace RealisticSoundPlus.Patches
         private static readonly Dictionary<MyEntity3DSoundEmitter, SmoothState> SmoothStatesByEmitter = new Dictionary<MyEntity3DSoundEmitter, SmoothState>();
 
         private static bool _disabled;
+        private static bool _hasAppliedThisSession;
         private static int _patchHits;
 
         [HarmonyPatch(typeof(MyThrust), "UpdateAfterSimulation")]
@@ -54,6 +55,7 @@ namespace RealisticSoundPlus.Patches
 
                 emitter.VolumeMultiplier = baseVolume * smoothedMultiplier;
                 BaseVolumeByEmitter[emitter] = baseVolume;
+                _hasAppliedThisSession = true;
 
                 if (++_patchHits == 1)
                     MyLog.Default.WriteLineAndConsole("[RealisticSoundPlus] Per-thruster spatial audio is active with de-click smoothing.");
@@ -65,6 +67,20 @@ namespace RealisticSoundPlus.Patches
             }
         }
 
+
+        public static bool CanOwnVanillaShipLayer()
+        {
+            return SettingsManager.Current.SpatialAudioEnabled && !_disabled && _hasAppliedThisSession;
+        }
+
+        public static void ResetRuntimeState()
+        {
+            BaseVolumeByEmitter.Clear();
+            SmoothStatesByEmitter.Clear();
+            _disabled = false;
+            _hasAppliedThisSession = false;
+            _patchHits = 0;
+        }
         private static float CalculateSpatialScale(MyThrust thruster)
         {
             if (!thruster.IsWorking)

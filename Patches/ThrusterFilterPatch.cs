@@ -57,12 +57,21 @@ namespace RealisticSoundPlus.Patches
             }
         }
 
+
+        public static void ResetRuntimeState()
+        {
+            _disabled = false;
+            _patchHits = 0;
+            _speedAmbientFilterHits = 0;
+        }
         private static string GetSpeedAmbientEffectSubtype(MyEntity3DSoundEmitter emitter)
         {
-            if (ExteriorSoundTransmission.IsListenerInsideShip())
-                return SelectAtmosphereAwareFilter(SettingsManager.GetSpeedAmbientFilterEffectSubtype(), emitter.SourcePosition, true);
+            bool engineAdjacent = IsEngineAdjacentSpeedCue(emitter);
+            string configuredFilter = engineAdjacent
+                ? SettingsManager.GetEngineFilterEffectSubtype()
+                : SettingsManager.GetSpeedAmbientFilterEffectSubtype();
 
-            return SelectAtmosphereAwareFilter(SettingsManager.GetEngineFilterEffectSubtype(), emitter.SourcePosition, false);
+            return SelectAtmosphereAwareFilter(configuredFilter, emitter.SourcePosition, ExteriorSoundTransmission.IsListenerInsideShip());
         }
 
         private static string GetExteriorEffectSubtype(MyEntity3DSoundEmitter emitter)
@@ -103,6 +112,20 @@ namespace RealisticSoundPlus.Patches
             return Math.Max(
                 ExteriorSoundTransmission.GetAtmosphericPressure(listenerPosition),
                 ExteriorSoundTransmission.GetAtmosphericPressure(sourcePosition));
+        }
+        private static bool IsEngineAdjacentSpeedCue(MyEntity3DSoundEmitter emitter)
+        {
+            return IsEngineAdjacentSpeedCue(emitter.SoundId.ToString())
+                || IsEngineAdjacentSpeedCue(emitter.Sound?.CueEnum.ToString())
+                || IsEngineAdjacentSpeedCue(emitter.SecondarySound?.CueEnum.ToString());
+        }
+
+        private static bool IsEngineAdjacentSpeedCue(string cueName)
+        {
+            if (string.IsNullOrWhiteSpace(cueName))
+                return false;
+
+            return EngineAudioClassifier.IsKnownEngineAdjacentSpeedCue(cueName);
         }
         public static bool IsEngineAudioEmitter(MyEntity3DSoundEmitter emitter)
         {
