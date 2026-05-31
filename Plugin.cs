@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using HarmonyLib;
 using VRage.Plugins;
 using VRage.Utils;
@@ -11,10 +11,13 @@ namespace RealisticSoundPlus
 
         private Harmony _harmony;
         private bool _disposed;
+        private int _settingsPollFrame;
 
         public void Init(object gameInstance)
         {
             MyLog.Default.WriteLineAndConsole("[RealisticSoundPlus] Loading realistic-audio correction plugin.");
+
+            SettingsManager.LoadOrCreate();
 
             _harmony = new Harmony(HarmonyId);
             _harmony.PatchAll(typeof(Plugin).Assembly);
@@ -24,6 +27,13 @@ namespace RealisticSoundPlus
 
         public void Update()
         {
+            SettingsCommands.TryRegister();
+
+            if (++_settingsPollFrame >= 300)
+            {
+                _settingsPollFrame = 0;
+                SettingsManager.ReloadIfChanged();
+            }
         }
 
         public void Dispose()
@@ -35,6 +45,7 @@ namespace RealisticSoundPlus
 
             try
             {
+                SettingsCommands.Unregister();
                 _harmony?.UnpatchAll(HarmonyId);
                 MyLog.Default.WriteLineAndConsole("[RealisticSoundPlus] Unloaded.");
             }

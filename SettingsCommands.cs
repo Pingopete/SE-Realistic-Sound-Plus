@@ -1,0 +1,101 @@
+using System;
+using System.Globalization;
+using Sandbox.ModAPI;
+using VRage.Game.ModAPI;
+using VRage.Utils;
+
+namespace RealisticSoundPlus
+{
+    internal static class SettingsCommands
+    {
+        private const string Prefix = "/rsp";
+        private static bool _registered;
+
+        public static void TryRegister()
+        {
+            if (_registered || MyAPIGateway.Utilities == null)
+                return;
+
+            MyAPIGateway.Utilities.MessageEntered += OnMessageEntered;
+            _registered = true;
+            MyLog.Default.WriteLineAndConsole("[RealisticSoundPlus] Chat commands registered. Use /rsp help.");
+        }
+
+        public static void Unregister()
+        {
+            if (!_registered || MyAPIGateway.Utilities == null)
+                return;
+
+            MyAPIGateway.Utilities.MessageEntered -= OnMessageEntered;
+            _registered = false;
+        }
+
+        private static void OnMessageEntered(string messageText, ref bool sendToOthers)
+        {
+            if (string.IsNullOrWhiteSpace(messageText) || !messageText.StartsWith(Prefix, StringComparison.OrdinalIgnoreCase))
+                return;
+
+            sendToOthers = false;
+            Handle(messageText.Substring(Prefix.Length).Trim());
+        }
+
+        private static void Handle(string commandText)
+        {
+            string[] parts = commandText.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            string command = parts.Length == 0 ? "show" : parts[0].ToLowerInvariant();
+
+            try
+            {
+                switch (command)
+                {
+                    case "help":
+                    case "?":
+                        Notify("/rsp show | /rsp gain 1.5 | /rsp muffling 0.7 | /rsp curve 0.65 | /rsp control 0.4 | /rsp save | /rsp reload");
+                        break;
+                    case "show":
+                        Notify(SettingsManager.Summary());
+                        break;
+                    case "save":
+                        SettingsManager.Save();
+                        Notify("Saved. " + SettingsManager.Summary());
+                        break;
+                    case "reload":
+                        SettingsManager.Load();
+                        Notify("Reloaded. " + SettingsManager.Summary());
+                        break;
+                    default:
+                        SetValue(command, parts);
+                        break;
+                }
+            }
+            catch (Exception ex)
+            {
+                Notify("Command failed: " + ex.Message);
+                MyLog.Default.WriteLine("[RealisticSoundPlus] Command failed: " + ex);
+            }
+        }
+
+        private static void SetValue(string name, string[] parts)
+        {
+            if (parts.Length < 2 || !float.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out float value))
+            {
+                Notify("Usage: /rsp " + name + " <number>");
+                return;
+            }
+
+            if (!SettingsManager.TrySet(name, value))
+            {
+                Notify("Unknown setting: " + name + ". Use /rsp help.");
+                return;
+            }
+
+            Notify(SettingsManager.Summary());
+        }
+
+        private static void Notify(string message)
+        {
+            if (MyAPIGateway.Utilities != null)
+                MyAPIGateway.Utilities.ShowMessage("Realistic Sound+", message);
+        }
+    }
+}

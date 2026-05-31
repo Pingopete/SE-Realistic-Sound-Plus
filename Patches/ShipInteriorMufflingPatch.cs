@@ -13,11 +13,6 @@ namespace RealisticSoundPlus.Patches
     [HarmonyPatch(typeof(MyShipSoundComponent), "UpdateVolumes")]
     internal static class ShipInteriorMufflingPatch
     {
-        private const float InteriorBaseTransmission = 0.82f;
-        private const float NearDistance = 4f;
-        private const float FarDistance = 36f;
-        private const float FarDistanceTransmission = 0.52f;
-
         private static readonly int[] ShipEmitterIndexes =
         {
             2, 3, 4,
@@ -109,10 +104,12 @@ namespace RealisticSoundPlus.Patches
 
         private static float CalculateInteriorTransmission(Vector3D listenerPosition, Vector3D sourcePosition)
         {
+            var settings = SettingsManager.Current;
             double distance = Vector3D.Distance(listenerPosition, sourcePosition);
-            float distanceBlend = Clamp01((float)((distance - NearDistance) / (FarDistance - NearDistance)));
-            float distanceTransmission = Lerp(1f, FarDistanceTransmission, distanceBlend);
-            return Clamp01(InteriorBaseTransmission * distanceTransmission);
+            float distanceBlend = Clamp01((float)((distance - settings.NearDistance) / (settings.FarDistance - settings.NearDistance)));
+            float distanceTransmission = Lerp(1f, settings.FarDistanceTransmission, distanceBlend);
+            float fullTransmission = Clamp01(settings.InteriorBaseTransmission * distanceTransmission);
+            return Clamp01(1f - (1f - fullTransmission) * settings.MufflingStrength);
         }
 
         private static float Lerp(float from, float to, float amount)

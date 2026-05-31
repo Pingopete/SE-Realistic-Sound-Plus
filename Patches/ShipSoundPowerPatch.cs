@@ -14,12 +14,6 @@ namespace RealisticSoundPlus.Patches
         private const float PowerChangeSpeedUp = 0.006666667f;
         private const float PowerChangeSpeedDown = 0.01f;
         private const float MinimumAudibleForce = 10f;
-        private const float AudioCurveExponent = 0.72f;
-        private const float ControlInfluence = 0.3f;
-        private const float ThrustInfluence = 0.7f;
-        private const float MinimumShipPresence = 0.35f;
-        private const float QuietShipForceLog10 = 4.0f;
-        private const float LoudShipForceLog10 = 7.0f;
         private const float NormalizedVectorMagnitude = 1.7320508f;
 
         private static readonly FieldInfo ShipThrustersField = AccessTools.Field(typeof(MyShipSoundComponent), "m_shipThrusters");
@@ -72,13 +66,16 @@ namespace RealisticSoundPlus.Patches
             if (maxForce <= MinimumAudibleForce)
                 return 0f;
 
+            var settings = SettingsManager.Current;
             float thrustLoad = Clamp01(activeForce / maxForce);
             float controlLoad = GetControlLoad(thrusters, maxForce);
-            float requestedLoad = Clamp01(thrustLoad * ThrustInfluence + Math.Max(thrustLoad, controlLoad) * ControlInfluence);
-            float shapedLoad = Clamp01((float)Math.Pow(requestedLoad, AudioCurveExponent));
-            float shipPresence = CalculateShipPresence(maxForce);
+            float controlInfluence = settings.ControlInfluence;
+            float thrustInfluence = 1f - controlInfluence;
+            float requestedLoad = Clamp01(thrustLoad * thrustInfluence + Math.Max(thrustLoad, controlLoad) * controlInfluence);
+            float shapedLoad = Clamp01((float)Math.Pow(requestedLoad, settings.AudioCurveExponent));
+            float shipPresence = CalculateShipPresence(maxForce, settings);
 
-            return Clamp01(shapedLoad * shipPresence);
+            return Clamp01(shapedLoad * shipPresence * settings.EngineGain);
         }
 
         private static float GetControlLoad(MyEntityThrustComponent thrusters, float maxForce)
@@ -100,11 +97,11 @@ namespace RealisticSoundPlus.Patches
             return Clamp01(magnitude / NormalizedVectorMagnitude);
         }
 
-        private static float CalculateShipPresence(float maxForce)
+        private static float CalculateShipPresence(float maxForce, RealisticSoundPlusSettings settings)
         {
             float forceLog = (float)Math.Log10(Math.Max(maxForce, 1f));
-            float normalized = Clamp01((forceLog - QuietShipForceLog10) / (LoudShipForceLog10 - QuietShipForceLog10));
-            return MinimumShipPresence + (1f - MinimumShipPresence) * normalized;
+            float normalized = Clamp01((forceLog - settings.QuietShipForceLog10) / (settings.LoudShipForceLog10 - settings.QuietShipForceLog10));
+            return settings.MinimumShipPresence + (1f - settings.MinimumShipPresence) * normalized;
         }
 
         private static float CombinedAxisMagnitude(Vector3 positive, Vector3 negative)

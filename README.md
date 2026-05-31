@@ -24,3 +24,19 @@ The first implementation should be intentionally small:
 - Overall engine presence is scaled by available thrust so very small ships should not sound as large as heavy ships at the same throttle percentage.
 - Interior ship-engine muffling applies an extra distance-based transmission reduction to vanilla ship/thruster emitters when the listener is inside the ship.
 - Cockpit/control-seat mode is forced to keep ship-engine emitters spatial instead of switching to vanilla louder 2D ship audio.
+## Runtime Tuning
+
+Settings are saved to `%APPDATA%\SpaceEngineers\RealisticSoundPlus.xml` and hot-reloaded every few seconds while the game is running.
+
+In-game chat commands:
+
+- `/rsp show`
+- `/rsp gain 1.5`
+- `/rsp muffling 0.7`
+- `/rsp curve 0.65`
+- `/rsp control 0.4`
+- `/rsp presence 0.45`
+- `/rsp interior 0.9`
+- `/rsp far 0.6`
+- `/rsp save`
+- `/rsp reload`
