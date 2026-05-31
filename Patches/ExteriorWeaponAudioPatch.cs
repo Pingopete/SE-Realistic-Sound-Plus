@@ -18,30 +18,30 @@ namespace RealisticSoundPlus.Patches
 
         [HarmonyPatch(typeof(MyEntity3DSoundEmitter), "PlaySound", new[] { typeof(MySoundPair), typeof(bool), typeof(bool), typeof(bool), typeof(bool), typeof(bool), typeof(bool?), typeof(bool) })]
         [HarmonyPrefix]
-        private static void BeforePlaySoundPair(MyEntity3DSoundEmitter __instance, MySoundPair cuePair)
+        private static void BeforePlaySoundPair(MyEntity3DSoundEmitter __instance, MySoundPair soundId)
         {
-            MarkIfExteriorWeaponAudioEmitter(__instance, cuePair?.ToString());
+            MarkIfExteriorWeaponAudioEmitter(__instance, soundId?.ToString());
         }
 
         [HarmonyPatch(typeof(MyEntity3DSoundEmitter), "PlaySound", new[] { typeof(MySoundPair), typeof(bool), typeof(bool), typeof(bool), typeof(bool), typeof(bool), typeof(bool?), typeof(bool) })]
         [HarmonyPostfix]
-        private static void AfterPlaySoundPair(MyEntity3DSoundEmitter __instance, MySoundPair cuePair)
+        private static void AfterPlaySoundPair(MyEntity3DSoundEmitter __instance, MySoundPair soundId)
         {
-            Apply(__instance, cuePair?.ToString());
+            Apply(__instance, soundId?.ToString());
         }
 
         [HarmonyPatch(typeof(MyEntity3DSoundEmitter), "PlaySoundWithDistance", new[] { typeof(MyCueId), typeof(bool), typeof(bool), typeof(bool), typeof(bool), typeof(bool), typeof(bool), typeof(bool?) })]
         [HarmonyPrefix]
-        private static void BeforePlaySoundWithDistance(MyEntity3DSoundEmitter __instance, MyCueId cueId)
+        private static void BeforePlaySoundWithDistance(MyEntity3DSoundEmitter __instance, MyCueId soundId)
         {
-            MarkIfExteriorWeaponAudioEmitter(__instance, cueId.ToString());
+            MarkIfExteriorWeaponAudioEmitter(__instance, soundId.ToString());
         }
 
         [HarmonyPatch(typeof(MyEntity3DSoundEmitter), "PlaySoundWithDistance", new[] { typeof(MyCueId), typeof(bool), typeof(bool), typeof(bool), typeof(bool), typeof(bool), typeof(bool), typeof(bool?) })]
         [HarmonyPostfix]
-        private static void AfterPlaySoundWithDistance(MyEntity3DSoundEmitter __instance, MyCueId cueId)
+        private static void AfterPlaySoundWithDistance(MyEntity3DSoundEmitter __instance, MyCueId soundId)
         {
-            Apply(__instance, cueId.ToString());
+            Apply(__instance, soundId.ToString());
         }
 
         public static bool IsExteriorWeaponAudioEmitter(MyEntity3DSoundEmitter emitter)
