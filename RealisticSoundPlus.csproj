@@ -9,6 +9,7 @@
     <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
     <GameBin>C:\Program Files (x86)\Steam\steamapps\common\SpaceEngineers\Bin64</GameBin>
     <PulsarLocal>C:\Users\Pete\Desktop\pulsar\Legacy\Local\RealisticSoundPlus</PulsarLocal>
+    <DeployToPulsarOnBuild>true</DeployToPulsarOnBuild>
   </PropertyGroup>
 
   <ItemGroup>
@@ -46,7 +47,7 @@
     </Reference>
   </ItemGroup>
 
-  <Target Name="DeployToPulsar" AfterTargets="Build">
+  <Target Name="DeployToPulsar" AfterTargets="Build" Condition="'$(DeployToPulsarOnBuild)' == 'true'">
     <MakeDir Directories="$(PulsarLocal)" />
     <Copy SourceFiles="$(TargetPath)" DestinationFiles="$(PulsarLocal)\Realistic Sound Plus.dll" />
     <Copy SourceFiles="manifest.xml" DestinationFiles="$(PulsarLocal)\manifest.xml" Condition="Exists('manifest.xml')" />
