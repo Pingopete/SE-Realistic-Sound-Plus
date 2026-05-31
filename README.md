@@ -46,3 +46,5 @@ In-game chat commands:
 - `/rsp filter realship` - forces Keen's `realShipFilter` effect on known thruster emitters. This is very muffled and uses a 300 Hz low-pass.
 - `/rsp filter deep` - forces Keen's generic `LowPass` effect on known thruster emitters. This is the most aggressive/deep test mode.
 - `/rsp reload` - reloads the XML config from disk.
+
+- /rsp sounds - toggles a centered live overlay of currently playing audio cue names, grouped by sound/music/HUD source voices. Use /rsp sounds off to hide it.

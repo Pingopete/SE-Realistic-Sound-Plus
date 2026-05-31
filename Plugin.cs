@@ -28,6 +28,7 @@ namespace RealisticSoundPlus
         public void Update()
         {
             SettingsCommands.TryRegister();
+            AudioDebugOverlay.Draw();
 
             if (++_settingsPollFrame >= 300)
             {

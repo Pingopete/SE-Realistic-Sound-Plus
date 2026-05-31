@@ -50,7 +50,7 @@ namespace RealisticSoundPlus
                 {
                     case "help":
                     case "?":
-                        Notify("/rsp show | /rsp gain 1.5 | /rsp muffling 0.7 | /rsp curve 0.65 | /rsp control 0.4 | /rsp filter cockpit | /rsp save | /rsp reload");
+                        Notify("/rsp show | /rsp gain 1.5 | /rsp muffling 0.7 | /rsp curve 0.65 | /rsp control 0.4 | /rsp filter cockpit | /rsp sounds | /rsp save | /rsp reload");
                         break;
                     case "show":
                         Notify(SettingsManager.Summary());
@@ -66,6 +66,10 @@ namespace RealisticSoundPlus
                     case "filter":
                         SetFilter(parts);
                         break;
+                    case "sounds":
+                    case "audio":
+                        ToggleAudioOverlay(parts);
+                        break;
                     default:
                         SetValue(command, parts);
                         break;
@@ -79,6 +83,29 @@ namespace RealisticSoundPlus
         }
 
 
+
+        private static void ToggleAudioOverlay(string[] parts)
+        {
+            if (parts.Length >= 2)
+            {
+                string value = parts[1].ToLowerInvariant();
+                if (value == "on" || value == "1" || value == "true")
+                    AudioDebugOverlay.SetEnabled(true);
+                else if (value == "off" || value == "0" || value == "false")
+                    AudioDebugOverlay.SetEnabled(false);
+                else
+                {
+                    Notify("Usage: /rsp sounds [on|off]");
+                    return;
+                }
+            }
+            else
+            {
+                AudioDebugOverlay.Toggle();
+            }
+
+            Notify("Audio debug overlay " + (AudioDebugOverlay.Enabled ? "on" : "off") + ".");
+        }
         private static void SetFilter(string[] parts)
         {
             if (parts.Length < 2)
