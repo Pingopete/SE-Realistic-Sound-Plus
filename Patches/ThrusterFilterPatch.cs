@@ -46,6 +46,9 @@ namespace RealisticSoundPlus.Patches
             if (IsThrusterAudioEmitter(emitter) || IsHydrogenEngineAudioEmitter(emitter))
                 return true;
 
+            if (SettingsManager.Current.AmbientMufflingEnabled && IsAmbientAudioEmitter(emitter))
+                return true;
+
             return EngineAudioClassifier.IsKnownEngineCue(emitter.SoundId)
                 || EngineAudioClassifier.IsKnownEngineCue(emitter.Sound?.CueEnum)
                 || EngineAudioClassifier.IsKnownEngineCue(emitter.SecondarySound?.CueEnum);
@@ -60,6 +63,19 @@ namespace RealisticSoundPlus.Patches
                 return true;
 
             return emitter.Entity is MyThrust;
+        }
+
+        public static bool IsAmbientAudioEmitter(MyEntity3DSoundEmitter emitter)
+        {
+            if (emitter == null)
+                return false;
+
+            if (HydrogenEngineAudioPatch.IsKnownAmbientEmitter(emitter))
+                return true;
+
+            return EngineAudioClassifier.IsKnownAmbientCue(emitter.SoundId)
+                || EngineAudioClassifier.IsKnownAmbientCue(emitter.Sound?.CueEnum)
+                || EngineAudioClassifier.IsKnownAmbientCue(emitter.SecondarySound?.CueEnum);
         }
 
         public static bool IsHydrogenEngineAudioEmitter(MyEntity3DSoundEmitter emitter)

@@ -51,7 +51,7 @@ namespace RealisticSoundPlus
                 float startY = Math.Max(80f, viewportSize.Y * 0.12f);
 
                 DrawLine(0, "Realistic Sound+ audio debug  |  /rsp sounds off", HeaderColor, 0.68f, centerX, startY, rowHeight);
-                DrawLine(1, "type  eng  count  volume  cue", HeaderColor, 0.58f, centerX, startY, rowHeight);
+                DrawLine(1, "type  eng  amb  count  volume  cue", HeaderColor, 0.58f, centerX, startY, rowHeight);
 
                 if (rows.Count == 0)
                 {
@@ -64,9 +64,10 @@ namespace RealisticSoundPlus
                     Row row = rows[i];
                     string text = string.Format(
                         CultureInfo.InvariantCulture,
-                        "{0}    {1}   x{2,2}   {3:0.00}   {4}",
+                        "{0}    {1}    {2}   x{3,2}   {4:0.00}   {5}",
                         row.Kind,
                         row.EngineCandidate ? "*" : "-",
+                        row.AmbientCandidate ? "*" : "-",
                         row.Count,
                         row.Score,
                         row.CueName);
@@ -101,7 +102,13 @@ namespace RealisticSoundPlus
                 string key = kind + ":" + cueName;
                 if (!byCue.TryGetValue(key, out Row row))
                 {
-                    row = new Row { Kind = kind, CueName = cueName, EngineCandidate = EngineAudioClassifier.IsKnownEngineCue(cueName) };
+                    row = new Row
+                    {
+                        Kind = kind,
+                        CueName = cueName,
+                        EngineCandidate = EngineAudioClassifier.IsKnownEngineCue(cueName),
+                        AmbientCandidate = EngineAudioClassifier.IsKnownAmbientCue(cueName)
+                    };
                     byCue[key] = row;
                 }
 
@@ -147,6 +154,7 @@ namespace RealisticSoundPlus
             public int Count;
             public float Score;
             public bool EngineCandidate;
+            public bool AmbientCandidate;
         }
     }
 }

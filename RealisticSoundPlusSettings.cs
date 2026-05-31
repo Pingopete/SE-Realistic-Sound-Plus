@@ -20,6 +20,7 @@ namespace RealisticSoundPlus
         public float FarDistance { get; set; } = 36f;
         public float FarDistanceTransmission { get; set; } = 0.52f;
         public string EngineFilter { get; set; } = "Off";
+        public bool AmbientMufflingEnabled { get; set; }
     }
 
     internal static class SettingsManager
@@ -90,7 +91,7 @@ namespace RealisticSoundPlus
         {
             return string.Format(
                 CultureInfo.InvariantCulture,
-                "gain={0:0.00}, curve={1:0.00}, control={2:0.00}, presenceMin={3:0.00}, muffling={4:0.00}, interiorBase={5:0.00}, farTransmission={6:0.00}, filter={7}",
+                "gain={0:0.00}, curve={1:0.00}, control={2:0.00}, presenceMin={3:0.00}, muffling={4:0.00}, interiorBase={5:0.00}, farTransmission={6:0.00}, filter={7}, ambient={8}",
                 Current.EngineGain,
                 Current.AudioCurveExponent,
                 Current.ControlInfluence,
@@ -98,7 +99,8 @@ namespace RealisticSoundPlus
                 Current.MufflingStrength,
                 Current.InteriorBaseTransmission,
                 Current.FarDistanceTransmission,
-                Current.EngineFilter);
+                Current.EngineFilter,
+                Current.AmbientMufflingEnabled ? "on" : "off");
         }
 
         public static bool TrySet(string name, float value)
@@ -152,6 +154,37 @@ namespace RealisticSoundPlus
             return true;
         }
 
+
+        public static bool TrySetAmbient(string value)
+        {
+            if (!TryParseBool(value, out bool enabled))
+                return false;
+
+            Current.AmbientMufflingEnabled = enabled;
+            return true;
+        }
+
+        private static bool TryParseBool(string value, out bool enabled)
+        {
+            switch ((value ?? string.Empty).Trim().ToLowerInvariant())
+            {
+                case "on":
+                case "1":
+                case "true":
+                case "yes":
+                    enabled = true;
+                    return true;
+                case "off":
+                case "0":
+                case "false":
+                case "no":
+                    enabled = false;
+                    return true;
+                default:
+                    enabled = false;
+                    return false;
+            }
+        }
         public static string GetEngineFilterEffectSubtype()
         {
             switch (NormalizeFilter(Current.EngineFilter))

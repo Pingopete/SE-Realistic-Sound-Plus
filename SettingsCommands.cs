@@ -50,7 +50,7 @@ namespace RealisticSoundPlus
                 {
                     case "help":
                     case "?":
-                        Notify("/rsp show | /rsp gain 1.5 | /rsp muffling 0.7 | /rsp curve 0.65 | /rsp control 0.4 | /rsp filter cockpit | /rsp sounds | /rsp save | /rsp reload");
+                        Notify("/rsp show | /rsp gain 1.5 | /rsp muffling 0.7 | /rsp curve 0.65 | /rsp control 0.4 | /rsp filter cockpit | /rsp ambient on | /rsp sounds | /rsp save | /rsp reload");
                         break;
                     case "show":
                         Notify(SettingsManager.Summary());
@@ -65,6 +65,9 @@ namespace RealisticSoundPlus
                         break;
                     case "filter":
                         SetFilter(parts);
+                        break;
+                    case "ambient":
+                        SetAmbient(parts);
                         break;
                     case "sounds":
                     case "audio":
@@ -81,8 +84,6 @@ namespace RealisticSoundPlus
                 MyLog.Default.WriteLine("[RealisticSoundPlus] Command failed: " + ex);
             }
         }
-
-
 
         private static void ToggleAudioOverlay(string[] parts)
         {
@@ -106,6 +107,24 @@ namespace RealisticSoundPlus
 
             Notify("Audio debug overlay " + (AudioDebugOverlay.Enabled ? "on" : "off") + ".");
         }
+
+        private static void SetAmbient(string[] parts)
+        {
+            if (parts.Length < 2)
+            {
+                Notify("Usage: /rsp ambient <on|off>");
+                return;
+            }
+
+            if (!SettingsManager.TrySetAmbient(parts[1]))
+            {
+                Notify("Usage: /rsp ambient <on|off>");
+                return;
+            }
+
+            Notify(SettingsManager.Summary());
+        }
+
         private static void SetFilter(string[] parts)
         {
             if (parts.Length < 2)
@@ -122,6 +141,7 @@ namespace RealisticSoundPlus
 
             Notify(SettingsManager.Summary());
         }
+
         private static void SetValue(string name, string[] parts)
         {
             if (parts.Length < 2 || !float.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out float value))
