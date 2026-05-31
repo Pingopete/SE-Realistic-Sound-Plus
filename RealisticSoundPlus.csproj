@@ -1,7 +1,7 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net48</TargetFramework>
-    <AssemblyName>plugin</AssemblyName>
+    <AssemblyName>Realistic Sound Plus</AssemblyName>
     <RootNamespace>RealisticSoundPlus</RootNamespace>
     <LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>
@@ -48,7 +48,7 @@
 
   <Target Name="DeployToPulsar" AfterTargets="Build">
     <MakeDir Directories="$(PulsarLocal)" />
-    <Copy SourceFiles="$(TargetPath)" DestinationFiles="$(PulsarLocal)\plugin.dll" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFiles="$(PulsarLocal)\Realistic Sound Plus.dll" />
     <Copy SourceFiles="manifest.xml" DestinationFiles="$(PulsarLocal)\manifest.xml" Condition="Exists('manifest.xml')" />
   </Target>
 </Project>
