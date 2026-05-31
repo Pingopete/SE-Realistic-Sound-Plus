@@ -104,19 +104,7 @@ namespace RealisticSoundPlus.Patches
 
         private static float CalculateTransmission(Vector3D sourcePosition)
         {
-            var settings = SettingsManager.Current;
-            if (settings.MufflingStrength <= 0f)
-                return 1f;
-
-            Vector3D listenerPosition = MyAPIGateway.Session?.Camera?.Position ?? Vector3D.Zero;
-            if (listenerPosition == Vector3D.Zero)
-                return 1f;
-
-            double distance = Vector3D.Distance(listenerPosition, sourcePosition);
-            float distanceBlend = Clamp01((float)((distance - settings.NearDistance) / (settings.FarDistance - settings.NearDistance)));
-            float distanceTransmission = Lerp(1f, settings.FarDistanceTransmission, distanceBlend);
-            float fullTransmission = Clamp01(settings.InteriorBaseTransmission * distanceTransmission);
-            return Clamp01(1f - (1f - fullTransmission) * settings.MufflingStrength);
+            return ExteriorSoundTransmission.Calculate(sourcePosition);
         }
 
         private static float RestoreEmitter(MyEntity3DSoundEmitter emitter)
@@ -130,10 +118,6 @@ namespace RealisticSoundPlus.Patches
             return baseVolume;
         }
 
-        private static float Lerp(float from, float to, float amount)
-        {
-            return from + (to - from) * amount;
-        }
 
         private static float Clamp01(float value)
         {

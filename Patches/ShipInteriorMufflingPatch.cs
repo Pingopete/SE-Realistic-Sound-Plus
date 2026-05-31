@@ -61,7 +61,7 @@ namespace RealisticSoundPlus.Patches
 
                     KnownThrusterEmitters.Add(emitter);
                     float baseVolume = RestoreEmitter(emitter);
-                    float transmission = CalculateInteriorTransmission(listenerPosition, emitter.SourcePosition);
+                    float transmission = ExteriorSoundTransmission.Calculate(listenerPosition, emitter.SourcePosition);
                     if (SettingsManager.Current.SpatialAudioEnabled)
                         transmission *= SettingsManager.Current.SpatialCentralBlend;
 
@@ -112,20 +112,6 @@ namespace RealisticSoundPlus.Patches
             return restored;
         }
 
-        private static float CalculateInteriorTransmission(Vector3D listenerPosition, Vector3D sourcePosition)
-        {
-            var settings = SettingsManager.Current;
-            double distance = Vector3D.Distance(listenerPosition, sourcePosition);
-            float distanceBlend = Clamp01((float)((distance - settings.NearDistance) / (settings.FarDistance - settings.NearDistance)));
-            float distanceTransmission = Lerp(1f, settings.FarDistanceTransmission, distanceBlend);
-            float fullTransmission = Clamp01(settings.InteriorBaseTransmission * distanceTransmission);
-            return Clamp01(1f - (1f - fullTransmission) * settings.MufflingStrength);
-        }
-
-        private static float Lerp(float from, float to, float amount)
-        {
-            return from + (to - from) * amount;
-        }
 
         private static float Clamp01(float value)
         {

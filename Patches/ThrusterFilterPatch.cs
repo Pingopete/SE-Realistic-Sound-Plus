@@ -22,7 +22,7 @@ namespace RealisticSoundPlus.Patches
                 if (!IsEngineAudioEmitter(__instance))
                     return;
 
-                if (SettingsManager.Current.MufflingStrength <= 0f)
+                if (ExteriorSoundTransmission.CalculateEffectiveMufflingStrength(__instance.SourcePosition) <= 0f)
                 {
                     __result = MyStringHash.NullOrEmpty;
                     return;

@@ -19,6 +19,7 @@ namespace RealisticSoundPlus
         public float NearDistance { get; set; } = 4f;
         public float FarDistance { get; set; } = 36f;
         public float FarDistanceTransmission { get; set; } = 1.0f;
+        public float AtmosphericMufflingFloor { get; set; } = 0.5f;
         public string EngineFilter { get; set; } = "RealShip";
         public bool AmbientMufflingEnabled { get; set; }
         public bool SpatialAudioEnabled { get; set; } = true;
@@ -94,7 +95,7 @@ namespace RealisticSoundPlus
         {
             return string.Format(
                 CultureInfo.InvariantCulture,
-                "gain={0:0.00}, curve={1:0.00}, control={2:0.00}, presenceMin={3:0.00}, muffling={4:0.00}, interiorBase={5:0.00}, farTransmission={6:0.00}, filter={7}, ambient={8}, spatial={9}, spatialGain={10:0.00}, central={11:0.00}",
+                "gain={0:0.00}, curve={1:0.00}, control={2:0.00}, presenceMin={3:0.00}, muffling={4:0.00}, interiorBase={5:0.00}, farTransmission={6:0.00}, filter={7}, ambient={8}, spatial={9}, spatialGain={10:0.00}, central={11:0.00}, atmosphereFloor={12:0.00}",
                 Current.EngineGain,
                 Current.AudioCurveExponent,
                 Current.ControlInfluence,
@@ -106,7 +107,8 @@ namespace RealisticSoundPlus
                 Current.AmbientMufflingEnabled ? "on" : "off",
                 Current.SpatialAudioEnabled ? "on" : "off",
                 Current.SpatialEmitterGain,
-                Current.SpatialCentralBlend);
+                Current.SpatialCentralBlend,
+                Current.AtmosphericMufflingFloor);
         }
 
         public static bool TrySet(string name, float value)
@@ -140,6 +142,11 @@ namespace RealisticSoundPlus
                 case "far":
                 case "fartransmission":
                     Current.FarDistanceTransmission = value;
+                    break;
+                case "atmospherefloor":
+                case "atmosphericfloor":
+                case "atmfloor":
+                    Current.AtmosphericMufflingFloor = value;
                     break;
                 case "spatialgain":
                 case "spatialemittergain":
@@ -270,6 +277,7 @@ namespace RealisticSoundPlus
             Current.NearDistance = Clamp(Current.NearDistance, 0f, 100f);
             Current.FarDistance = Math.Max(Current.NearDistance + 1f, Clamp(Current.FarDistance, 1f, 500f));
             Current.FarDistanceTransmission = Clamp(Current.FarDistanceTransmission, 0.05f, 1f);
+            Current.AtmosphericMufflingFloor = Clamp(Current.AtmosphericMufflingFloor, 0f, 1f);
             Current.EngineFilter = NormalizeFilter(Current.EngineFilter) ?? "Off";
             Current.SpatialEmitterGain = Clamp(Current.SpatialEmitterGain, 0f, 4f);
             Current.SpatialCentralBlend = Clamp(Current.SpatialCentralBlend, 0f, 1f);
