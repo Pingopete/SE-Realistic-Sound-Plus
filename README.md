@@ -39,7 +39,7 @@ In-game chat commands:
 - `/rsp interior 0.9` - sets the baseline interior transmission for thruster muffling. Higher values are less muffled/louder inside; lower values are more muffled/quieter inside.
 - `/rsp far 0.6` - sets how much thruster sound transmits at far interior distances. Higher values keep distant engines louder/clearer; lower values reduce distant engines more strongly.
 - `/rsp save` - writes the current values to the XML config.
-- `/rsp filter off` - leaves vanilla effect selection unchanged for thruster sounds.
+- `/rsp filter off` - leaves vanilla effect selection unchanged for thruster sounds. Filter modes target both grouped ship thruster audio and individual thruster block emitters.
 - `/rsp filter helmet` - forces Keen's `LowPassHelmet` effect on known thruster emitters. This is the lightest low-pass test mode.
 - `/rsp filter cockpit` - forces Keen's `LowPassCockpit` effect on known thruster emitters. This is the first recommended muffling test mode.
 - `/rsp filter cockpitnooxy` - forces Keen's `LowPassCockpitNoOxy` effect on known thruster emitters. This is a heavier cockpit low-pass.

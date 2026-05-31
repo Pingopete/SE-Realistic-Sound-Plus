@@ -18,7 +18,7 @@ namespace RealisticSoundPlus.Patches
 
             try
             {
-                if (!ShipInteriorMufflingPatch.IsKnownThrusterEmitter(__instance))
+                if (!IsThrusterAudioEmitter(__instance))
                     return;
 
                 string effectSubtype = SettingsManager.GetEngineFilterEffectSubtype();
@@ -35,6 +35,17 @@ namespace RealisticSoundPlus.Patches
                 _disabled = true;
                 MyLog.Default.WriteLineAndConsole("[RealisticSoundPlus] Disabling thruster filter patch after error: " + ex);
             }
+        }
+
+        private static bool IsThrusterAudioEmitter(MyEntity3DSoundEmitter emitter)
+        {
+            if (emitter == null)
+                return false;
+
+            if (ShipInteriorMufflingPatch.IsKnownThrusterEmitter(emitter))
+                return true;
+
+            return emitter.Entity is MyThrust;
         }
     }
 }
