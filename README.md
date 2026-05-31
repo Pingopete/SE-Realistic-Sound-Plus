@@ -25,6 +25,7 @@ The first implementation should be intentionally small:
 - Interior thruster muffling applies an extra distance-based transmission reduction to active thruster emitters when the listener is inside the ship. Optional ambient muffling can also include ship motion loops and selected interior block ambience.
 - Cockpit/control-seat mode is forced to keep ship-engine emitters spatial instead of switching to vanilla louder 2D ship audio.
 - Experimental per-thruster spatial audio can reposition individual thruster emitters at their actual block locations, scale each one by its current thrust output, and reduce the old grid-center thruster layer with a blend control.
+- Exterior weapon/explosion cues use the same vacuum, atmosphere, distance, and filter rules as exterior engine audio.
 ## Runtime Tuning
 
 Settings are saved to `%APPDATA%\SpaceEngineers\RealisticSoundPlus.xml` and hot-reloaded every few seconds while the game is running.
@@ -43,7 +44,7 @@ In-game chat commands:
 - `/rsp spatial on` - enables experimental per-thruster spatial audio. Each thruster emitter is forced 3D, moved to that thruster block location, scaled by that thruster's actual output, and passed through the same XML-backed gain, curve, muffling, distance, and filter settings.
 - `/rsp spatialgain 1.2` - adjusts only the individual thruster emitter layer after the normal engine gain/curve. Raise this if the new localized thrusters are too subtle; lower it if individual nozzles dominate the mix.
 - `/rsp spatialcenter 0.25` - controls how much of Keen's original grid-center thruster layer remains while spatial audio is enabled. `0` removes the centered layer; `1` leaves it at the normal muffled level.
-- `/rsp atmfloor 0.5` - sets how much of the configured muffling remains at full planetary air density. `0.5` means full atmosphere cuts the extra exterior muffling strength in half; vacuum still uses the full configured muffling value.
+- `/rsp atmfloor 0.5` - sets how much of the configured muffling remains at full planetary air density while the listener is inside a ship. `0.5` means full atmosphere cuts the extra exterior muffling strength in half inside; outside in full atmosphere, the extra muffling fades completely to zero. Vacuum still uses the full configured muffling value.
 - `/rsp save` - writes the current values to the XML config.
 - `/rsp filter off` - leaves vanilla effect selection unchanged for thruster sounds. Filter modes target grouped ship thruster audio, hydrogen jet cues, hydrogen engine block emitters, and individual thruster block emitters.
 - `/rsp filter helmet` - forces Keen's `LowPassHelmet` effect on known thruster emitters. This is the lightest low-pass test mode.

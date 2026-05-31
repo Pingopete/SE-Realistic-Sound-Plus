@@ -40,7 +40,10 @@ namespace RealisticSoundPlus.Patches
                 if (emitters == null)
                     return;
 
-                if (!(bool)InsideShipField.GetValue(__instance))
+                bool insideShip = (bool)InsideShipField.GetValue(__instance);
+                ExteriorSoundTransmission.ReportListenerInsideShip(insideShip);
+
+                if (!insideShip)
                 {
                     RestoreEmitters(emitters);
                     return;

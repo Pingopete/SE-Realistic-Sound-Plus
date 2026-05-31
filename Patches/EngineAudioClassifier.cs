@@ -67,6 +67,35 @@ namespace RealisticSoundPlus.Patches
                 || cueName.IndexOf("GravityGen", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
+
+        public static bool IsKnownExteriorWeaponCue(MyCueId? cueId)
+        {
+            if (!cueId.HasValue)
+                return false;
+
+            return IsKnownExteriorWeaponCue(cueId.Value.ToString());
+        }
+
+        public static bool IsKnownExteriorWeaponCue(string cueName)
+        {
+            if (string.IsNullOrWhiteSpace(cueName))
+                return false;
+
+            if (cueName.IndexOf("NoAmmo", StringComparison.OrdinalIgnoreCase) >= 0
+                || cueName.IndexOf("Reload", StringComparison.OrdinalIgnoreCase) >= 0)
+                return false;
+
+            return cueName.StartsWith("ArcWep", StringComparison.OrdinalIgnoreCase)
+                || cueName.StartsWith("RealWep", StringComparison.OrdinalIgnoreCase)
+                || cueName.IndexOf("Missile", StringComparison.OrdinalIgnoreCase) >= 0
+                || cueName.IndexOf("Gatling", StringComparison.OrdinalIgnoreCase) >= 0
+                || cueName.IndexOf("Autocannon", StringComparison.OrdinalIgnoreCase) >= 0
+                || cueName.IndexOf("Railgun", StringComparison.OrdinalIgnoreCase) >= 0
+                || cueName.IndexOf("Calibre", StringComparison.OrdinalIgnoreCase) >= 0
+                || cueName.IndexOf("Warhead", StringComparison.OrdinalIgnoreCase) >= 0
+                || cueName.IndexOf("Explosion", StringComparison.OrdinalIgnoreCase) >= 0
+                || cueName.IndexOf("Expl", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
         private static bool IsKnownShipMotionCue(string cueName)
         {
             return cueName.Equals("ShipLargeIdle", StringComparison.OrdinalIgnoreCase)

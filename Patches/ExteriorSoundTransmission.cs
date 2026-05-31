@@ -8,8 +8,16 @@ namespace RealisticSoundPlus.Patches
 {
     internal static class ExteriorSoundTransmission
     {
+        private static readonly TimeSpan InsideShipReportLifetime = TimeSpan.FromMilliseconds(250);
         private static bool _pressureLookupDisabled;
         private static int _pressureLookupErrors;
+        private static DateTime _lastInsideShipReportUtc = DateTime.MinValue;
+
+        public static void ReportListenerInsideShip(bool insideShip)
+        {
+            if (insideShip)
+                _lastInsideShipReportUtc = DateTime.UtcNow;
+        }
 
         public static float Calculate(Vector3D sourcePosition)
         {
@@ -46,8 +54,17 @@ namespace RealisticSoundPlus.Patches
         private static float CalculateEffectiveMufflingStrength(Vector3D listenerPosition, Vector3D sourcePosition, RealisticSoundPlusSettings settings)
         {
             float pressure = Math.Max(GetAtmosphericPressure(listenerPosition), GetAtmosphericPressure(sourcePosition));
-            float pressureScale = Lerp(1f, settings.AtmosphericMufflingFloor, pressure);
+            float atmosphericFloor = IsListenerInsideShip() ? settings.AtmosphericMufflingFloor : 0f;
+            float pressureScale = Lerp(1f, atmosphericFloor, pressure);
             return Clamp01(settings.MufflingStrength * pressureScale);
+        }
+
+        private static bool IsListenerInsideShip()
+        {
+            if (DateTime.UtcNow - _lastInsideShipReportUtc <= InsideShipReportLifetime)
+                return true;
+
+            return MyAPIGateway.Session?.ControlledObject is IMyShipController;
         }
 
         public static float GetAtmosphericPressure(Vector3D position)
