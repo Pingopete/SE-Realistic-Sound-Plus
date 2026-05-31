@@ -24,6 +24,7 @@ namespace RealisticSoundPlus.Patches
         private static readonly FieldInfo EmittersField = AccessTools.Field(typeof(MyShipSoundComponent), "m_emitters");
         private static readonly FieldInfo InsideShipField = AccessTools.Field(typeof(MyShipSoundComponent), "m_insideShip");
         private static readonly Dictionary<MyEntity3DSoundEmitter, float> LastTransmissionByEmitter = new Dictionary<MyEntity3DSoundEmitter, float>();
+        private static readonly HashSet<MyEntity3DSoundEmitter> KnownThrusterEmitters = new HashSet<MyEntity3DSoundEmitter>();
 
         private static bool _disabled;
         private static int _patchHits;
@@ -58,6 +59,7 @@ namespace RealisticSoundPlus.Patches
                     if (emitter == null)
                         continue;
 
+                    KnownThrusterEmitters.Add(emitter);
                     float baseVolume = RestoreEmitter(emitter);
                     float transmission = CalculateInteriorTransmission(listenerPosition, emitter.SourcePosition);
                     emitter.VolumeMultiplier = baseVolume * transmission;
@@ -85,6 +87,11 @@ namespace RealisticSoundPlus.Patches
                 if (emitter != null)
                     RestoreEmitter(emitter);
             }
+        }
+
+        public static bool IsKnownThrusterEmitter(MyEntity3DSoundEmitter emitter)
+        {
+            return emitter != null && KnownThrusterEmitters.Contains(emitter);
         }
 
         private static float RestoreEmitter(MyEntity3DSoundEmitter emitter)

@@ -50,7 +50,7 @@ namespace RealisticSoundPlus
                 {
                     case "help":
                     case "?":
-                        Notify("/rsp show | /rsp gain 1.5 | /rsp muffling 0.7 | /rsp curve 0.65 | /rsp control 0.4 | /rsp save | /rsp reload");
+                        Notify("/rsp show | /rsp gain 1.5 | /rsp muffling 0.7 | /rsp curve 0.65 | /rsp control 0.4 | /rsp filter cockpit | /rsp save | /rsp reload");
                         break;
                     case "show":
                         Notify(SettingsManager.Summary());
@@ -62,6 +62,9 @@ namespace RealisticSoundPlus
                     case "reload":
                         SettingsManager.Load();
                         Notify("Reloaded. " + SettingsManager.Summary());
+                        break;
+                    case "filter":
+                        SetFilter(parts);
                         break;
                     default:
                         SetValue(command, parts);
@@ -75,6 +78,23 @@ namespace RealisticSoundPlus
             }
         }
 
+
+        private static void SetFilter(string[] parts)
+        {
+            if (parts.Length < 2)
+            {
+                Notify("Usage: /rsp filter <" + SettingsManager.FilterOptions + ">");
+                return;
+            }
+
+            if (!SettingsManager.TrySetFilter(parts[1]))
+            {
+                Notify("Unknown filter. Options: " + SettingsManager.FilterOptions);
+                return;
+            }
+
+            Notify(SettingsManager.Summary());
+        }
         private static void SetValue(string name, string[] parts)
         {
             if (parts.Length < 2 || !float.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out float value))
