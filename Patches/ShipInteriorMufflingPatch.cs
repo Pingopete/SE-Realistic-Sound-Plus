@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
+using Sandbox.Definitions;
 using Sandbox.Game.Entities;
 using Sandbox.Game.EntityComponents;
 using Sandbox.ModAPI;
@@ -23,11 +24,14 @@ namespace RealisticSoundPlus.Patches
 
         private static readonly FieldInfo EmittersField = AccessTools.Field(typeof(MyShipSoundComponent), "m_emitters");
         private static readonly FieldInfo InsideShipField = AccessTools.Field(typeof(MyShipSoundComponent), "m_insideShip");
+        private static readonly FieldInfo ShipGridField = AccessTools.Field(typeof(MyShipSoundComponent), "m_shipGrid");
         private static readonly Dictionary<MyEntity3DSoundEmitter, float> LastTransmissionByEmitter = new Dictionary<MyEntity3DSoundEmitter, float>();
+        private static readonly Dictionary<MyEntity3DSoundEmitter, float> SpeedAmbientBaseVolumeByEmitter = new Dictionary<MyEntity3DSoundEmitter, float>();
         private static readonly HashSet<MyEntity3DSoundEmitter> KnownThrusterEmitters = new HashSet<MyEntity3DSoundEmitter>();
 
         private static bool _disabled;
         private static int _patchHits;
+        private static int _speedAmbientPatchHits;
 
         private static void Postfix(MyShipSoundComponent __instance)
         {
@@ -43,6 +47,7 @@ namespace RealisticSoundPlus.Patches
                 bool insideShip = (bool)InsideShipField.GetValue(__instance);
                 ExteriorSoundTransmission.ReportListenerInsideShip(insideShip);
                 AudioDiagnostics.UpdateGlobal(insideShip);
+                ApplySpeedAmbientWind(__instance, emitters);
 
                 if (!insideShip)
                 {
@@ -87,9 +92,76 @@ namespace RealisticSoundPlus.Patches
         public static void ResetRuntimeState()
         {
             LastTransmissionByEmitter.Clear();
+            SpeedAmbientBaseVolumeByEmitter.Clear();
             KnownThrusterEmitters.Clear();
             _disabled = false;
             _patchHits = 0;
+            _speedAmbientPatchHits = 0;
+        }
+
+        private static void ApplySpeedAmbientWind(MyShipSoundComponent component, MyEntity3DSoundEmitter[] emitters)
+        {
+            if (!SettingsManager.Current.AmbientMufflingEnabled)
+            {
+                RestoreSpeedAmbientEmitters(emitters);
+                return;
+            }
+
+            MyCubeGrid grid = (MyCubeGrid)ShipGridField.GetValue(component);
+            float windScale = CalculateAtmosphericSpeedScale(grid);
+
+            foreach (MyEntity3DSoundEmitter emitter in emitters)
+            {
+                if (!ThrusterFilterPatch.IsSpeedAmbientAudioEmitter(emitter))
+                    continue;
+
+                float baseVolume = RestoreSpeedAmbientEmitter(emitter);
+                float finalMultiplier = baseVolume * windScale;
+                emitter.VolumeMultiplier = finalMultiplier;
+                SpeedAmbientBaseVolumeByEmitter[emitter] = baseVolume;
+                AudioDiagnostics.RecordEmitter(emitter, "speedwind", baseVolume, windScale, windScale, finalMultiplier, emitter.SourcePosition);
+            }
+
+            if (++_speedAmbientPatchHits == 1)
+                MyLog.Default.WriteLineAndConsole("[RealisticSoundPlus] Speed ambient wind volume is controlled by ship speed and atmospheric density.");
+        }
+
+        private static float CalculateAtmosphericSpeedScale(MyCubeGrid grid)
+        {
+            if (grid == null || grid.Physics == null)
+                return 0f;
+
+            float maxSpeed = GetWorldMaxShipSpeed(grid);
+            float speed = (float)grid.Physics.LinearVelocity.Length();
+            float speedScale = Clamp01(speed / maxSpeed);
+            float pressure = ExteriorSoundTransmission.GetAtmosphericPressure(grid.WorldMatrix.Translation);
+            return Clamp01(speedScale * pressure);
+        }
+
+        private static float GetWorldMaxShipSpeed(MyCubeGrid grid)
+        {
+            try
+            {
+                var environment = MyDefinitionManager.Static?.EnvironmentDefinition;
+                if (environment != null)
+                {
+                    float maxSpeed = IsSmallGrid(grid)
+                        ? environment.SmallShipMaxSpeed
+                        : environment.LargeShipMaxSpeed;
+
+                    return Math.Max(maxSpeed, 1f);
+                }
+            }
+            catch
+            {
+            }
+
+            return IsSmallGrid(grid) ? 100f : 150f;
+        }
+
+        private static bool IsSmallGrid(MyCubeGrid grid)
+        {
+            return grid != null && string.Equals(grid.GridSizeEnum.ToString(), "Small", StringComparison.OrdinalIgnoreCase);
         }
 
         private static void RestoreEmitters(MyEntity3DSoundEmitter[] emitters)
@@ -102,6 +174,15 @@ namespace RealisticSoundPlus.Patches
                 MyEntity3DSoundEmitter emitter = emitters[index];
                 if (emitter != null)
                     RestoreEmitter(emitter);
+            }
+        }
+
+        private static void RestoreSpeedAmbientEmitters(MyEntity3DSoundEmitter[] emitters)
+        {
+            foreach (MyEntity3DSoundEmitter emitter in emitters)
+            {
+                if (emitter != null)
+                    RestoreSpeedAmbientEmitter(emitter);
             }
         }
 
@@ -125,6 +206,16 @@ namespace RealisticSoundPlus.Patches
             return restored;
         }
 
+        private static float RestoreSpeedAmbientEmitter(MyEntity3DSoundEmitter emitter)
+        {
+            float volume = emitter.VolumeMultiplier;
+            if (!SpeedAmbientBaseVolumeByEmitter.TryGetValue(emitter, out float baseVolume))
+                return volume;
+
+            SpeedAmbientBaseVolumeByEmitter.Remove(emitter);
+            emitter.VolumeMultiplier = baseVolume;
+            return baseVolume;
+        }
 
         private static float Clamp01(float value)
         {
