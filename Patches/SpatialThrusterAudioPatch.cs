@@ -51,6 +51,9 @@ namespace RealisticSoundPlus.Patches
                 float transmission = CalculateTransmission(sourcePosition);
                 float atmosphereGainScale = ExteriorSoundTransmission.CalculateAtmosphericEngineGainScale(sourcePosition);
                 float targetMultiplier = scale * transmission * atmosphereGainScale;
+                if (ShouldCapInteriorVacuumBoost(sourcePosition))
+                    targetMultiplier = Math.Min(targetMultiplier, transmission);
+
                 float smoothedMultiplier = SmoothMultiplier(emitter, targetMultiplier);
 
                 emitter.VolumeMultiplier = baseVolume * smoothedMultiplier;
@@ -81,6 +84,19 @@ namespace RealisticSoundPlus.Patches
             _disabled = false;
             _hasAppliedThisSession = false;
             _patchHits = 0;
+        }
+
+        private static bool ShouldCapInteriorVacuumBoost(Vector3D sourcePosition)
+        {
+            if (!ExteriorSoundTransmission.IsListenerInsideShip())
+                return false;
+
+            Vector3D listenerPosition = Sandbox.ModAPI.MyAPIGateway.Session?.Camera?.Position ?? Vector3D.Zero;
+            float pressure = listenerPosition == Vector3D.Zero
+                ? ExteriorSoundTransmission.GetAtmosphericPressure(sourcePosition)
+                : ExteriorSoundTransmission.GetListenerSourceAtmosphericPressure(listenerPosition, sourcePosition);
+
+            return pressure < 0.1f;
         }
         private static float CalculateSpatialScale(MyThrust thruster)
         {
