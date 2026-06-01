@@ -12,18 +12,20 @@ namespace RealisticSoundPlus.Patches
         private static bool _pressureLookupDisabled;
         private static int _pressureLookupErrors;
         private static DateTime _lastInsideShipReportUtc = DateTime.MinValue;
+        private static bool _lastInsideShipReport;
 
         public static void ResetRuntimeState()
         {
             _pressureLookupDisabled = false;
             _pressureLookupErrors = 0;
             _lastInsideShipReportUtc = DateTime.MinValue;
+            _lastInsideShipReport = false;
         }
 
         public static void ReportListenerInsideShip(bool insideShip)
         {
-            if (insideShip)
-                _lastInsideShipReportUtc = DateTime.UtcNow;
+            _lastInsideShipReport = insideShip;
+            _lastInsideShipReportUtc = DateTime.UtcNow;
         }
 
         public static float Calculate(Vector3D sourcePosition)
@@ -60,18 +62,23 @@ namespace RealisticSoundPlus.Patches
 
         private static float CalculateEffectiveMufflingStrength(Vector3D listenerPosition, Vector3D sourcePosition, RealisticSoundPlusSettings settings)
         {
-            float pressure = Math.Max(GetAtmosphericPressure(listenerPosition), GetAtmosphericPressure(sourcePosition));
+            float pressure = GetListenerSourceAtmosphericPressure(listenerPosition, sourcePosition);
             float atmosphericFloor = IsListenerInsideShip() ? settings.AtmosphericMufflingFloor : 0f;
             float pressureScale = Lerp(1f, atmosphericFloor, pressure);
             return Clamp01(settings.MufflingStrength * pressureScale);
         }
 
-        private static bool IsListenerInsideShip()
+        public static bool IsListenerInsideShip()
         {
             if (DateTime.UtcNow - _lastInsideShipReportUtc <= InsideShipReportLifetime)
-                return true;
+                return _lastInsideShipReport;
 
-            return MyAPIGateway.Session?.ControlledObject is IMyShipController;
+            return false;
+        }
+
+        public static float GetListenerSourceAtmosphericPressure(Vector3D listenerPosition, Vector3D sourcePosition)
+        {
+            return Math.Max(GetAtmosphericPressure(listenerPosition), GetAtmosphericPressure(sourcePosition));
         }
 
         public static float GetAtmosphericPressure(Vector3D position)
