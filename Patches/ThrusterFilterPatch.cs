@@ -36,7 +36,11 @@ namespace RealisticSoundPlus.Patches
 
                 string effectSubtype = SettingsManager.GetEngineFilterEffectSubtype();
                 if (string.IsNullOrEmpty(effectSubtype))
+                {
+                    __result = MyStringHash.NullOrEmpty;
+                    AudioDiagnostics.RecordEmitter(__instance, engineAudio ? "filter-none" : "weapon-none", __instance.VolumeMultiplier, 1f, 1f, __instance.VolumeMultiplier, __instance.SourcePosition);
                     return;
+                }
 
                 __result = MyStringHash.GetOrCompute(effectSubtype);
                 AudioDiagnostics.RecordEmitter(__instance, engineAudio ? "filter" : "weapon", __instance.VolumeMultiplier, 1f, 1f, __instance.VolumeMultiplier, __instance.SourcePosition);
