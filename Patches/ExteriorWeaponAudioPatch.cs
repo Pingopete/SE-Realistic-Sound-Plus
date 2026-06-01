@@ -44,6 +44,14 @@ namespace RealisticSoundPlus.Patches
             Apply(__instance, soundId.ToString());
         }
 
+        public static void ResetRuntimeState()
+        {
+            LastTransmissionByEmitter.Clear();
+            KnownExteriorWeaponEmitters.Clear();
+            _disabled = false;
+            _patchHits = 0;
+        }
+
         public static bool IsExteriorWeaponAudioEmitter(MyEntity3DSoundEmitter emitter)
         {
             if (emitter == null)

@@ -51,6 +51,13 @@ namespace RealisticSoundPlus.Patches
             }
         }
 
+        public static void ResetRuntimeState()
+        {
+            KnownEngineCueEmitters.Clear();
+            _disabled = false;
+            _patchHits = 0;
+        }
+
         public static void MarkKnownEngineCueEmitter(MyEntity3DSoundEmitter emitter)
         {
             if (emitter != null)

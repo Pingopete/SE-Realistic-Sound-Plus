@@ -13,6 +13,13 @@ namespace RealisticSoundPlus.Patches
         private static int _pressureLookupErrors;
         private static DateTime _lastInsideShipReportUtc = DateTime.MinValue;
 
+        public static void ResetRuntimeState()
+        {
+            _pressureLookupDisabled = false;
+            _pressureLookupErrors = 0;
+            _lastInsideShipReportUtc = DateTime.MinValue;
+        }
+
         public static void ReportListenerInsideShip(bool insideShip)
         {
             if (insideShip)

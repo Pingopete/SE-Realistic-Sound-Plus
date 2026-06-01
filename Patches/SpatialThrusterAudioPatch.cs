@@ -65,6 +65,14 @@ namespace RealisticSoundPlus.Patches
             }
         }
 
+        public static void ResetRuntimeState()
+        {
+            BaseVolumeByEmitter.Clear();
+            SmoothStatesByEmitter.Clear();
+            _disabled = false;
+            _patchHits = 0;
+        }
+
         private static float CalculateSpatialScale(MyThrust thruster)
         {
             if (!thruster.IsWorking)

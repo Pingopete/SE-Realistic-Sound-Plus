@@ -84,6 +84,14 @@ namespace RealisticSoundPlus.Patches
             }
         }
 
+        public static void ResetRuntimeState()
+        {
+            LastTransmissionByEmitter.Clear();
+            KnownThrusterEmitters.Clear();
+            _disabled = false;
+            _patchHits = 0;
+        }
+
         private static void RestoreEmitters(MyEntity3DSoundEmitter[] emitters)
         {
             foreach (int index in ThrusterEmitterIndexes)

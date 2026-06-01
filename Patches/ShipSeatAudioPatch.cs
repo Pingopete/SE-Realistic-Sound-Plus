@@ -43,6 +43,12 @@ namespace RealisticSoundPlus.Patches
             }
         }
 
+        public static void ResetRuntimeState()
+        {
+            _disabled = false;
+            _patchHits = 0;
+        }
+
         [HarmonyPatch(typeof(MyShipSoundComponent), "UpdateSoundDimension")]
         [HarmonyPostfix]
         private static void ClearForced2D(MyShipSoundComponent __instance)

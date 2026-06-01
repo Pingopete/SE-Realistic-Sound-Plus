@@ -16,6 +16,12 @@ namespace RealisticSoundPlus.Patches
 
         private static GlobalSnapshot _global;
 
+        public static void ResetRuntimeState()
+        {
+            CueSnapshots.Clear();
+            _global = default(GlobalSnapshot);
+        }
+
         public static void UpdateGlobal(bool insideShip)
         {
             Vector3D listenerPosition = MyAPIGateway.Session?.Camera?.Position ?? Vector3D.Zero;
