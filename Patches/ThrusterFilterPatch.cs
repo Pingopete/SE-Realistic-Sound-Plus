@@ -1,7 +1,9 @@
 using System;
+using System.Collections.Generic;
 using HarmonyLib;
 using Sandbox.Game.Entities;
 using SpaceEngineers.Game.Entities.Blocks;
+using VRage.Audio;
 using VRage.Utils;
 
 namespace RealisticSoundPlus.Patches
@@ -9,6 +11,8 @@ namespace RealisticSoundPlus.Patches
     [HarmonyPatch(typeof(MyEntity3DSoundEmitter), "SelectEffect")]
     internal static class ThrusterFilterPatch
     {
+        private static readonly HashSet<MyEntity3DSoundEmitter> KnownEngineCueEmitters = new HashSet<MyEntity3DSoundEmitter>();
+
         private static bool _disabled;
         private static int _patchHits;
 
@@ -44,6 +48,12 @@ namespace RealisticSoundPlus.Patches
             }
         }
 
+
+        public static void MarkKnownEngineCueEmitter(MyEntity3DSoundEmitter emitter)
+        {
+            if (emitter != null)
+                KnownEngineCueEmitters.Add(emitter);
+        }
         public static bool IsEngineAudioEmitter(MyEntity3DSoundEmitter emitter)
         {
             if (emitter == null)
@@ -53,6 +63,9 @@ namespace RealisticSoundPlus.Patches
                 return true;
 
             if (SettingsManager.Current.AmbientMufflingEnabled && IsAmbientAudioEmitter(emitter))
+                return true;
+
+            if (KnownEngineCueEmitters.Contains(emitter))
                 return true;
 
             return EngineAudioClassifier.IsKnownEngineCue(emitter.SoundId)
