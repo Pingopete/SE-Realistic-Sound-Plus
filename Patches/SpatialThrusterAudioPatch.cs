@@ -53,6 +53,7 @@ namespace RealisticSoundPlus.Patches
 
                 emitter.VolumeMultiplier = baseVolume * smoothedMultiplier;
                 BaseVolumeByEmitter[emitter] = baseVolume;
+                AudioDiagnostics.RecordEmitter(emitter, "spatial", baseVolume, transmission, scale, smoothedMultiplier, sourcePosition);
 
                 if (++_patchHits == 1)
                     MyLog.Default.WriteLineAndConsole("[RealisticSoundPlus] Per-thruster spatial audio is active with de-click smoothing.");

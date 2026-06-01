@@ -12,7 +12,7 @@ namespace RealisticSoundPlus
 {
     internal static class AudioDebugOverlay
     {
-        private const int MaxRows = 30;
+        private const int MaxRows = 22;
         private static readonly Color HeaderColor = new Color(120, 220, 255, 255);
         private static readonly Color TextColor = new Color(230, 235, 240, 255);
         private static readonly Color QuietColor = new Color(170, 180, 190, 255);
@@ -51,31 +51,36 @@ namespace RealisticSoundPlus
                 float startY = Math.Max(80f, viewportSize.Y * 0.12f);
 
                 DrawLine(0, "Realistic Sound+ audio debug  |  /rsp sounds off", HeaderColor, 0.68f, centerX, startY, rowHeight);
-                DrawLine(1, "type  eng  amb  count  volume  cue", HeaderColor, 0.58f, centerX, startY, rowHeight);
+                DrawLine(1, AudioDiagnostics.FormatGlobal(), HeaderColor, 0.48f, centerX, startY, rowHeight);
+                DrawLine(2, "type  eng  amb  count  volume  cue  | route tr sc base fin d p", HeaderColor, 0.50f, centerX, startY, rowHeight);
 
                 if (rows.Count == 0)
                 {
-                    DrawLine(3, "No currently playing source voices reported.", QuietColor, 0.56f, centerX, startY, rowHeight);
+                    DrawLine(4, "No currently playing source voices reported.", QuietColor, 0.56f, centerX, startY, rowHeight);
                     return;
                 }
 
                 for (int i = 0; i < shown; i++)
                 {
                     Row row = rows[i];
+                    string diagnostic = AudioDiagnostics.TryGetCueSnapshot(row.CueName, out AudioDiagnostics.CueSnapshot snapshot)
+                        ? AudioDiagnostics.FormatCue(snapshot)
+                        : (row.EngineCandidate ? " UNCONTROLLED" : string.Empty);
                     string text = string.Format(
                         CultureInfo.InvariantCulture,
-                        "{0}    {1}    {2}   x{3,2}   {4:0.00}   {5}",
+                        "{0}    {1}    {2}   x{3,2}   {4:0.00}   {5}{6}",
                         row.Kind,
                         row.EngineCandidate ? "*" : "-",
                         row.AmbientCandidate ? "*" : "-",
                         row.Count,
                         row.Score,
-                        row.CueName);
-                    DrawLine(i + 3, text, row.Score > 0.05f ? TextColor : QuietColor, 0.54f, centerX, startY, rowHeight);
+                        row.CueName,
+                        diagnostic);
+                    DrawLine(i + 4, text, row.Score > 0.05f ? TextColor : QuietColor, 0.46f, centerX, startY, rowHeight);
                 }
 
                 if (rows.Count > shown)
-                    DrawLine(shown + 4, "+ " + (rows.Count - shown).ToString(CultureInfo.InvariantCulture) + " more", QuietColor, 0.5f, centerX, startY, rowHeight);
+                    DrawLine(shown + 5, "+ " + (rows.Count - shown).ToString(CultureInfo.InvariantCulture) + " more", QuietColor, 0.5f, centerX, startY, rowHeight);
             }
             catch (Exception ex)
             {

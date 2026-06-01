@@ -42,6 +42,7 @@ namespace RealisticSoundPlus.Patches
 
                 bool insideShip = (bool)InsideShipField.GetValue(__instance);
                 ExteriorSoundTransmission.ReportListenerInsideShip(insideShip);
+                AudioDiagnostics.UpdateGlobal(insideShip);
 
                 if (!insideShip)
                 {
@@ -67,8 +68,9 @@ namespace RealisticSoundPlus.Patches
                     float transmission = SettingsManager.Current.SpatialAudioEnabled
                         ? 0f
                         : ExteriorSoundTransmission.Calculate(listenerPosition, emitter.SourcePosition);
-
-                    emitter.VolumeMultiplier = baseVolume * transmission;
+                    float finalMultiplier = baseVolume * transmission;
+                    emitter.VolumeMultiplier = finalMultiplier;
+                    AudioDiagnostics.RecordEmitter(emitter, "interior", baseVolume, transmission, transmission, finalMultiplier, emitter.SourcePosition);
                     LastTransmissionByEmitter[emitter] = transmission;
                 }
 
