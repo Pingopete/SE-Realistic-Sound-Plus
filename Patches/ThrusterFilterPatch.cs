@@ -22,12 +22,15 @@ namespace RealisticSoundPlus.Patches
 
             try
             {
-                if (!IsEngineAudioEmitter(__instance) && !ExteriorWeaponAudioPatch.IsExteriorWeaponAudioEmitter(__instance))
+                bool engineAudio = IsEngineAudioEmitter(__instance);
+                bool exteriorWeaponAudio = ExteriorWeaponAudioPatch.IsExteriorWeaponAudioEmitter(__instance);
+                if (!engineAudio && !exteriorWeaponAudio)
                     return;
 
                 if (ExteriorSoundTransmission.CalculateEffectiveMufflingStrength(__instance.SourcePosition) <= 0f)
                 {
                     __result = MyStringHash.NullOrEmpty;
+                    AudioDiagnostics.RecordEmitter(__instance, engineAudio ? "filter-off" : "weapon-off", __instance.VolumeMultiplier, 1f, 1f, __instance.VolumeMultiplier, __instance.SourcePosition);
                     return;
                 }
 
@@ -36,6 +39,7 @@ namespace RealisticSoundPlus.Patches
                     return;
 
                 __result = MyStringHash.GetOrCompute(effectSubtype);
+                AudioDiagnostics.RecordEmitter(__instance, engineAudio ? "filter" : "weapon", __instance.VolumeMultiplier, 1f, 1f, __instance.VolumeMultiplier, __instance.SourcePosition);
 
                 if (++_patchHits == 1)
                     MyLog.Default.WriteLineAndConsole("[RealisticSoundPlus] Exterior audio low-pass filter override is active: " + effectSubtype);
