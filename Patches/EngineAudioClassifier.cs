@@ -27,6 +27,9 @@ namespace RealisticSoundPlus.Patches
             if (cueName.IndexOf("JetHydrogen", StringComparison.OrdinalIgnoreCase) >= 0)
                 return true;
 
+            if (cueName.IndexOf("Hydrogen", StringComparison.OrdinalIgnoreCase) >= 0 && cueName.IndexOf("Ship", StringComparison.OrdinalIgnoreCase) >= 0)
+                return true;
+
             if (cueName.IndexOf("Thruster", StringComparison.OrdinalIgnoreCase) >= 0)
                 return true;
 
