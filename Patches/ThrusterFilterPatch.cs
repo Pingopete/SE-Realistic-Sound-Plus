@@ -24,13 +24,16 @@ namespace RealisticSoundPlus.Patches
                 if (IsSpeedAmbientAudioEmitter(__instance))
                 {
                     string speedEffectSubtype = GetSpeedAmbientEffectSubtype(__instance);
-                    if (!string.IsNullOrEmpty(speedEffectSubtype))
+                    if (string.IsNullOrEmpty(speedEffectSubtype))
                     {
-                        __result = MyStringHash.GetOrCompute(speedEffectSubtype);
-
-                        if (++_speedAmbientFilterHits == 1)
-                            MyLog.Default.WriteLineAndConsole("[RealisticSoundPlus] Speed ambient filter override is active: " + speedEffectSubtype);
+                        __result = MyStringHash.NullOrEmpty;
+                        return;
                     }
+
+                    __result = MyStringHash.GetOrCompute(speedEffectSubtype);
+
+                    if (++_speedAmbientFilterHits == 1)
+                        MyLog.Default.WriteLineAndConsole("[RealisticSoundPlus] Speed ambient filter override is active: " + speedEffectSubtype);
 
                     return;
                 }
@@ -81,6 +84,9 @@ namespace RealisticSoundPlus.Patches
 
         private static string SelectAtmosphereAwareFilter(string configuredFilter, Vector3D sourcePosition, bool listenerInside)
         {
+            if (string.IsNullOrEmpty(configuredFilter))
+                return null;
+
             float pressure = GetListenerSourcePressure(sourcePosition);
             if (!listenerInside && pressure >= 0.95f)
                 return null;
