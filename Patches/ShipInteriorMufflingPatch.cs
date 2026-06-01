@@ -142,16 +142,7 @@ namespace RealisticSoundPlus.Patches
             if (string.IsNullOrWhiteSpace(cueName))
                 return false;
 
-            return cueName.Equals("ArcShipWindSpeed", StringComparison.OrdinalIgnoreCase)
-                || cueName.Equals("ShipLargeEngine", StringComparison.OrdinalIgnoreCase)
-                || cueName.Equals("ShipSmallEngine", StringComparison.OrdinalIgnoreCase)
-                || cueName.Equals("ShipLargeSpeedDown", StringComparison.OrdinalIgnoreCase)
-                || cueName.Equals("ShipLargeSpeedUp", StringComparison.OrdinalIgnoreCase)
-                || cueName.Equals("ShipSmallRunSlow", StringComparison.OrdinalIgnoreCase)
-                || cueName.Equals("ShipSmallRunMedium", StringComparison.OrdinalIgnoreCase)
-                || cueName.Equals("ShipSmallRunFast", StringComparison.OrdinalIgnoreCase)
-                || cueName.Equals("ShipSmallSpeedDown", StringComparison.OrdinalIgnoreCase)
-                || cueName.Equals("ShipSmallSpeedUp", StringComparison.OrdinalIgnoreCase);
+            return cueName.Equals("ShipLargeEngine", StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool IsGridBelowSpeedAmbientThreshold(MyCubeGrid grid)

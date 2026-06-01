@@ -109,7 +109,10 @@ namespace RealisticSoundPlus.Patches
 
         public static bool IsKnownSpeedAmbientCue(string cueName)
         {
-            return IsKnownShipMotionCue(cueName);
+            if (string.IsNullOrWhiteSpace(cueName))
+                return false;
+
+            return cueName.Equals("ShipLargeEngine", StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool IsKnownShipMotionCue(string cueName)
