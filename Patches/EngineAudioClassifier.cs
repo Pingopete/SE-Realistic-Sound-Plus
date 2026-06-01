@@ -70,7 +70,6 @@ namespace RealisticSoundPlus.Patches
                 || cueName.IndexOf("GravityGen", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
-
         public static bool IsKnownExteriorWeaponCue(MyCueId? cueId)
         {
             if (!cueId.HasValue)
@@ -99,6 +98,20 @@ namespace RealisticSoundPlus.Patches
                 || cueName.IndexOf("Explosion", StringComparison.OrdinalIgnoreCase) >= 0
                 || cueName.IndexOf("Expl", StringComparison.OrdinalIgnoreCase) >= 0;
         }
+
+        public static bool IsKnownSpeedAmbientCue(MyCueId? cueId)
+        {
+            if (!cueId.HasValue)
+                return false;
+
+            return IsKnownSpeedAmbientCue(cueId.Value.ToString());
+        }
+
+        public static bool IsKnownSpeedAmbientCue(string cueName)
+        {
+            return IsKnownShipMotionCue(cueName);
+        }
+
         private static bool IsKnownShipMotionCue(string cueName)
         {
             return cueName.Equals("ShipLargeIdle", StringComparison.OrdinalIgnoreCase)

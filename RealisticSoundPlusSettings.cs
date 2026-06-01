@@ -21,6 +21,7 @@ namespace RealisticSoundPlus
         public float FarDistanceTransmission { get; set; } = 1.0f;
         public float AtmosphericMufflingFloor { get; set; } = 0.5f;
         public string EngineFilter { get; set; } = "RealShip";
+        public string SpeedAmbientFilter { get; set; } = "Off";
         public bool AmbientMufflingEnabled { get; set; }
         public bool SpatialAudioEnabled { get; set; } = true;
         public float SpatialEmitterGain { get; set; } = 1.0f;
@@ -36,21 +37,16 @@ namespace RealisticSoundPlus
 
         public static RealisticSoundPlusSettings Current { get; private set; } = new RealisticSoundPlusSettings();
 
-        public static string ConfigPath { get; } = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "SpaceEngineers",
-            "RealisticSoundPlus.xml");
+        public static string ConfigPath { get; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SpaceEngineers", "RealisticSoundPlus.xml");
 
         public static void LoadOrCreate()
         {
             Directory.CreateDirectory(Path.GetDirectoryName(ConfigPath));
-
             if (!File.Exists(ConfigPath))
             {
                 Save();
                 return;
             }
-
             Load();
         }
 
@@ -58,11 +54,9 @@ namespace RealisticSoundPlus
         {
             if (!File.Exists(ConfigPath))
                 return false;
-
             DateTime writeUtc = File.GetLastWriteTimeUtc(ConfigPath);
             if (writeUtc <= _lastWriteUtc)
                 return false;
-
             Load();
             return true;
         }
@@ -70,10 +64,7 @@ namespace RealisticSoundPlus
         public static void Load()
         {
             using (FileStream stream = File.OpenRead(ConfigPath))
-            {
                 Current = (RealisticSoundPlusSettings)Serializer.Deserialize(stream);
-            }
-
             Clamp();
             _lastWriteUtc = File.GetLastWriteTimeUtc(ConfigPath);
             MyLog.Default.WriteLineAndConsole("[RealisticSoundPlus] Loaded settings from " + ConfigPath + ": " + Summary());
@@ -83,37 +74,15 @@ namespace RealisticSoundPlus
         {
             Clamp();
             Directory.CreateDirectory(Path.GetDirectoryName(ConfigPath));
-
             using (FileStream stream = File.Create(ConfigPath))
-            {
                 Serializer.Serialize(stream, Current);
-            }
-
             _lastWriteUtc = File.GetLastWriteTimeUtc(ConfigPath);
             MyLog.Default.WriteLineAndConsole("[RealisticSoundPlus] Saved settings to " + ConfigPath + ": " + Summary());
         }
 
         public static string Summary()
         {
-            return string.Format(
-                CultureInfo.InvariantCulture,
-                "gain={0:0.00}, curve={1:0.00}, control={2:0.00}, presenceMin={3:0.00}, quietLog={4:0.00}, loudLog={5:0.00}, muffling={6:0.00}, interiorBase={7:0.00}, farTransmission={8:0.00}, filter={9}, ambient={10}, spatial={11}, spatialGain={12:0.00}, center=off, smoothMs={13:0}, fade={14:0.000}, atmosphereFloor={15:0.00}",
-                Current.EngineGain,
-                Current.AudioCurveExponent,
-                Current.ControlInfluence,
-                Current.MinimumShipPresence,
-                Current.QuietShipForceLog10,
-                Current.LoudShipForceLog10,
-                Current.MufflingStrength,
-                Current.InteriorBaseTransmission,
-                Current.FarDistanceTransmission,
-                Current.EngineFilter,
-                Current.AmbientMufflingEnabled ? "on" : "off",
-                Current.SpatialAudioEnabled ? "on" : "off",
-                Current.SpatialEmitterGain,
-                Current.SpatialSmoothingMs,
-                Current.SpatialSoftFadeRatio,
-                Current.AtmosphericMufflingFloor);
+            return string.Format(CultureInfo.InvariantCulture, "gain={0:0.00}, curve={1:0.00}, control={2:0.00}, presenceMin={3:0.00}, quietLog={4:0.00}, loudLog={5:0.00}, muffling={6:0.00}, interiorBase={7:0.00}, farTransmission={8:0.00}, filter={9}, speedFilter={10}, ambient={11}, spatial={12}, spatialGain={13:0.00}, center=off, smoothMs={14:0}, fade={15:0.000}, atmosphereFloor={16:0.00}", Current.EngineGain, Current.AudioCurveExponent, Current.ControlInfluence, Current.MinimumShipPresence, Current.QuietShipForceLog10, Current.LoudShipForceLog10, Current.MufflingStrength, Current.InteriorBaseTransmission, Current.FarDistanceTransmission, Current.EngineFilter, Current.SpeedAmbientFilter, Current.AmbientMufflingEnabled ? "on" : "off", Current.SpatialAudioEnabled ? "on" : "off", Current.SpatialEmitterGain, Current.SpatialSmoothingMs, Current.SpatialSoftFadeRatio, Current.AtmosphericMufflingFloor);
         }
 
         public static bool TrySet(string name, float value)
@@ -185,37 +154,40 @@ namespace RealisticSoundPlus
                 default:
                     return false;
             }
-
             Clamp();
             return true;
         }
-
 
         public static bool TrySetFilter(string value)
         {
             string normalized = NormalizeFilter(value);
             if (normalized == null)
                 return false;
-
             Current.EngineFilter = normalized;
             return true;
         }
 
-
+        public static bool TrySetSpeedAmbientFilter(string value)
+        {
+            string normalized = NormalizeFilter(value);
+            if (normalized == null)
+                return false;
+            Current.SpeedAmbientFilter = normalized;
+            return true;
+        }
 
         public static bool TrySetSpatial(string value)
         {
             if (!TryParseBool(value, out bool enabled))
                 return false;
-
             Current.SpatialAudioEnabled = enabled;
             return true;
         }
+
         public static bool TrySetAmbient(string value)
         {
             if (!TryParseBool(value, out bool enabled))
                 return false;
-
             Current.AmbientMufflingEnabled = enabled;
             return true;
         }
@@ -241,22 +213,27 @@ namespace RealisticSoundPlus
                     return false;
             }
         }
+
         public static string GetEngineFilterEffectSubtype()
         {
-            switch (NormalizeFilter(Current.EngineFilter))
+            return GetFilterEffectSubtype(Current.EngineFilter);
+        }
+
+        public static string GetSpeedAmbientFilterEffectSubtype()
+        {
+            return GetFilterEffectSubtype(Current.SpeedAmbientFilter);
+        }
+
+        private static string GetFilterEffectSubtype(string filter)
+        {
+            switch (NormalizeFilter(filter))
             {
-                case "Helmet":
-                    return "LowPassHelmet";
-                case "Cockpit":
-                    return "LowPassCockpit";
-                case "CockpitNoOxy":
-                    return "LowPassCockpitNoOxy";
-                case "RealShip":
-                    return "realShipFilter";
-                case "Deep":
-                    return "LowPassNoHelmetNoOxy";
-                default:
-                    return null;
+                case "Helmet": return "LowPassHelmet";
+                case "Cockpit": return "LowPassCockpit";
+                case "CockpitNoOxy": return "LowPassCockpitNoOxy";
+                case "RealShip": return "realShipFilter";
+                case "Deep": return "LowPassNoHelmetNoOxy";
+                default: return null;
             }
         }
 
@@ -267,28 +244,22 @@ namespace RealisticSoundPlus
             switch ((value ?? string.Empty).Trim().ToLowerInvariant())
             {
                 case "off":
-                case "none":
-                    return "Off";
+                case "none": return "Off";
                 case "helmet":
-                case "light":
-                    return "Helmet";
+                case "light": return "Helmet";
                 case "cockpit":
-                case "medium":
-                    return "Cockpit";
+                case "medium": return "Cockpit";
                 case "cockpitnooxy":
                 case "nooxy":
-                case "heavy":
-                    return "CockpitNoOxy";
+                case "heavy": return "CockpitNoOxy";
                 case "realship":
-                case "ship":
-                    return "RealShip";
+                case "ship": return "RealShip";
                 case "deep":
-                case "lowpass":
-                    return "Deep";
-                default:
-                    return null;
+                case "lowpass": return "Deep";
+                default: return null;
             }
         }
+
         private static void Clamp()
         {
             Current.EngineGain = Clamp(Current.EngineGain, 0f, 4f);
@@ -304,6 +275,7 @@ namespace RealisticSoundPlus
             Current.FarDistanceTransmission = Clamp(Current.FarDistanceTransmission, 0.05f, 1f);
             Current.AtmosphericMufflingFloor = Clamp(Current.AtmosphericMufflingFloor, 0f, 1f);
             Current.EngineFilter = NormalizeFilter(Current.EngineFilter) ?? "Off";
+            Current.SpeedAmbientFilter = NormalizeFilter(Current.SpeedAmbientFilter) ?? "Off";
             Current.SpatialEmitterGain = Clamp(Current.SpatialEmitterGain, 0f, 4f);
             Current.SpatialCentralBlend = Clamp(Current.SpatialCentralBlend, 0f, 1f);
             Current.SpatialSmoothingMs = Clamp(Current.SpatialSmoothingMs, 0f, 500f);
@@ -314,7 +286,6 @@ namespace RealisticSoundPlus
         {
             if (value < min)
                 return min;
-
             return value > max ? max : value;
         }
     }
