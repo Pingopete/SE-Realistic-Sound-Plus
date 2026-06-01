@@ -55,6 +55,7 @@ namespace RealisticSoundPlus.Patches
 
                 emitter.VolumeMultiplier = baseVolume * smoothedMultiplier;
                 BaseVolumeByEmitter[emitter] = baseVolume;
+                AudioDiagnostics.RecordEmitter(emitter, "spatial", baseVolume, transmission, atmosphereGainScale, scale, smoothedMultiplier, sourcePosition, 0f);
                 _hasAppliedThisSession = true;
 
                 if (++_patchHits == 1)

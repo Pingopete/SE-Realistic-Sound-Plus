@@ -122,9 +122,9 @@ namespace RealisticSoundPlus.Patches
             float baseVolume = RestoreEmitter(emitter);
             float transmission = suppress
                 ? CalculateHullVacuumStructuralTransmission(grid)
-                : ExteriorSoundTransmission.Calculate(listenerPosition, emitter.SourcePosition);
-
-            emitter.VolumeMultiplier = baseVolume * transmission;
+                : ExteriorSoundTransmission.Calculate(listenerPosition, emitter.SourcePosition);            float finalMultiplier = baseVolume * transmission;
+            emitter.VolumeMultiplier = finalMultiplier;
+            AudioDiagnostics.RecordEmitter(emitter, suppress ? "vanSup" : "vanTr", baseVolume, transmission, 1f, transmission, finalMultiplier, emitter.SourcePosition, 0f);
             BaseVolumeByEmitter[emitter] = baseVolume;
         }
 
@@ -157,6 +157,7 @@ namespace RealisticSoundPlus.Patches
             bool lowSpeed = IsGridBelowSpeedAmbientThreshold(grid);
             bool hasEnginePower = GetShipCurrentPower(component) > 0.02f;
             bool controlSpeedAmbient = SettingsManager.Current.AmbientMufflingEnabled || inVacuum;
+            AudioDiagnostics.UpdateGlobal(grid, windScale, hasEnginePower, inVacuum, lowSpeed);
 
             foreach (MyEntity3DSoundEmitter emitter in emitters)
             {
@@ -172,8 +173,9 @@ namespace RealisticSoundPlus.Patches
                     float engineLoopBaseVolume = RestoreSpeedAmbientEmitter(emitter);
                     float engineTransmission = ExteriorSoundTransmission.Calculate(emitter.SourcePosition);
                     float atmosphereGainScale = ExteriorSoundTransmission.CalculateAtmosphericEngineGainScale(emitter.SourcePosition);
-                    float poweredLoopFloor = Math.Max(engineLoopBaseVolume, SettingsManager.Current.MinimumShipPresence);
-                    emitter.VolumeMultiplier = poweredLoopFloor * engineTransmission * atmosphereGainScale;
+                    float poweredLoopFloor = Math.Max(engineLoopBaseVolume, SettingsManager.Current.MinimumShipPresence);                    float engineSpeedFinalMultiplier = poweredLoopFloor * engineTransmission * atmosphereGainScale;
+                    emitter.VolumeMultiplier = engineSpeedFinalMultiplier;
+                    AudioDiagnostics.RecordEmitter(emitter, "engSpd", engineLoopBaseVolume, engineTransmission, atmosphereGainScale, poweredLoopFloor, engineSpeedFinalMultiplier, emitter.SourcePosition, windScale);
                     SpeedAmbientBaseVolumeByEmitter[emitter] = engineLoopBaseVolume;
                     continue;
                 }
@@ -183,8 +185,9 @@ namespace RealisticSoundPlus.Patches
                     continue;
                 }
 
-                float baseVolume = RestoreSpeedAmbientEmitter(emitter);
-                emitter.VolumeMultiplier = baseVolume * windScale;
+                float baseVolume = RestoreSpeedAmbientEmitter(emitter);                float windFinalMultiplier = baseVolume * windScale;
+                emitter.VolumeMultiplier = windFinalMultiplier;
+                AudioDiagnostics.RecordEmitter(emitter, suppressStuckMotionLoop ? "supSpd" : "wind", baseVolume, windScale, 1f, windScale, windFinalMultiplier, emitter.SourcePosition, windScale);
                 SpeedAmbientBaseVolumeByEmitter[emitter] = baseVolume;
             }
 

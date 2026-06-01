@@ -15,6 +15,7 @@ namespace RealisticSoundPlus.Patches
             CharacterBreathPatch.ResetRuntimeState();
             ShipSeatAudioPatch.ResetRuntimeState();
             ExteriorSoundTransmission.ResetRuntimeState();
+            AudioDiagnostics.ResetRuntimeState();
 
             MyLog.Default.WriteLineAndConsole("[RealisticSoundPlus] Audio runtime state reset: " + reason);
         }
