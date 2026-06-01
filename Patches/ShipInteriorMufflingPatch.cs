@@ -101,19 +101,23 @@ namespace RealisticSoundPlus.Patches
 
         private static void ApplySpeedAmbientWind(MyShipSoundComponent component, MyEntity3DSoundEmitter[] emitters)
         {
-            if (!SettingsManager.Current.AmbientMufflingEnabled)
-            {
-                RestoreSpeedAmbientEmitters(emitters);
-                return;
-            }
-
             MyCubeGrid grid = (MyCubeGrid)ShipGridField.GetValue(component);
             float windScale = CalculateAtmosphericSpeedScale(grid);
+            bool inVacuum = IsGridInVacuum(grid);
+            bool lowSpeed = IsGridBelowSpeedAmbientThreshold(grid);
+            bool controlSpeedAmbient = SettingsManager.Current.AmbientMufflingEnabled || inVacuum;
 
             foreach (MyEntity3DSoundEmitter emitter in emitters)
             {
                 if (!ThrusterFilterPatch.IsSpeedAmbientAudioEmitter(emitter))
                     continue;
+
+                bool suppressStuckMotionLoop = lowSpeed && IsMovingSpeedAmbientEmitter(emitter);
+                if (!controlSpeedAmbient && !suppressStuckMotionLoop)
+                {
+                    RestoreSpeedAmbientEmitter(emitter);
+                    continue;
+                }
 
                 float baseVolume = RestoreSpeedAmbientEmitter(emitter);
                 float finalMultiplier = baseVolume * windScale;
@@ -123,7 +127,47 @@ namespace RealisticSoundPlus.Patches
             }
 
             if (++_speedAmbientPatchHits == 1)
-                MyLog.Default.WriteLineAndConsole("[RealisticSoundPlus] Speed ambient wind volume is controlled by ship speed and atmospheric density.");
+                MyLog.Default.WriteLineAndConsole("[RealisticSoundPlus] Speed ambient wind volume is controlled by ship speed and atmospheric density; vacuum and near-stationary movement speed loops are suppressed.");
+        }
+
+        private static bool IsMovingSpeedAmbientEmitter(MyEntity3DSoundEmitter emitter)
+        {
+            return IsMovingSpeedAmbientCue(emitter.SoundId.ToString())
+                || IsMovingSpeedAmbientCue(emitter.Sound?.CueEnum.ToString())
+                || IsMovingSpeedAmbientCue(emitter.SecondarySound?.CueEnum.ToString());
+        }
+
+        private static bool IsMovingSpeedAmbientCue(string cueName)
+        {
+            if (string.IsNullOrWhiteSpace(cueName))
+                return false;
+
+            return cueName.Equals("ArcShipWindSpeed", StringComparison.OrdinalIgnoreCase)
+                || cueName.Equals("ShipLargeEngine", StringComparison.OrdinalIgnoreCase)
+                || cueName.Equals("ShipSmallEngine", StringComparison.OrdinalIgnoreCase)
+                || cueName.Equals("ShipLargeSpeedDown", StringComparison.OrdinalIgnoreCase)
+                || cueName.Equals("ShipLargeSpeedUp", StringComparison.OrdinalIgnoreCase)
+                || cueName.Equals("ShipSmallRunSlow", StringComparison.OrdinalIgnoreCase)
+                || cueName.Equals("ShipSmallRunMedium", StringComparison.OrdinalIgnoreCase)
+                || cueName.Equals("ShipSmallRunFast", StringComparison.OrdinalIgnoreCase)
+                || cueName.Equals("ShipSmallSpeedDown", StringComparison.OrdinalIgnoreCase)
+                || cueName.Equals("ShipSmallSpeedUp", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsGridBelowSpeedAmbientThreshold(MyCubeGrid grid)
+        {
+            if (grid == null || grid.Physics == null)
+                return true;
+
+            return grid.Physics.LinearVelocity.LengthSquared() < 4.0;
+        }
+
+        private static bool IsGridInVacuum(MyCubeGrid grid)
+        {
+            if (grid == null)
+                return true;
+
+            return ExteriorSoundTransmission.GetAtmosphericPressure(grid.WorldMatrix.Translation) < 0.01f;
         }
 
         private static float CalculateAtmosphericSpeedScale(MyCubeGrid grid)
