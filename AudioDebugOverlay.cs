@@ -54,7 +54,7 @@ namespace RealisticSoundPlus
                 DrawLine(0, "Realistic Sound+ audio debug  |  /rsp sounds off", HeaderColor, 0.68f, centerX, startY, rowHeight);
                 DrawLine(1, AudioDiagnostics.FormatGlobal(), HeaderColor, 0.48f, centerX, startY, rowHeight);
                 DrawLine(2, AudioEngineV2Runtime.FormatDebugLine(), HeaderColor, 0.44f, centerX, startY, rowHeight);
-                DrawLine(3, "type  eng  amb  count  volume  cue  | route tr sc base fin d p", HeaderColor, 0.50f, centerX, startY, rowHeight);
+                DrawLine(3, "type  eng  count  volume  cue  | route tr sc base fin d p", HeaderColor, 0.50f, centerX, startY, rowHeight);
                 AudioEngineV2Runtime.DrawDebugMarkers();
 
                 if (rows.Count == 0)
@@ -71,10 +71,9 @@ namespace RealisticSoundPlus
                         : (row.EngineCandidate ? " UNCONTROLLED" : string.Empty);
                     string text = string.Format(
                         CultureInfo.InvariantCulture,
-                        "{0}    {1}    {2}   x{3,2}   {4:0.00}   {5}{6}",
+                        "{0}    {1}   x{2,2}   {3:0.00}   {4}{5}",
                         row.Kind,
                         row.EngineCandidate ? "*" : "-",
-                        row.AmbientCandidate ? "*" : "-",
                         row.Count,
                         row.Score,
                         row.CueName,
@@ -114,8 +113,7 @@ namespace RealisticSoundPlus
                     {
                         Kind = kind,
                         CueName = cueName,
-                        EngineCandidate = EngineAudioClassifier.IsKnownEngineCue(cueName),
-                        AmbientCandidate = EngineAudioClassifier.IsKnownAmbientCue(cueName)
+                        EngineCandidate = EngineAudioClassifier.IsKnownEngineCue(cueName)
                     };
                     byCue[key] = row;
                 }
@@ -162,7 +160,6 @@ namespace RealisticSoundPlus
             public int Count;
             public float Score;
             public bool EngineCandidate;
-            public bool AmbientCandidate;
         }
     }
 }

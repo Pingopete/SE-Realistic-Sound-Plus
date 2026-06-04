@@ -14,7 +14,6 @@ namespace RealisticSoundPlus.Patches
 
         private static bool _disabled;
         private static int _patchHits;
-        private static int _speedAmbientFilterHits;
 
         private static void Postfix(MyEntity3DSoundEmitter __instance, ref MyStringHash __result)
         {
@@ -30,33 +29,14 @@ namespace RealisticSoundPlus.Patches
                     return;
                 }
 
-                if (SettingsManager.Current.AmbientMufflingEnabled && IsSpeedAmbientAudioEmitter(__instance))
-                {
-                    string speedEffectSubtype = SettingsManager.GetSpeedAmbientFilterEffectSubtype();
-                    if (string.IsNullOrEmpty(speedEffectSubtype))
-                    {
-                        AudioDiagnostics.RecordEmitter(__instance, "speedfilter-none", __instance.VolumeMultiplier, 1f, 1f, __instance.VolumeMultiplier, __instance.SourcePosition);
-                        return;
-                    }
-
-                    __result = MyStringHash.GetOrCompute(speedEffectSubtype);
-                    AudioDiagnostics.RecordEmitter(__instance, "speedfilter", __instance.VolumeMultiplier, 1f, 1f, __instance.VolumeMultiplier, __instance.SourcePosition);
-
-                    if (++_speedAmbientFilterHits == 1)
-                        MyLog.Default.WriteLineAndConsole("[RealisticSoundPlus] Speed ambient filter override is active: " + speedEffectSubtype);
-
-                    return;
-                }
-
                 bool engineAudio = IsEngineAudioEmitter(__instance);
-                bool exteriorWeaponAudio = ExteriorWeaponAudioPatch.IsExteriorWeaponAudioEmitter(__instance);
-                if (!engineAudio && !exteriorWeaponAudio)
+                if (!engineAudio)
                     return;
 
                 if (ExteriorSoundTransmission.CalculateEffectiveMufflingStrength(__instance.SourcePosition) <= 0f)
                 {
                     __result = MyStringHash.NullOrEmpty;
-                    AudioDiagnostics.RecordEmitter(__instance, engineAudio ? "filter-off" : "weapon-off", __instance.VolumeMultiplier, 1f, 1f, __instance.VolumeMultiplier, __instance.SourcePosition);
+                    AudioDiagnostics.RecordEmitter(__instance, "filter-off", __instance.VolumeMultiplier, 1f, 1f, __instance.VolumeMultiplier, __instance.SourcePosition);
                     return;
                 }
 
@@ -64,12 +44,12 @@ namespace RealisticSoundPlus.Patches
                 if (string.IsNullOrEmpty(effectSubtype))
                 {
                     __result = MyStringHash.NullOrEmpty;
-                    AudioDiagnostics.RecordEmitter(__instance, engineAudio ? "filter-none" : "weapon-none", __instance.VolumeMultiplier, 1f, 1f, __instance.VolumeMultiplier, __instance.SourcePosition);
+                    AudioDiagnostics.RecordEmitter(__instance, "filter-none", __instance.VolumeMultiplier, 1f, 1f, __instance.VolumeMultiplier, __instance.SourcePosition);
                     return;
                 }
 
                 __result = MyStringHash.GetOrCompute(effectSubtype);
-                AudioDiagnostics.RecordEmitter(__instance, engineAudio ? "filter" : "weapon", __instance.VolumeMultiplier, 1f, 1f, __instance.VolumeMultiplier, __instance.SourcePosition);
+                AudioDiagnostics.RecordEmitter(__instance, "filter", __instance.VolumeMultiplier, 1f, 1f, __instance.VolumeMultiplier, __instance.SourcePosition);
 
                 if (++_patchHits == 1)
                     MyLog.Default.WriteLineAndConsole("[RealisticSoundPlus] Exterior audio low-pass filter override is active: " + effectSubtype);
@@ -86,7 +66,6 @@ namespace RealisticSoundPlus.Patches
             KnownEngineCueEmitters.Clear();
             _disabled = false;
             _patchHits = 0;
-            _speedAmbientFilterHits = 0;
         }
 
         public static void MarkKnownEngineCueEmitter(MyEntity3DSoundEmitter emitter)
@@ -114,24 +93,5 @@ namespace RealisticSoundPlus.Patches
             return AudioEngineV2Runtime.IsV2Emitter(emitter);
         }
 
-        public static bool IsAmbientAudioEmitter(MyEntity3DSoundEmitter emitter)
-        {
-            return false;
-        }
-
-        public static bool IsSpeedAmbientAudioEmitter(MyEntity3DSoundEmitter emitter)
-        {
-            if (emitter == null)
-                return false;
-
-            return EngineAudioClassifier.IsKnownSpeedAmbientCue(emitter.SoundId)
-                || EngineAudioClassifier.IsKnownSpeedAmbientCue(emitter.Sound?.CueEnum)
-                || EngineAudioClassifier.IsKnownSpeedAmbientCue(emitter.SecondarySound?.CueEnum);
-        }
-
-        public static bool IsHydrogenEngineAudioEmitter(MyEntity3DSoundEmitter emitter)
-        {
-            return false;
-        }
     }
 }

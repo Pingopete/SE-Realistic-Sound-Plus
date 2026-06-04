@@ -41,14 +41,24 @@ Use `/rsp sounds on|off`.
 
 The centered overlay shows:
 
-- Global listener state: atmosphere, altitude, controlled speed, inside state, active filter, ambient toggle, and `route=v2`.
+- Global listener state: atmosphere, altitude, controlled speed, inside state, active filter, and `route=v2`.
 - V2 listener state: mode, vanilla room probe, inside state, active detail/state source counts, shared distance, curve, 2D positional test flag, and atmosphere.
-- Current audio voices: cue name, voice count, volume score, engine/ambient candidate markers, and RSP diagnostics when available.
+- Current audio voices: cue name, voice count, volume score, engine-candidate marker, and RSP diagnostics when available.
 - RSP diagnostics: route, transmission, scale, base volume, final multiplier, listener distance, and pressure.
 
 Room readout note:
 
 The `room=` value is currently a reflective probe from vanilla `MyShipSoundComponent`. If Keen does not expose a useful room name/id in that object for a given state, the overlay will report that the vanilla room id is unavailable.
+
+## Active Runtime Hooks
+
+For clean V2 testing, this branch keeps the active Harmony surface intentionally narrow:
+
+- `MyThrust.UpdateAfterSimulation` feeds thruster state into the V2 six-direction audio model.
+- `MyShipSoundComponent.UpdateVolumes` reports vanilla inside/room state to the V2 listener model and overlay.
+- `MyEntity3DSoundEmitter.SelectEffect` applies filters only to V2-registered emitters.
+
+Old weapon, breath, ambient, hydrogen-engine, seat, continuous-power, and per-thruster-spatial patches are not active on this branch.
 
 ## Runtime Controls
 
@@ -83,8 +93,6 @@ Filtering and transmission:
 - `/rsp interior 0.9` - baseline transmission floor used by the V2 muffling model; source range is controlled by `/rsp dist` and `/rsp distcurve`.
 - `/rsp atmfloor 0.5` - amount of configured muffling retained at full planetary air density while inside.
 - `/rsp filter off|helmet|cockpit|cockpitnooxy|realship|deep` - V2 3D engine emitter filter mode.
-- `/rsp speedfilter off|helmet|cockpit|cockpitnooxy|realship|deep` - speed/ambient filter mode.
-- `/rsp ambient on|off` - ambient filter toggle.
 
 Utility:
 

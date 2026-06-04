@@ -50,7 +50,7 @@ namespace RealisticSoundPlus
                 {
                     case "help":
                     case "?":
-                        Notify("/rsp show | /rsp detail on | /rsp state on | /rsp detailgain 1 | /rsp stategain 1 | /rsp dist 36 | /rsp distcurve 1 | /rsp state2dpos off | /rsp filter cockpit | /rsp speedfilter deep | /rsp ambient on | /rsp sounds | /rsp save | /rsp reload");
+                        Notify("/rsp show | /rsp detail on | /rsp state on | /rsp detailgain 1 | /rsp stategain 1 | /rsp dist 36 | /rsp distcurve 1 | /rsp state2dpos off | /rsp filter cockpit | /rsp sounds | /rsp save | /rsp reload");
                         break;
                     case "show":
                         Notify(SettingsManager.Summary());
@@ -65,13 +65,6 @@ namespace RealisticSoundPlus
                         break;
                     case "filter":
                         SetFilter(parts);
-                        break;
-                    case "speedfilter":
-                    case "ambientfilter":
-                        SetSpeedAmbientFilter(parts);
-                        break;
-                    case "ambient":
-                        SetAmbient(parts);
                         break;
                     case "detail":
                     case "enginedetail":
@@ -124,23 +117,6 @@ namespace RealisticSoundPlus
             }
 
             Notify("Audio debug overlay " + (AudioDebugOverlay.Enabled ? "on" : "off") + ".");
-        }
-
-        private static void SetAmbient(string[] parts)
-        {
-            if (parts.Length < 2)
-            {
-                Notify("Usage: /rsp ambient <on|off>");
-                return;
-            }
-
-            if (!SettingsManager.TrySetAmbient(parts[1]))
-            {
-                Notify("Usage: /rsp ambient <on|off>");
-                return;
-            }
-
-            Notify(SettingsManager.Summary());
         }
 
         private static void SetV2Detail(string[] parts)
@@ -205,23 +181,6 @@ namespace RealisticSoundPlus
             if (!SettingsManager.TrySetFilter(parts[1]))
             {
                 Notify("Unknown filter. Options: " + SettingsManager.FilterOptions);
-                return;
-            }
-
-            Notify(SettingsManager.Summary());
-        }
-
-        private static void SetSpeedAmbientFilter(string[] parts)
-        {
-            if (parts.Length < 2)
-            {
-                Notify("Usage: /rsp speedfilter <" + SettingsManager.FilterOptions + ">");
-                return;
-            }
-
-            if (!SettingsManager.TrySetSpeedAmbientFilter(parts[1]))
-            {
-                Notify("Unknown speed ambient filter. Options: " + SettingsManager.FilterOptions);
                 return;
             }
 
