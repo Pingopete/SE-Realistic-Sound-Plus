@@ -22,7 +22,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             {
                 AudioEngineV2Runtime.ReportThruster(__instance);
 
-                if (SettingsManager.Current.AudioEngineV2Enabled && ++_patchHits == 1)
+                if (++_patchHits == 1)
                     MyLog.Default.WriteLineAndConsole("[RealisticSoundPlus] V2 thruster reporter is active.");
             }
             catch (Exception ex)

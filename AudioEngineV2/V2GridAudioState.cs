@@ -219,8 +219,8 @@ namespace RealisticSoundPlus.AudioEngineV2
                     ? Clamp((float)Math.Sqrt(snapshot.Target) * settings.V2StateGain * distanceGain, 0f, MaxLayerVolume)
                     : 0f;
 
-                detailTarget *= SmoothStep(snapshot.Target / settings.SpatialSoftFadeRatio);
-                stateTarget *= SmoothStep(snapshot.Target / settings.SpatialSoftFadeRatio);
+                detailTarget *= SmoothStep(snapshot.Target / settings.V2SoftFadeRatio);
+                stateTarget *= SmoothStep(snapshot.Target / settings.V2SoftFadeRatio);
 
                 UpdateLayer(ref _detail, ref _detailValue, ref _lastDetailUpdateUtc, snapshot.Anchor, snapshot.Position, snapshot.DetailCue, detailTarget, V2AudioLayer.Detail, false, false);
                 bool state2D = listener.InsideShip;
@@ -306,7 +306,7 @@ namespace RealisticSoundPlus.AudioEngineV2
 
             private void UpdateLayer(ref LayerEmitter emitter, ref float value, ref DateTime lastUpdateUtc, MyThrust anchor, Vector3D position, string cueName, float target, V2AudioLayer layer, bool force2D, bool force2DPositional)
             {
-                value = Smooth(value, target, ref lastUpdateUtc, SettingsManager.Current.SpatialSmoothingMs);
+                value = Smooth(value, target, ref lastUpdateUtc, SettingsManager.Current.V2SmoothingMs);
                 if (value <= StartThreshold || anchor == null || string.IsNullOrWhiteSpace(cueName))
                 {
                     emitter?.SetVolume(0f);

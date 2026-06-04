@@ -50,7 +50,7 @@ namespace RealisticSoundPlus
                 {
                     case "help":
                     case "?":
-                        Notify("/rsp show | /rsp v2 on | /rsp detail on | /rsp state on | /rsp detailgain 1 | /rsp stategain 1 | /rsp dist 36 | /rsp distcurve 1 | /rsp state2dpos off | /rsp filter cockpit | /rsp speedfilter deep | /rsp ambient on | /rsp spatial on | /rsp sounds | /rsp save | /rsp reload");
+                        Notify("/rsp show | /rsp detail on | /rsp state on | /rsp detailgain 1 | /rsp stategain 1 | /rsp dist 36 | /rsp distcurve 1 | /rsp state2dpos off | /rsp filter cockpit | /rsp speedfilter deep | /rsp ambient on | /rsp sounds | /rsp save | /rsp reload");
                         break;
                     case "show":
                         Notify(SettingsManager.Summary());
@@ -72,13 +72,6 @@ namespace RealisticSoundPlus
                         break;
                     case "ambient":
                         SetAmbient(parts);
-                        break;
-                    case "spatial":
-                        SetSpatial(parts);
-                        break;
-                    case "v2":
-                    case "audioenginev2":
-                        SetAudioEngineV2(parts);
                         break;
                     case "detail":
                     case "enginedetail":
@@ -133,23 +126,6 @@ namespace RealisticSoundPlus
             Notify("Audio debug overlay " + (AudioDebugOverlay.Enabled ? "on" : "off") + ".");
         }
 
-        private static void SetSpatial(string[] parts)
-        {
-            if (parts.Length < 2)
-            {
-                Notify("Usage: /rsp spatial <on|off>");
-                return;
-            }
-
-            if (!SettingsManager.TrySetSpatial(parts[1]))
-            {
-                Notify("Usage: /rsp spatial <on|off>");
-                return;
-            }
-
-            Notify(SettingsManager.Summary());
-        }
-
         private static void SetAmbient(string[] parts)
         {
             if (parts.Length < 2)
@@ -161,23 +137,6 @@ namespace RealisticSoundPlus
             if (!SettingsManager.TrySetAmbient(parts[1]))
             {
                 Notify("Usage: /rsp ambient <on|off>");
-                return;
-            }
-
-            Notify(SettingsManager.Summary());
-        }
-
-        private static void SetAudioEngineV2(string[] parts)
-        {
-            if (parts.Length < 2)
-            {
-                Notify("Usage: /rsp v2 <on|off>");
-                return;
-            }
-
-            if (!SettingsManager.TrySetAudioEngineV2(parts[1]))
-            {
-                Notify("Usage: /rsp v2 <on|off>");
                 return;
             }
 

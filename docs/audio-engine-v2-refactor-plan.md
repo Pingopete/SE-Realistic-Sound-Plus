@@ -29,13 +29,22 @@ The live implementation branch is `v2/live-audio-engine`. It starts from `main`,
 
 First playable V2 checkpoint:
 
-- `/rsp v2 on|off` enables the V2 test route.
-- V2 is active only while the listener is inside or seated in a ship; outside/camera fallback leaves vanilla stock ship audio alone.
+- V2 is the only ship-engine route on this branch. There is no `/rsp v2` opt-in command.
+- V2 takes over while the listener is inside or seated in a ship; outside/camera fallback leaves vanilla stock ship audio alone for now.
 - Each grid can now create up to six grouped `EngineDetail` emitters and six grouped `EngineState` emitters.
 - Detail emitters use thruster block `PrimarySound` where available.
 - State emitters use confirmed vanilla ship-group run loop cues.
 - `/rsp detail`, `/rsp state`, `/rsp detailgain`, `/rsp stategain`, `/rsp dist`, `/rsp distcurve`, and `/rsp state2dpos` are live controls.
 - Debug overlay shows V2 mode, vanilla room probe, active detail/state source counts, and cyan/orange 3D debug spheres for active source groups.
+
+Deprecated ship-engine route code removed from the live branch:
+
+- old continuous vanilla `m_shipCurrentPower` patch
+- old cockpit/seat forced-spatial patch
+- old per-thruster `SpatialThrusterAudioPatch`
+- old ship-interior vanilla emitter muffling patch
+- old hydrogen/ambient block muffling patch
+- old broad vanilla engine cue marker
 
 The reference snapshot contains several useful research patches:
 

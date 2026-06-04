@@ -33,19 +33,16 @@ namespace RealisticSoundPlus.AudioEngineV2
         public static void Update()
         {
             _listener = V2AudioListenerState.Capture();
-            if (!SettingsManager.Current.AudioEngineV2Enabled || _listener.VanillaFallback)
+            if (_listener.VanillaFallback)
                 StopAllEmitters();
 
             CleanupEmptyGridStates();
             V2AudioDebugState.Update(_listener, CountActiveDetailSources(), CountActiveStateSources());
 
-            if (!SettingsManager.Current.AudioEngineV2Enabled)
-                return;
-
             if (!_loggedEnabled)
             {
                 _loggedEnabled = true;
-                MyLog.Default.WriteLineAndConsole("[RealisticSoundPlus] Audio Engine V2 is enabled. Six-direction detail/state emitter routing is active while the listener is inside a ship.");
+                MyLog.Default.WriteLineAndConsole("[RealisticSoundPlus] Audio Engine V2 is the active ship-engine route. Six-direction detail/state emitter routing is active while the listener is inside a ship.");
             }
         }
 
@@ -54,7 +51,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             if (thruster == null || thruster.CubeGrid == null)
                 return;
 
-            if (!SettingsManager.Current.AudioEngineV2Enabled || _listener.VanillaFallback)
+            if (_listener.VanillaFallback)
                 return;
 
             V2GridAudioState state = GetOrCreateGridState(thruster.CubeGrid);

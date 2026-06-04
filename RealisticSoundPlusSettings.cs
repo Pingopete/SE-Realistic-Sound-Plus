@@ -6,11 +6,10 @@ using VRage.Utils;
 
 namespace RealisticSoundPlus
 {
-    public sealed class RealisticSoundPlusSettings
+        public sealed class RealisticSoundPlusSettings
     {
         public float EngineGain { get; set; } = 1.0f;
         public float AudioCurveExponent { get; set; } = 1.0f;
-        public float ControlInfluence { get; set; } = 0.0f;
         public float MinimumShipPresence { get; set; } = 0.35f;
         public float QuietShipForceLog10 { get; set; } = 4.0f;
         public float LoudShipForceLog10 { get; set; } = 7.0f;
@@ -23,12 +22,8 @@ namespace RealisticSoundPlus
         public string EngineFilter { get; set; } = "RealShip";
         public string SpeedAmbientFilter { get; set; } = "Off";
         public bool AmbientMufflingEnabled { get; set; }
-        public bool SpatialAudioEnabled { get; set; } = true;
-        public float SpatialEmitterGain { get; set; } = 1.0f;
-        public float SpatialCentralBlend { get; set; } = 0.25f;
-        public float SpatialSmoothingMs { get; set; } = 100f;
-        public float SpatialSoftFadeRatio { get; set; } = 0.04f;
-        public bool AudioEngineV2Enabled { get; set; }
+        public float V2SmoothingMs { get; set; } = 100f;
+        public float V2SoftFadeRatio { get; set; } = 0.04f;
         public bool V2DetailEnabled { get; set; } = true;
         public bool V2StateEnabled { get; set; } = true;
         public bool V2State2DPositionalTest { get; set; }
@@ -90,7 +85,7 @@ namespace RealisticSoundPlus
 
         public static string Summary()
         {
-            return string.Format(CultureInfo.InvariantCulture, "gain={0:0.00}, curve={1:0.00}, control={2:0.00}, presenceMin={3:0.00}, quietLog={4:0.00}, loudLog={5:0.00}, muffling={6:0.00}, interiorBase={7:0.00}, farTransmission={8:0.00}, filter={9}, speedFilter={10}, ambient={11}, spatial={12}, spatialGain={13:0.00}, center=off, smoothMs={14:0}, fade={15:0.000}, atmosphereFloor={16:0.00}, v2={17}, detail={18}({19:0.00}), state={20}({21:0.00}), dist={22:0}, distcurve={23:0.00}, state2dpos={24}", Current.EngineGain, Current.AudioCurveExponent, Current.ControlInfluence, Current.MinimumShipPresence, Current.QuietShipForceLog10, Current.LoudShipForceLog10, Current.MufflingStrength, Current.InteriorBaseTransmission, Current.FarDistanceTransmission, Current.EngineFilter, Current.SpeedAmbientFilter, Current.AmbientMufflingEnabled ? "on" : "off", Current.SpatialAudioEnabled ? "on" : "off", Current.SpatialEmitterGain, Current.SpatialSmoothingMs, Current.SpatialSoftFadeRatio, Current.AtmosphericMufflingFloor, Current.AudioEngineV2Enabled ? "on" : "off", Current.V2DetailEnabled ? "on" : "off", Current.V2DetailGain, Current.V2StateEnabled ? "on" : "off", Current.V2StateGain, Current.V2EmitterDistance, Current.V2DistanceCurve, Current.V2State2DPositionalTest ? "on" : "off");
+            return string.Format(CultureInfo.InvariantCulture, "route=v2, gain={0:0.00}, curve={1:0.00}, presenceMin={2:0.00}, quietLog={3:0.00}, loudLog={4:0.00}, muffling={5:0.00}, interiorBase={6:0.00}, farTransmission={7:0.00}, filter={8}, speedFilter={9}, ambient={10}, smoothMs={11:0}, fade={12:0.000}, atmosphereFloor={13:0.00}, detail={14}({15:0.00}), state={16}({17:0.00}), dist={18:0}, distcurve={19:0.00}, state2dpos={20}", Current.EngineGain, Current.AudioCurveExponent, Current.MinimumShipPresence, Current.QuietShipForceLog10, Current.LoudShipForceLog10, Current.MufflingStrength, Current.InteriorBaseTransmission, Current.FarDistanceTransmission, Current.EngineFilter, Current.SpeedAmbientFilter, Current.AmbientMufflingEnabled ? "on" : "off", Current.V2SmoothingMs, Current.V2SoftFadeRatio, Current.AtmosphericMufflingFloor, Current.V2DetailEnabled ? "on" : "off", Current.V2DetailGain, Current.V2StateEnabled ? "on" : "off", Current.V2StateGain, Current.V2EmitterDistance, Current.V2DistanceCurve, Current.V2State2DPositionalTest ? "on" : "off");
         }
 
         public static bool TrySet(string name, float value)
@@ -104,10 +99,6 @@ namespace RealisticSoundPlus
                 case "curve":
                 case "exponent":
                     Current.AudioCurveExponent = value;
-                    break;
-                case "control":
-                case "controlinfluence":
-                    Current.ControlInfluence = value;
                     break;
                 case "presence":
                 case "minpresence":
@@ -140,24 +131,13 @@ namespace RealisticSoundPlus
                 case "atmfloor":
                     Current.AtmosphericMufflingFloor = value;
                     break;
-                case "spatialgain":
-                case "spatialemittergain":
-                    Current.SpatialEmitterGain = value;
-                    break;
-                case "spatialcenter":
-                case "spatialcentral":
-                case "spatialblend":
-                    Current.SpatialCentralBlend = value;
-                    break;
                 case "smooth":
                 case "smoothing":
-                case "spatialsmooth":
-                    Current.SpatialSmoothingMs = value;
+                    Current.V2SmoothingMs = value;
                     break;
                 case "fade":
                 case "softfade":
-                case "spatialfade":
-                    Current.SpatialSoftFadeRatio = value;
+                    Current.V2SoftFadeRatio = value;
                     break;
                 case "dist":
                 case "v2dist":
@@ -201,27 +181,11 @@ namespace RealisticSoundPlus
             return true;
         }
 
-        public static bool TrySetSpatial(string value)
-        {
-            if (!TryParseBool(value, out bool enabled))
-                return false;
-            Current.SpatialAudioEnabled = enabled;
-            return true;
-        }
-
         public static bool TrySetAmbient(string value)
         {
             if (!TryParseBool(value, out bool enabled))
                 return false;
             Current.AmbientMufflingEnabled = enabled;
-            return true;
-        }
-
-        public static bool TrySetAudioEngineV2(string value)
-        {
-            if (!TryParseBool(value, out bool enabled))
-                return false;
-            Current.AudioEngineV2Enabled = enabled;
             return true;
         }
 
@@ -321,7 +285,6 @@ namespace RealisticSoundPlus
         {
             Current.EngineGain = Clamp(Current.EngineGain, 0f, 4f);
             Current.AudioCurveExponent = Clamp(Current.AudioCurveExponent, 0.25f, 10f);
-            Current.ControlInfluence = Clamp(Current.ControlInfluence, 0f, 1f);
             Current.MinimumShipPresence = Clamp(Current.MinimumShipPresence, 0f, 1f);
             Current.QuietShipForceLog10 = Clamp(Current.QuietShipForceLog10, 1f, 10f);
             Current.LoudShipForceLog10 = Math.Max(Current.QuietShipForceLog10 + 0.1f, Clamp(Current.LoudShipForceLog10, 1f, 12f));
@@ -333,10 +296,8 @@ namespace RealisticSoundPlus
             Current.AtmosphericMufflingFloor = Clamp(Current.AtmosphericMufflingFloor, 0f, 1f);
             Current.EngineFilter = NormalizeFilter(Current.EngineFilter) ?? "Off";
             Current.SpeedAmbientFilter = NormalizeFilter(Current.SpeedAmbientFilter) ?? "Off";
-            Current.SpatialEmitterGain = Clamp(Current.SpatialEmitterGain, 0f, 4f);
-            Current.SpatialCentralBlend = Clamp(Current.SpatialCentralBlend, 0f, 1f);
-            Current.SpatialSmoothingMs = Clamp(Current.SpatialSmoothingMs, 0f, 500f);
-            Current.SpatialSoftFadeRatio = Clamp(Current.SpatialSoftFadeRatio, 0.001f, 0.25f);
+            Current.V2SmoothingMs = Clamp(Current.V2SmoothingMs, 0f, 500f);
+            Current.V2SoftFadeRatio = Clamp(Current.V2SoftFadeRatio, 0.001f, 0.25f);
             Current.V2DetailGain = Clamp(Current.V2DetailGain, 0f, 4f);
             Current.V2StateGain = Clamp(Current.V2StateGain, 0f, 4f);
             Current.V2EmitterDistance = Clamp(Current.V2EmitterDistance, 1f, 1000f);

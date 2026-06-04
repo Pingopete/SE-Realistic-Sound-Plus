@@ -33,8 +33,7 @@ namespace RealisticSoundPlus.Patches
                 ControlledSpeed = TryGetControlledSpeed(),
                 InsideShip = insideShip,
                 EngineFilter = SettingsManager.Current.EngineFilter,
-                AmbientEnabled = SettingsManager.Current.AmbientMufflingEnabled,
-                SpatialEnabled = SettingsManager.Current.SpatialAudioEnabled
+                AmbientEnabled = SettingsManager.Current.AmbientMufflingEnabled
             };
         }
 
@@ -67,14 +66,13 @@ namespace RealisticSoundPlus.Patches
 
             return string.Format(
                 CultureInfo.InvariantCulture,
-                "atm={0:0.00} {1} speed={2:0.0} inside={3} filter={4} ambient={5} spatial={6}",
+                "atm={0:0.00} {1} speed={2:0.0} inside={3} filter={4} ambient={5} route=v2",
                 snapshot.ListenerPressure,
                 altitude,
                 snapshot.ControlledSpeed,
                 snapshot.InsideShip ? "Y" : "N",
                 snapshot.EngineFilter,
-                snapshot.AmbientEnabled ? "on" : "off",
-                snapshot.SpatialEnabled ? "on" : "off");
+                snapshot.AmbientEnabled ? "on" : "off");
         }
 
         public static string FormatCue(CueSnapshot snapshot)
@@ -176,7 +174,6 @@ namespace RealisticSoundPlus.Patches
             public bool InsideShip;
             public string EngineFilter;
             public bool AmbientEnabled;
-            public bool SpatialEnabled;
         }
 
         public struct CueSnapshot

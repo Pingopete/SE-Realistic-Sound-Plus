@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using HarmonyLib;
 using RealisticSoundPlus.AudioEngineV2;
 using Sandbox.Game.Entities;
-using SpaceEngineers.Game.Entities.Blocks;
 using VRage.Utils;
 
 namespace RealisticSoundPlus.Patches
@@ -101,42 +100,23 @@ namespace RealisticSoundPlus.Patches
             if (emitter == null)
                 return false;
 
-            if (IsThrusterAudioEmitter(emitter) || IsHydrogenEngineAudioEmitter(emitter))
-                return true;
-
-            if (SettingsManager.Current.AmbientMufflingEnabled && IsAmbientAudioEmitter(emitter))
+            if (AudioEngineV2Runtime.IsV2Emitter(emitter))
                 return true;
 
             if (KnownEngineCueEmitters.Contains(emitter))
                 return true;
 
-            return EngineAudioClassifier.IsKnownEngineCue(emitter.SoundId)
-                || EngineAudioClassifier.IsKnownEngineCue(emitter.Sound?.CueEnum)
-                || EngineAudioClassifier.IsKnownEngineCue(emitter.SecondarySound?.CueEnum);
+            return false;
         }
 
         public static bool IsThrusterAudioEmitter(MyEntity3DSoundEmitter emitter)
         {
-            if (emitter == null)
-                return false;
-
-            if (ShipInteriorMufflingPatch.IsKnownThrusterEmitter(emitter))
-                return true;
-
-            return emitter.Entity is MyThrust;
+            return AudioEngineV2Runtime.IsV2Emitter(emitter);
         }
 
         public static bool IsAmbientAudioEmitter(MyEntity3DSoundEmitter emitter)
         {
-            if (emitter == null)
-                return false;
-
-            if (HydrogenEngineAudioPatch.IsKnownAmbientEmitter(emitter))
-                return true;
-
-            return EngineAudioClassifier.IsKnownAmbientCue(emitter.SoundId)
-                || EngineAudioClassifier.IsKnownAmbientCue(emitter.Sound?.CueEnum)
-                || EngineAudioClassifier.IsKnownAmbientCue(emitter.SecondarySound?.CueEnum);
+            return false;
         }
 
         public static bool IsSpeedAmbientAudioEmitter(MyEntity3DSoundEmitter emitter)
@@ -151,13 +131,7 @@ namespace RealisticSoundPlus.Patches
 
         public static bool IsHydrogenEngineAudioEmitter(MyEntity3DSoundEmitter emitter)
         {
-            if (emitter == null)
-                return false;
-
-            if (HydrogenEngineAudioPatch.IsKnownHydrogenEngineEmitter(emitter))
-                return true;
-
-            return emitter.Entity is MyHydrogenEngine;
+            return false;
         }
     }
 }
