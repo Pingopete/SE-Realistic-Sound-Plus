@@ -12,7 +12,8 @@ V2 is now the active ship-engine audio route on this branch. There is no `/rsp v
 
 The current build creates a replacement ship engine soundscape for listener states where RSP should own the ship audio:
 
-- V2 takes over while the listener/camera is inside a ship or seated in a ship controller.
+- V2 takes over while the listener/camera is inside a ship or close to a controlled ship seat/cockpit.
+- Third-person/outside-camera seat states should fall back to stock vanilla ship audio.
 - Exterior fallback states currently leave stock vanilla ship audio alone.
 - Each relevant grid can create up to six grouped engine-detail emitters, one for each thrust direction.
 - Each relevant grid can create up to six grouped engine-state emitters using the same directional positions.
@@ -20,6 +21,7 @@ The current build creates a replacement ship engine soundscape for listener stat
 - State emitters use confirmed vanilla ship sound group run-loop cues.
 - V2-created 3D engine emitters use the shared filter/transmission path.
 - Interior 2D/local state emitters are explicitly filter-exempt.
+- When V2 owns the inside soundscape, confirmed vanilla ship-state cues are suppressed so the replacement emitters are not hidden under the stock centered mix.
 
 Debug marker colors:
 
@@ -56,6 +58,7 @@ For clean V2 testing, this branch keeps the active Harmony surface intentionally
 
 - `MyThrust.UpdateAfterSimulation` feeds thruster state into the V2 six-direction audio model.
 - `MyShipSoundComponent.UpdateVolumes` reports vanilla inside/room state to the V2 listener model and overlay.
+- `MyEntity3DSoundEmitter.PlaySound` and `PlaySoundWithDistance` suppress confirmed vanilla ship-state cues only while V2 owns the inside soundscape.
 - `MyEntity3DSoundEmitter.SelectEffect` applies filters only to V2-registered emitters.
 
 Old weapon, breath, ambient, hydrogen-engine, seat, continuous-power, and per-thruster-spatial patches are not active on this branch.

@@ -68,10 +68,13 @@ namespace RealisticSoundPlus.Patches
 
         private static bool IsListenerInsideShip()
         {
+            if (AudioEngineV2Runtime.Listener.InsideShip)
+                return true;
+
             if (DateTime.UtcNow - _lastInsideShipReportUtc <= InsideShipReportLifetime)
                 return true;
 
-            return MyAPIGateway.Session?.ControlledObject is IMyShipController;
+            return false;
         }
 
         public static float GetAtmosphericPressure(Vector3D position)

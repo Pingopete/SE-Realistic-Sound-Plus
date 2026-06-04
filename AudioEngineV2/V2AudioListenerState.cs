@@ -1,3 +1,5 @@
+using System;
+using System.Reflection;
 using RealisticSoundPlus.Patches;
 using Sandbox.ModAPI;
 using VRageMath;
@@ -6,6 +8,9 @@ namespace RealisticSoundPlus.AudioEngineV2
 {
     internal struct V2AudioListenerState
     {
+        private const double SeatInteriorCameraRange = 12.0;
+        private static readonly BindingFlags InstanceMembers = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+
         public Vector3D Position;
         public float Atmosphere;
         public bool InsideShip;
@@ -18,7 +23,8 @@ namespace RealisticSoundPlus.AudioEngineV2
         public static V2AudioListenerState Capture()
         {
             Vector3D position = MyAPIGateway.Session?.Camera?.Position ?? Vector3D.Zero;
-            bool seated = MyAPIGateway.Session?.ControlledObject is IMyShipController;
+            bool controlledShip = TryGetControlledShip(out long controlledGridId, out Vector3D controlledPosition);
+            bool seatedInteriorCamera = controlledShip && IsCameraNearControlledShip(position, controlledPosition);
             bool vanillaInside = false;
             string roomName = "room=?";
             long gridEntityId = 0L;
@@ -30,22 +36,128 @@ namespace RealisticSoundPlus.AudioEngineV2
                 gridEntityId = vanilla.GridEntityId;
             }
 
-            bool insideShip = vanillaInside || seated;
+            if (controlledGridId != 0L)
+                gridEntityId = controlledGridId;
+
+            bool insideShip = vanillaInside || seatedInteriorCamera;
             string modeName = insideShip
-                ? (seated ? "inside-seat" : "inside-room")
-                : "vanilla-fallback";
+                ? (seatedInteriorCamera ? "inside-seat" : "inside-room")
+                : (controlledShip ? "vanilla-fallback-seat-camera" : "vanilla-fallback");
 
             return new V2AudioListenerState
             {
                 Position = position,
                 Atmosphere = ExteriorSoundTransmission.GetAtmosphericPressure(position),
                 InsideShip = insideShip,
-                SeatedInShip = seated,
+                SeatedInShip = seatedInteriorCamera,
                 VanillaFallback = !insideShip,
                 RoomName = roomName,
                 GridEntityId = gridEntityId,
                 ModeName = modeName
             };
+        }
+
+        private static bool IsCameraNearControlledShip(Vector3D cameraPosition, Vector3D controlledPosition)
+        {
+            if (cameraPosition == Vector3D.Zero || controlledPosition == Vector3D.Zero)
+                return true;
+
+            return Vector3D.DistanceSquared(cameraPosition, controlledPosition) <= SeatInteriorCameraRange * SeatInteriorCameraRange;
+        }
+
+        private static bool TryGetControlledShip(out long gridEntityId, out Vector3D controlledPosition)
+        {
+            gridEntityId = 0L;
+            controlledPosition = Vector3D.Zero;
+
+            object controlled = MyAPIGateway.Session?.ControlledObject;
+            if (controlled == null)
+                return false;
+
+            if (controlled is IMyShipController controller)
+            {
+                gridEntityId = TryReadEntityId(controller.CubeGrid);
+                controlledPosition = TryReadPosition(controller);
+                return gridEntityId != 0L;
+            }
+
+            object grid = TryReadMember(controlled, "CubeGrid")
+                ?? TryReadMember(TryReadMember(controlled, "Entity"), "CubeGrid");
+            gridEntityId = TryReadEntityId(grid);
+            controlledPosition = TryReadPosition(controlled);
+            return gridEntityId != 0L;
+        }
+
+        private static object TryReadMember(object instance, string name)
+        {
+            if (instance == null)
+                return null;
+
+            try
+            {
+                PropertyInfo property = instance.GetType().GetProperty(name, InstanceMembers);
+                if (property != null)
+                    return property.GetValue(instance, null);
+
+                FieldInfo field = instance.GetType().GetField(name, InstanceMembers);
+                return field?.GetValue(instance);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static long TryReadEntityId(object instance)
+        {
+            if (instance == null)
+                return 0L;
+
+            try
+            {
+                object value = TryReadMember(instance, "EntityId");
+                if (value == null)
+                    return 0L;
+
+                return Convert.ToInt64(value);
+            }
+            catch
+            {
+                return 0L;
+            }
+        }
+
+        private static Vector3D TryReadPosition(object instance)
+        {
+            if (instance == null)
+                return Vector3D.Zero;
+
+            try
+            {
+                MethodInfo method = instance.GetType().GetMethod("GetPosition", InstanceMembers, null, Type.EmptyTypes, null);
+                object result = method?.Invoke(instance, null);
+                if (result is Vector3D directPosition)
+                    return directPosition;
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                object worldMatrix = TryReadMember(instance, "WorldMatrix");
+                if (worldMatrix is MatrixD matrix)
+                    return matrix.Translation;
+            }
+            catch
+            {
+            }
+
+            object entity = TryReadMember(instance, "Entity");
+            if (entity != null && !ReferenceEquals(entity, instance))
+                return TryReadPosition(entity);
+
+            return Vector3D.Zero;
         }
     }
 }

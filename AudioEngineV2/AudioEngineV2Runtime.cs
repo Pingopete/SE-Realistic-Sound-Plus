@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using RealisticSoundPlus.Patches;
 using Sandbox.Game.Entities;
 using VRage.Utils;
+using VRageMath;
 
 namespace RealisticSoundPlus.AudioEngineV2
 {
@@ -12,6 +13,7 @@ namespace RealisticSoundPlus.AudioEngineV2
         private static readonly HashSet<MyEntity3DSoundEmitter> V2Emitters = new HashSet<MyEntity3DSoundEmitter>();
         private static readonly HashSet<MyEntity3DSoundEmitter> UnfilteredV2Emitters = new HashSet<MyEntity3DSoundEmitter>();
         private static bool _loggedEnabled;
+        private static bool _hasListener;
         private static V2AudioListenerState _listener;
 
         public static V2AudioListenerState Listener => _listener;
@@ -23,6 +25,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             V2Emitters.Clear();
             UnfilteredV2Emitters.Clear();
             _loggedEnabled = false;
+            _hasListener = false;
             _listener = default(V2AudioListenerState);
             VanillaShipEnvironment.Reset();
             V2AudioDebugState.Reset();
@@ -33,6 +36,7 @@ namespace RealisticSoundPlus.AudioEngineV2
         public static void Update()
         {
             _listener = V2AudioListenerState.Capture();
+            _hasListener = true;
             if (_listener.VanillaFallback)
                 StopAllEmitters();
 
@@ -51,11 +55,44 @@ namespace RealisticSoundPlus.AudioEngineV2
             if (thruster == null || thruster.CubeGrid == null)
                 return;
 
+            if (!_hasListener)
+            {
+                _listener = V2AudioListenerState.Capture();
+                _hasListener = true;
+            }
+
             if (_listener.VanillaFallback)
+                return;
+
+            if (_listener.GridEntityId != 0L && thruster.CubeGrid.EntityId != _listener.GridEntityId)
                 return;
 
             V2GridAudioState state = GetOrCreateGridState(thruster.CubeGrid);
             state.ReportThruster(thruster, _listener);
+        }
+
+        public static bool ShouldSuppressVanillaShipCue(MyEntity3DSoundEmitter emitter, string cueName)
+        {
+            if (emitter == null || string.IsNullOrWhiteSpace(cueName))
+                return false;
+
+            if (!_hasListener)
+            {
+                _listener = V2AudioListenerState.Capture();
+                _hasListener = true;
+            }
+
+            if (_listener.VanillaFallback || !_listener.InsideShip)
+                return false;
+
+            if (IsV2Emitter(emitter))
+                return false;
+
+            if (!EngineAudioClassifier.IsKnownVanillaShipStateCue(cueName))
+                return false;
+
+            AudioDiagnostics.RecordCueName(cueName, "v2-vanilla-muted", emitter.VolumeMultiplier, 0f, 0f, 0f, emitter.SourcePosition);
+            return true;
         }
 
         public static void RegisterEmitter(MyEntity3DSoundEmitter emitter, bool skipFilter)

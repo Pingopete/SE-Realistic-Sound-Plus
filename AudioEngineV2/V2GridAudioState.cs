@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using RealisticSoundPlus.Patches;
 using Sandbox.Game.Entities;
+using VRage.Audio;
 using VRage.Utils;
 using VRageMath;
 using VRageRender;
@@ -212,11 +213,12 @@ namespace RealisticSoundPlus.AudioEngineV2
 
                 RealisticSoundPlusSettings settings = SettingsManager.Current;
                 float distanceGain = CalculateDistanceGain(listener, snapshot.Position, settings);
+                float shapedTarget = Clamp01((float)Math.Pow(snapshot.Target, settings.AudioCurveExponent));
                 float detailTarget = settings.V2DetailEnabled
-                    ? Clamp(snapshot.Target * settings.EngineGain * settings.V2DetailGain * distanceGain, 0f, MaxLayerVolume)
+                    ? Clamp(shapedTarget * settings.EngineGain * settings.V2DetailGain * distanceGain, 0f, MaxLayerVolume)
                     : 0f;
                 float stateTarget = settings.V2StateEnabled
-                    ? Clamp((float)Math.Sqrt(snapshot.Target) * settings.V2StateGain * distanceGain, 0f, MaxLayerVolume)
+                    ? Clamp((float)Math.Sqrt(shapedTarget) * settings.V2StateGain * distanceGain, 0f, MaxLayerVolume)
                     : 0f;
 
                 detailTarget *= SmoothStep(snapshot.Target / settings.V2SoftFadeRatio);
@@ -418,7 +420,9 @@ namespace RealisticSoundPlus.AudioEngineV2
                     _cueName = cueName;
                     _force2D = force2D;
                     _force3D = force3D;
-                    Emitter.PlaySound(new MySoundPair(cueName, false), true, false, force2D, true, false, force3D, true);
+                    MySoundPair pair = new MySoundPair(cueName, false);
+                    MyEntity3DSoundEmitter.PreloadSound(pair);
+                    Emitter.PlaySoundWithDistance(new MyCueId(MyStringHash.GetOrCompute(cueName)), true, false, force2D, true, false, force3D, true);
                     IsPlaying = true;
                 }
 

@@ -47,6 +47,12 @@ namespace RealisticSoundPlus.Patches
             RecordCue(emitter.SecondarySound?.CueEnum.ToString(), snapshot);
         }
 
+        public static void RecordCueName(string cueName, string route, float baseVolume, float transmission, float scale, float finalMultiplier, Vector3D sourcePosition)
+        {
+            CueSnapshot snapshot = CreateSnapshot(route, baseVolume, transmission, scale, finalMultiplier, sourcePosition);
+            RecordCue(cueName, snapshot);
+        }
+
         public static bool TryGetCueSnapshot(string cueName, out CueSnapshot snapshot)
         {
             snapshot = default(CueSnapshot);

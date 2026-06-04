@@ -43,6 +43,55 @@ namespace RealisticSoundPlus.Patches
             return IsKnownShipMotionCue(cueName);
         }
 
+        public static bool IsKnownVanillaShipStateCue(string cueName)
+        {
+            if (string.IsNullOrWhiteSpace(cueName))
+                return false;
+
+            switch (cueName.Trim().ToLowerInvariant())
+            {
+                case "shiplargeidle":
+                case "shiplargerunloop":
+                case "shiplargeengine":
+                case "shiplargestart":
+                case "shiplargeend":
+                case "shiplargespeeddown":
+                case "shiplargespeedup":
+                case "shiplargethrusterion":
+                case "shiplargethrusterionidle":
+                case "shiplargethrusterhydrogen":
+                case "shiplargethrusterhydrogenidle":
+                case "shiplargethrusteratmosphericslow":
+                case "shiplargethrusteratmosphericfast":
+                case "shiplargethrusteratmosphericidle":
+                case "shipsmallrunloop":
+                case "shipsmallrunslow":
+                case "shipsmallrunmedium":
+                case "shipsmallrunfast":
+                case "shipsmallengine":
+                case "shipsmallstart":
+                case "shipsmallend":
+                case "shipsmallspeeddown":
+                case "shipsmallspeedup":
+                case "shipsmallthrusterion":
+                case "shipsmallthrusterionidle":
+                case "shipsmallthrusterhydrogen":
+                case "shipsmallthrusterhydrogenidle":
+                case "shipsmallthrusteratmosphericslow":
+                case "shipsmallthrusteratmosphericfast":
+                case "shipsmallthrusteratmosphericidle":
+                case "shipsmallthrusterionpush":
+                case "shipsmallthrusterhydropush":
+                case "shipthrusterionpush":
+                case "shipthrusterhydrogenpush":
+                case "shipthrusterprototech":
+                case "shipthrusterprototechpush":
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
         private static bool IsKnownShipMotionCue(string cueName)
         {
             return cueName.Equals("ShipLargeIdle", StringComparison.OrdinalIgnoreCase)
