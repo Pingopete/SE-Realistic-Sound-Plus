@@ -1,4 +1,5 @@
 using VRage.Utils;
+using RealisticSoundPlus.AudioEngineV2;
 
 namespace RealisticSoundPlus.Patches
 {
@@ -16,6 +17,7 @@ namespace RealisticSoundPlus.Patches
             ShipSeatAudioPatch.ResetRuntimeState();
             ExteriorSoundTransmission.ResetRuntimeState();
             AudioDiagnostics.ResetRuntimeState();
+            AudioEngineV2Runtime.ResetForSession(reason);
 
             MyLog.Default.WriteLineAndConsole("[RealisticSoundPlus] Audio runtime state reset: " + reason);
         }

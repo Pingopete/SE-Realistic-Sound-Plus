@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using RealisticSoundPlus.AudioEngineV2;
 using RealisticSoundPlus.Patches;
 using Sandbox.ModAPI;
 using VRage.Audio;
@@ -52,11 +53,13 @@ namespace RealisticSoundPlus
 
                 DrawLine(0, "Realistic Sound+ audio debug  |  /rsp sounds off", HeaderColor, 0.68f, centerX, startY, rowHeight);
                 DrawLine(1, AudioDiagnostics.FormatGlobal(), HeaderColor, 0.48f, centerX, startY, rowHeight);
-                DrawLine(2, "type  eng  amb  count  volume  cue  | route tr sc base fin d p", HeaderColor, 0.50f, centerX, startY, rowHeight);
+                DrawLine(2, AudioEngineV2Runtime.FormatDebugLine(), HeaderColor, 0.44f, centerX, startY, rowHeight);
+                DrawLine(3, "type  eng  amb  count  volume  cue  | route tr sc base fin d p", HeaderColor, 0.50f, centerX, startY, rowHeight);
+                AudioEngineV2Runtime.DrawDebugMarkers();
 
                 if (rows.Count == 0)
                 {
-                    DrawLine(4, "No currently playing source voices reported.", QuietColor, 0.56f, centerX, startY, rowHeight);
+                    DrawLine(5, "No currently playing source voices reported.", QuietColor, 0.56f, centerX, startY, rowHeight);
                     return;
                 }
 
@@ -76,11 +79,11 @@ namespace RealisticSoundPlus
                         row.Score,
                         row.CueName,
                         diagnostic);
-                    DrawLine(i + 4, text, row.Score > 0.05f ? TextColor : QuietColor, 0.46f, centerX, startY, rowHeight);
+                    DrawLine(i + 5, text, row.Score > 0.05f ? TextColor : QuietColor, 0.46f, centerX, startY, rowHeight);
                 }
 
                 if (rows.Count > shown)
-                    DrawLine(shown + 5, "+ " + (rows.Count - shown).ToString(CultureInfo.InvariantCulture) + " more", QuietColor, 0.5f, centerX, startY, rowHeight);
+                    DrawLine(shown + 6, "+ " + (rows.Count - shown).ToString(CultureInfo.InvariantCulture) + " more", QuietColor, 0.5f, centerX, startY, rowHeight);
             }
             catch (Exception ex)
             {

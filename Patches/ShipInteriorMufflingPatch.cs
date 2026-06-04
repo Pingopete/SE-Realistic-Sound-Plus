@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
+using RealisticSoundPlus.AudioEngineV2;
 using Sandbox.Definitions;
 using Sandbox.Game.Entities;
 using Sandbox.Game.EntityComponents;
@@ -46,6 +47,7 @@ namespace RealisticSoundPlus.Patches
 
                 bool insideShip = (bool)InsideShipField.GetValue(__instance);
                 ExteriorSoundTransmission.ReportListenerInsideShip(insideShip);
+                VanillaShipEnvironment.ReportShipSoundComponent(__instance, insideShip);
                 AudioDiagnostics.UpdateGlobal(insideShip);
                 ApplySpeedAmbientWind(__instance, emitters);
 

@@ -1,5 +1,6 @@
 using System;
 using HarmonyLib;
+using RealisticSoundPlus.AudioEngineV2;
 using RealisticSoundPlus.Patches;
 using Sandbox.ModAPI;
 using VRage.Plugins;
@@ -33,6 +34,7 @@ namespace RealisticSoundPlus
         {
             ResetAudioRuntimeIfSessionChanged();
             SettingsCommands.TryRegister();
+            AudioEngineV2Runtime.Update();
             AudioDebugOverlay.Draw();
 
             if (++_settingsPollFrame >= 300)

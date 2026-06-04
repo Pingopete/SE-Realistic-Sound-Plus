@@ -50,7 +50,7 @@ namespace RealisticSoundPlus
                 {
                     case "help":
                     case "?":
-                        Notify("/rsp show | /rsp gain 1.5 | /rsp muffling 0.7 | /rsp curve 0.65 | /rsp control 0.4 | /rsp quietlog 4 | /rsp loudlog 8 | /rsp filter cockpit | /rsp speedfilter deep | /rsp ambient on | /rsp spatial on | /rsp spatialgain 1.2 | /rsp spatialcenter 0.25 | /rsp smooth 100 | /rsp fade 0.04 | /rsp atmfloor 0.5 | /rsp sounds | /rsp save | /rsp reload");
+                        Notify("/rsp show | /rsp v2 on | /rsp detail on | /rsp state on | /rsp detailgain 1 | /rsp stategain 1 | /rsp dist 36 | /rsp distcurve 1 | /rsp state2dpos off | /rsp filter cockpit | /rsp speedfilter deep | /rsp ambient on | /rsp spatial on | /rsp sounds | /rsp save | /rsp reload");
                         break;
                     case "show":
                         Notify(SettingsManager.Summary());
@@ -75,6 +75,24 @@ namespace RealisticSoundPlus
                         break;
                     case "spatial":
                         SetSpatial(parts);
+                        break;
+                    case "v2":
+                    case "audioenginev2":
+                        SetAudioEngineV2(parts);
+                        break;
+                    case "detail":
+                    case "enginedetail":
+                        SetV2Detail(parts);
+                        break;
+                    case "state":
+                    case "enginestate":
+                    case "statemachine":
+                        SetV2State(parts);
+                        break;
+                    case "state2dpos":
+                    case "state2dposition":
+                    case "positional2d":
+                        SetV2State2DPositionalTest(parts);
                         break;
                     case "sounds":
                     case "audio":
@@ -143,6 +161,74 @@ namespace RealisticSoundPlus
             if (!SettingsManager.TrySetAmbient(parts[1]))
             {
                 Notify("Usage: /rsp ambient <on|off>");
+                return;
+            }
+
+            Notify(SettingsManager.Summary());
+        }
+
+        private static void SetAudioEngineV2(string[] parts)
+        {
+            if (parts.Length < 2)
+            {
+                Notify("Usage: /rsp v2 <on|off>");
+                return;
+            }
+
+            if (!SettingsManager.TrySetAudioEngineV2(parts[1]))
+            {
+                Notify("Usage: /rsp v2 <on|off>");
+                return;
+            }
+
+            Notify(SettingsManager.Summary());
+        }
+
+        private static void SetV2Detail(string[] parts)
+        {
+            if (parts.Length < 2)
+            {
+                Notify("Usage: /rsp detail <on|off>");
+                return;
+            }
+
+            if (!SettingsManager.TrySetV2Detail(parts[1]))
+            {
+                Notify("Usage: /rsp detail <on|off>");
+                return;
+            }
+
+            Notify(SettingsManager.Summary());
+        }
+
+        private static void SetV2State(string[] parts)
+        {
+            if (parts.Length < 2)
+            {
+                Notify("Usage: /rsp state <on|off>");
+                return;
+            }
+
+            if (!SettingsManager.TrySetV2State(parts[1]))
+            {
+                Notify("Usage: /rsp state <on|off>");
+                return;
+            }
+
+            Notify(SettingsManager.Summary());
+        }
+
+        private static void SetV2State2DPositionalTest(string[] parts)
+        {
+            if (parts.Length < 2)
+            {
+                Notify("Usage: /rsp state2dpos <on|off>");
+                return;
+            }
+
+            if (!SettingsManager.TrySetV2State2DPositionalTest(parts[1]))
+            {
+                Notify("Usage: /rsp state2dpos <on|off>");
                 return;
             }
 
