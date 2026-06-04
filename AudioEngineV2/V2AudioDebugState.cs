@@ -12,7 +12,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             _snapshot = default(Snapshot);
         }
 
-        public static void Update(V2AudioListenerState listener, int activeDetailSources, int activeStateSources)
+        public static void Update(V2AudioListenerState listener, int activeDetailSources, int activeStateSources, int knownSourceGroups)
         {
             RealisticSoundPlusSettings settings = SettingsManager.Current;
             _snapshot = new Snapshot
@@ -27,6 +27,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                 DistanceCurve = settings.V2DistanceCurve,
                 ActiveDetailSources = activeDetailSources,
                 ActiveStateSources = activeStateSources,
+                KnownSourceGroups = knownSourceGroups,
                 Listener = listener
             };
         }
@@ -40,10 +41,11 @@ namespace RealisticSoundPlus.AudioEngineV2
             string room = Trim(snapshot.Listener.RoomName, 42);
             return string.Format(
                 CultureInfo.InvariantCulture,
-                "route=v2 mode={0} room={1} inside={2} detail={3}/{4:0.00}/x{5} state={6}/{7:0.00}/x{8} dist={9:0} curve={10:0.00} state2dpos={11} atm={12:0.00}",
+                "route=v2 mode={0} room={1} inside={2} groups={3} detail={4}/{5:0.00}/x{6} state={7}/{8:0.00}/x{9} dist={10:0} curve={11:0.00} state2dpos={12} atm={13:0.00}",
                 snapshot.Listener.ModeName,
                 room,
                 snapshot.Listener.InsideShip ? "Y" : "N",
+                snapshot.KnownSourceGroups,
                 snapshot.DetailEnabled ? "on" : "off",
                 snapshot.DetailGain,
                 snapshot.ActiveDetailSources,
@@ -76,6 +78,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             public float DistanceCurve;
             public int ActiveDetailSources;
             public int ActiveStateSources;
+            public int KnownSourceGroups;
             public V2AudioListenerState Listener;
         }
     }

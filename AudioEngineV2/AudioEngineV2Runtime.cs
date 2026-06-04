@@ -41,7 +41,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                 StopAllEmitters();
 
             CleanupEmptyGridStates();
-            V2AudioDebugState.Update(_listener, CountActiveDetailSources(), CountActiveStateSources());
+            V2AudioDebugState.Update(_listener, CountActiveDetailSources(), CountActiveStateSources(), CountKnownSourceGroups());
 
             if (!_loggedEnabled)
             {
@@ -195,6 +195,16 @@ namespace RealisticSoundPlus.AudioEngineV2
             int count = 0;
             foreach (V2GridAudioState state in GridStates.Values)
                 count += state.CountActiveStateSources();
+
+            return count;
+        }
+
+        private static int CountKnownSourceGroups()
+        {
+            DateTime now = DateTime.UtcNow;
+            int count = 0;
+            foreach (V2GridAudioState state in GridStates.Values)
+                count += state.CountKnownSourceGroups(now);
 
             return count;
         }

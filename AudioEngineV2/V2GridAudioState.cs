@@ -15,6 +15,7 @@ namespace RealisticSoundPlus.AudioEngineV2
         private static readonly TimeSpan DirectionUpdateInterval = TimeSpan.FromMilliseconds(50);
         private const float StartThreshold = 0.01f;
         private const float MaxLayerVolume = 1.0f;
+        private const float VanillaFullSpeed = 96f;
 
         private readonly DirectionState[] _directions = new DirectionState[6];
         private DateTime _lastUpdateUtc = DateTime.MinValue;
@@ -35,17 +36,18 @@ namespace RealisticSoundPlus.AudioEngineV2
 
             V2ThrustDirectionGroup direction = DirectionFromVector(thruster.GridThrustDirection);
             string detailCue = V2CueCatalog.SelectDetailCue(thruster);
+            float maxForce = GetMaxForce(thruster);
+            float presence = CalculateThrusterPresence(maxForce, SettingsManager.Current);
             float load = CalculateLoad(thruster);
             if (load <= 0f)
             {
-                _directions[(int)direction].Report(thruster, thruster.WorldMatrix.Translation, 0f, detailCue);
+                _directions[(int)direction].Report(thruster, thruster.WorldMatrix.Translation, 0f, presence, detailCue);
+                Update(thruster.CubeGrid, listener);
                 return;
             }
 
-            float maxForce = GetMaxForce(thruster);
-            float presence = CalculateThrusterPresence(maxForce, SettingsManager.Current);
             float target = Clamp01(load * presence);
-            _directions[(int)direction].Report(thruster, thruster.WorldMatrix.Translation, target, detailCue);
+            _directions[(int)direction].Report(thruster, thruster.WorldMatrix.Translation, target, presence, detailCue);
             Update(thruster.CubeGrid, listener);
         }
 
@@ -96,6 +98,18 @@ namespace RealisticSoundPlus.AudioEngineV2
             for (int i = 0; i < _directions.Length; i++)
             {
                 if (_directions[i].StateActive)
+                    count++;
+            }
+
+            return count;
+        }
+
+        public int CountKnownSourceGroups(DateTime now)
+        {
+            int count = 0;
+            for (int i = 0; i < _directions.Length; i++)
+            {
+                if (_directions[i].HasFreshContribution(now))
                     count++;
             }
 
@@ -194,13 +208,25 @@ namespace RealisticSoundPlus.AudioEngineV2
 
             public bool StateActive => _state != null && _state.IsPlaying;
 
-            public void Report(MyThrust thruster, Vector3D position, float target, string detailCue)
+            public bool HasFreshContribution(DateTime now)
+            {
+                foreach (Contribution contribution in _contributors.Values)
+                {
+                    if (now - contribution.UpdatedUtc <= ContributionLifetime)
+                        return true;
+                }
+
+                return false;
+            }
+
+            public void Report(MyThrust thruster, Vector3D position, float target, float geometryWeight, string detailCue)
             {
                 _contributors[thruster] = new Contribution
                 {
                     Anchor = thruster,
                     Position = position,
                     Target = target,
+                    GeometryWeight = geometryWeight,
                     DetailCue = detailCue,
                     UpdatedUtc = DateTime.UtcNow
                 };
@@ -214,15 +240,16 @@ namespace RealisticSoundPlus.AudioEngineV2
                 RealisticSoundPlusSettings settings = SettingsManager.Current;
                 float distanceGain = CalculateDistanceGain(listener, snapshot.Position, settings);
                 float shapedTarget = Clamp01((float)Math.Pow(snapshot.Target, settings.AudioCurveExponent));
+                float stateInput = Math.Max(shapedTarget, CalculateSpeedStateInput(grid));
                 float detailTarget = settings.V2DetailEnabled
                     ? Clamp(shapedTarget * settings.EngineGain * settings.V2DetailGain * distanceGain, 0f, MaxLayerVolume)
                     : 0f;
                 float stateTarget = settings.V2StateEnabled
-                    ? Clamp((float)Math.Sqrt(shapedTarget) * settings.V2StateGain * distanceGain, 0f, MaxLayerVolume)
+                    ? Clamp((float)Math.Sqrt(stateInput) * settings.EngineGain * settings.V2StateGain * distanceGain, 0f, MaxLayerVolume)
                     : 0f;
 
                 detailTarget *= SmoothStep(snapshot.Target / settings.V2SoftFadeRatio);
-                stateTarget *= SmoothStep(snapshot.Target / settings.V2SoftFadeRatio);
+                stateTarget *= SmoothStep(stateInput / settings.V2SoftFadeRatio);
 
                 UpdateLayer(ref _detail, ref _detailValue, ref _lastDetailUpdateUtc, snapshot.Anchor, snapshot.Position, snapshot.DetailCue, detailTarget, V2AudioLayer.Detail, false, false);
                 bool state2D = listener.InsideShip;
@@ -262,9 +289,14 @@ namespace RealisticSoundPlus.AudioEngineV2
             {
                 Vector3D weightedPosition = Vector3D.Zero;
                 float totalWeight = 0f;
+                Vector3D geometryWeightedPosition = Vector3D.Zero;
+                float totalGeometryWeight = 0f;
                 float strongestTarget = 0f;
+                float strongestGeometryWeight = 0f;
                 MyThrust strongestThruster = null;
+                MyThrust strongestGeometryThruster = null;
                 string strongestDetailCue = null;
+                string strongestGeometryDetailCue = null;
                 List<MyThrust> stale = null;
 
                 foreach (KeyValuePair<MyThrust, Contribution> pair in _contributors)
@@ -276,6 +308,18 @@ namespace RealisticSoundPlus.AudioEngineV2
                             stale = new List<MyThrust>();
                         stale.Add(pair.Key);
                         continue;
+                    }
+
+                    if (contribution.GeometryWeight > 0f)
+                    {
+                        geometryWeightedPosition += contribution.Position * contribution.GeometryWeight;
+                        totalGeometryWeight += contribution.GeometryWeight;
+                        if (contribution.GeometryWeight > strongestGeometryWeight)
+                        {
+                            strongestGeometryWeight = contribution.GeometryWeight;
+                            strongestGeometryThruster = contribution.Anchor;
+                            strongestGeometryDetailCue = contribution.DetailCue;
+                        }
                     }
 
                     if (contribution.Target <= 0f)
@@ -297,12 +341,17 @@ namespace RealisticSoundPlus.AudioEngineV2
                         _contributors.Remove(thruster);
                 }
 
+                MyThrust anchor = strongestThruster ?? strongestGeometryThruster;
+                Vector3D position = totalWeight > 0f
+                    ? weightedPosition / totalWeight
+                    : (totalGeometryWeight > 0f ? geometryWeightedPosition / totalGeometryWeight : (grid?.WorldMatrix.Translation ?? _lastPosition));
+
                 return new DirectionSnapshot
                 {
-                    Anchor = strongestThruster,
-                    Position = totalWeight > 0f ? weightedPosition / totalWeight : (grid?.WorldMatrix.Translation ?? _lastPosition),
+                    Anchor = anchor,
+                    Position = position,
                     Target = strongestTarget,
-                    DetailCue = strongestDetailCue
+                    DetailCue = strongestDetailCue ?? strongestGeometryDetailCue
                 };
             }
 
@@ -335,6 +384,22 @@ namespace RealisticSoundPlus.AudioEngineV2
 
                 float distance = (float)Vector3D.Distance(listener.Position, position);
                 return SixDirectionSourceModel.EvaluateDistanceGain(distance, settings.V2EmitterDistance, settings.V2DistanceCurve);
+            }
+
+            private static float CalculateSpeedStateInput(MyCubeGrid grid)
+            {
+                try
+                {
+                    if (grid?.Physics == null)
+                        return 0f;
+
+                    float speed = (float)grid.Physics.LinearVelocity.Length();
+                    return Clamp01(speed / VanillaFullSpeed);
+                }
+                catch
+                {
+                    return 0f;
+                }
             }
 
             private static float Smooth(float current, float target, ref DateTime lastUpdateUtc, float smoothingMs)
@@ -478,6 +543,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             public MyThrust Anchor;
             public Vector3D Position;
             public float Target;
+            public float GeometryWeight;
             public string DetailCue;
             public DateTime UpdatedUtc;
         }
