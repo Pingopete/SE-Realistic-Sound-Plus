@@ -41,6 +41,7 @@ namespace RealisticSoundPlus
                 AddRows(rows, "S", played.Sound);
                 AddRows(rows, "M", played.Music);
                 AddRows(rows, "H", played.Hud);
+                AddVirtualRows(rows);
 
                 rows.Sort((left, right) => right.Score.CompareTo(left.Score));
 
@@ -89,6 +90,22 @@ namespace RealisticSoundPlus
             }
         }
 
+
+        private static void AddVirtualRows(List<Row> rows)
+        {
+            foreach (AudioDiagnostics.VirtualCueSnapshot virtualCue in AudioDiagnostics.GetVirtualCueSnapshots())
+            {
+                rows.Add(new Row
+                {
+                    Kind = "R",
+                    CueName = virtualCue.CueName,
+                    Count = 1,
+                    Score = Math.Max(0f, virtualCue.Snapshot.FinalMultiplier),
+                    EngineCandidate = false,
+                    AmbientCandidate = false
+                });
+            }
+        }
         private static void AddRows(List<Row> rows, string kind, List<IMySourceVoice> voices)
         {
             if (voices == null || voices.Count == 0)

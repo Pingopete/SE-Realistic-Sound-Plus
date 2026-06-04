@@ -46,10 +46,20 @@ namespace RealisticSoundPlus.Patches
 
         public static void ResetRuntimeState()
         {
+            RestoreCachedTransmissions();
             LastTransmissionByEmitter.Clear();
             KnownExteriorWeaponEmitters.Clear();
             _disabled = false;
             _patchHits = 0;
+        }
+
+        private static void RestoreCachedTransmissions()
+        {
+            foreach (KeyValuePair<MyEntity3DSoundEmitter, float> pair in LastTransmissionByEmitter)
+            {
+                if (pair.Key != null && pair.Value > 0f)
+                    pair.Key.VolumeMultiplier = pair.Key.VolumeMultiplier / pair.Value;
+            }
         }
 
         public static bool IsExteriorWeaponAudioEmitter(MyEntity3DSoundEmitter emitter)

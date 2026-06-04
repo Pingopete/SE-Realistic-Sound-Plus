@@ -67,10 +67,20 @@ namespace RealisticSoundPlus.Patches
 
         public static void ResetRuntimeState()
         {
+            RestoreCachedBaseVolumes();
             BaseVolumeByEmitter.Clear();
             SmoothStatesByEmitter.Clear();
             _disabled = false;
             _patchHits = 0;
+        }
+
+        private static void RestoreCachedBaseVolumes()
+        {
+            foreach (KeyValuePair<MyEntity3DSoundEmitter, float> pair in BaseVolumeByEmitter)
+            {
+                if (pair.Key != null)
+                    pair.Key.VolumeMultiplier = pair.Value;
+            }
         }
 
         private static float CalculateSpatialScale(MyThrust thruster)

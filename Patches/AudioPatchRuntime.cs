@@ -9,6 +9,7 @@ namespace RealisticSoundPlus.Patches
             ShipSoundPowerPatch.ResetRuntimeState();
             ShipInteriorMufflingPatch.ResetRuntimeState();
             SpatialThrusterAudioPatch.ResetRuntimeState();
+            DirectionalSpoolAudioPatch.ResetRuntimeState();
             ThrusterFilterPatch.ResetRuntimeState();
             HydrogenEngineAudioPatch.ResetRuntimeState();
             ExteriorWeaponAudioPatch.ResetRuntimeState();

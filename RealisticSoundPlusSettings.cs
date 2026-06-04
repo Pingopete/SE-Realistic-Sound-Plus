@@ -24,7 +24,9 @@ namespace RealisticSoundPlus
         public string SpeedAmbientFilter { get; set; } = "Off";
         public bool AmbientMufflingEnabled { get; set; }
         public bool SpatialAudioEnabled { get; set; } = true;
+        public bool DirectionalSpoolEnabled { get; set; }
         public float SpatialEmitterGain { get; set; } = 1.0f;
+        public float DirectionalSpoolGain { get; set; } = 0.35f;
         public float SpatialCentralBlend { get; set; } = 0.25f;
         public float SpatialSmoothingMs { get; set; } = 100f;
         public float SpatialSoftFadeRatio { get; set; } = 0.04f;
@@ -82,7 +84,7 @@ namespace RealisticSoundPlus
 
         public static string Summary()
         {
-            return string.Format(CultureInfo.InvariantCulture, "gain={0:0.00}, curve={1:0.00}, control={2:0.00}, presenceMin={3:0.00}, quietLog={4:0.00}, loudLog={5:0.00}, muffling={6:0.00}, interiorBase={7:0.00}, farTransmission={8:0.00}, filter={9}, speedFilter={10}, ambient={11}, spatial={12}, spatialGain={13:0.00}, center=off, smoothMs={14:0}, fade={15:0.000}, atmosphereFloor={16:0.00}", Current.EngineGain, Current.AudioCurveExponent, Current.ControlInfluence, Current.MinimumShipPresence, Current.QuietShipForceLog10, Current.LoudShipForceLog10, Current.MufflingStrength, Current.InteriorBaseTransmission, Current.FarDistanceTransmission, Current.EngineFilter, Current.SpeedAmbientFilter, Current.AmbientMufflingEnabled ? "on" : "off", Current.SpatialAudioEnabled ? "on" : "off", Current.SpatialEmitterGain, Current.SpatialSmoothingMs, Current.SpatialSoftFadeRatio, Current.AtmosphericMufflingFloor);
+            return string.Format(CultureInfo.InvariantCulture, "gain={0:0.00}, curve={1:0.00}, control={2:0.00}, presenceMin={3:0.00}, quietLog={4:0.00}, loudLog={5:0.00}, muffling={6:0.00}, interiorBase={7:0.00}, nearDistance={8:0.0}, farDistance={9:0.0}, farTransmission={10:0.00}, filter={11}, speedFilter={12}, ambient={13}, spatial={14}, spool={15}, spatialGain={16:0.00}, spoolGain={17:0.00}, center=off, smoothMs={18:0}, fade={19:0.000}, atmosphereFloor={20:0.00}", Current.EngineGain, Current.AudioCurveExponent, Current.ControlInfluence, Current.MinimumShipPresence, Current.QuietShipForceLog10, Current.LoudShipForceLog10, Current.MufflingStrength, Current.InteriorBaseTransmission, Current.NearDistance, Current.FarDistance, Current.FarDistanceTransmission, Current.EngineFilter, Current.SpeedAmbientFilter, Current.AmbientMufflingEnabled ? "on" : "off", Current.SpatialAudioEnabled ? "on" : "off", Current.DirectionalSpoolEnabled ? "on" : "off", Current.SpatialEmitterGain, Current.DirectionalSpoolGain, Current.SpatialSmoothingMs, Current.SpatialSoftFadeRatio, Current.AtmosphericMufflingFloor);
         }
 
         public static bool TrySet(string name, float value)
@@ -123,8 +125,21 @@ namespace RealisticSoundPlus
                 case "interiorbase":
                     Current.InteriorBaseTransmission = value;
                     break;
+                case "near":
+                case "neardistance":
+                    Current.NearDistance = value;
+                    break;
                 case "far":
+                case "range":
+                case "distance":
+                case "fardistance":
+                    Current.FarDistance = value;
+                    break;
                 case "fartransmission":
+                case "fartrans":
+                case "fartx":
+                case "transmission":
+                case "farvolume":
                     Current.FarDistanceTransmission = value;
                     break;
                 case "atmospherefloor":
@@ -135,6 +150,11 @@ namespace RealisticSoundPlus
                 case "spatialgain":
                 case "spatialemittergain":
                     Current.SpatialEmitterGain = value;
+                    break;
+                case "spoolgain":
+                case "dirspoolgain":
+                case "directionalspoolgain":
+                    Current.DirectionalSpoolGain = value;
                     break;
                 case "spatialcenter":
                 case "spatialcentral":
@@ -181,6 +201,14 @@ namespace RealisticSoundPlus
             if (!TryParseBool(value, out bool enabled))
                 return false;
             Current.SpatialAudioEnabled = enabled;
+            return true;
+        }
+
+        public static bool TrySetDirectionalSpool(string value)
+        {
+            if (!TryParseBool(value, out bool enabled))
+                return false;
+            Current.DirectionalSpoolEnabled = enabled;
             return true;
         }
 
@@ -270,13 +298,14 @@ namespace RealisticSoundPlus
             Current.LoudShipForceLog10 = Math.Max(Current.QuietShipForceLog10 + 0.1f, Clamp(Current.LoudShipForceLog10, 1f, 12f));
             Current.MufflingStrength = Clamp(Current.MufflingStrength, 0f, 1f);
             Current.InteriorBaseTransmission = Clamp(Current.InteriorBaseTransmission, 0.05f, 1f);
-            Current.NearDistance = Clamp(Current.NearDistance, 0f, 100f);
-            Current.FarDistance = Math.Max(Current.NearDistance + 1f, Clamp(Current.FarDistance, 1f, 500f));
-            Current.FarDistanceTransmission = Clamp(Current.FarDistanceTransmission, 0.05f, 1f);
+            Current.FarDistance = Clamp(Current.FarDistance, 0.1f, 500f);
+            Current.NearDistance = Clamp(Current.NearDistance, 0f, Math.Max(0f, Current.FarDistance - 0.001f));
+            Current.FarDistanceTransmission = Clamp(Current.FarDistanceTransmission, 0f, 1f);
             Current.AtmosphericMufflingFloor = Clamp(Current.AtmosphericMufflingFloor, 0f, 1f);
             Current.EngineFilter = NormalizeFilter(Current.EngineFilter) ?? "Off";
             Current.SpeedAmbientFilter = NormalizeFilter(Current.SpeedAmbientFilter) ?? "Off";
             Current.SpatialEmitterGain = Clamp(Current.SpatialEmitterGain, 0f, 4f);
+            Current.DirectionalSpoolGain = Clamp(Current.DirectionalSpoolGain, 0f, 20f);
             Current.SpatialCentralBlend = Clamp(Current.SpatialCentralBlend, 0f, 1f);
             Current.SpatialSmoothingMs = Clamp(Current.SpatialSmoothingMs, 0f, 500f);
             Current.SpatialSoftFadeRatio = Clamp(Current.SpatialSoftFadeRatio, 0.001f, 0.25f);

@@ -1,5 +1,6 @@
 using System;
 using System.Globalization;
+using RealisticSoundPlus.Patches;
 using Sandbox.ModAPI;
 using VRage.Game.ModAPI;
 using VRage.Utils;
@@ -50,7 +51,7 @@ namespace RealisticSoundPlus
                 {
                     case "help":
                     case "?":
-                        Notify("/rsp show | /rsp gain 1.5 | /rsp muffling 0.7 | /rsp curve 0.65 | /rsp control 0.4 | /rsp quietlog 4 | /rsp loudlog 8 | /rsp filter cockpit | /rsp speedfilter deep | /rsp ambient on | /rsp spatial on | /rsp spatialgain 1.2 | /rsp spatialcenter 0.25 | /rsp smooth 100 | /rsp fade 0.04 | /rsp atmfloor 0.5 | /rsp sounds | /rsp save | /rsp reload");
+                        Notify("/rsp show | /rsp gain 1.5 | /rsp curve 0.65 | /rsp filter deep | /rsp near 0 | /rsp far 25 | /rsp transmission 0.2 | /rsp spatial on | /rsp spool on | /rsp spoolgain 1.5 | /rsp smooth 100 | /rsp fade 0.04 | /rsp atmfloor 0.5 | /rsp sounds | /rsp save | /rsp reload");
                         break;
                     case "show":
                         Notify(SettingsManager.Summary());
@@ -61,6 +62,7 @@ namespace RealisticSoundPlus
                         break;
                     case "reload":
                         SettingsManager.Load();
+                        ResetAudioRuntime("settings reloaded");
                         Notify("Reloaded. " + SettingsManager.Summary());
                         break;
                     case "filter":
@@ -75,6 +77,11 @@ namespace RealisticSoundPlus
                         break;
                     case "spatial":
                         SetSpatial(parts);
+                        break;
+                    case "spool":
+                    case "dirspool":
+                    case "directionalspool":
+                        SetDirectionalSpool(parts);
                         break;
                     case "sounds":
                     case "audio":
@@ -129,6 +136,25 @@ namespace RealisticSoundPlus
                 return;
             }
 
+            ResetAudioRuntime("spatial changed");
+            Notify(SettingsManager.Summary());
+        }
+
+        private static void SetDirectionalSpool(string[] parts)
+        {
+            if (parts.Length < 2)
+            {
+                Notify("Usage: /rsp spool <on|off>");
+                return;
+            }
+
+            if (!SettingsManager.TrySetDirectionalSpool(parts[1]))
+            {
+                Notify("Usage: /rsp spool <on|off>");
+                return;
+            }
+
+            ResetAudioRuntime("directional spool changed");
             Notify(SettingsManager.Summary());
         }
 
@@ -146,6 +172,7 @@ namespace RealisticSoundPlus
                 return;
             }
 
+            ResetAudioRuntime("ambient changed");
             Notify(SettingsManager.Summary());
         }
 
@@ -163,6 +190,7 @@ namespace RealisticSoundPlus
                 return;
             }
 
+            ResetAudioRuntime("filter changed");
             Notify(SettingsManager.Summary());
         }
 
@@ -180,6 +208,7 @@ namespace RealisticSoundPlus
                 return;
             }
 
+            ResetAudioRuntime("speed ambient filter changed");
             Notify(SettingsManager.Summary());
         }
 
@@ -197,7 +226,20 @@ namespace RealisticSoundPlus
                 return;
             }
 
+            RefreshAudioForValueSetting(name);
             Notify(SettingsManager.Summary());
+        }
+
+        private static void RefreshAudioForValueSetting(string name)
+        {
+            string normalized = (name ?? string.Empty).ToLowerInvariant();
+            if (normalized == "gain" || normalized == "enginegain" || normalized == "spatialgain" || normalized == "spatialemittergain")
+                SpatialThrusterAudioPatch.ResetRuntimeState();
+        }
+
+        private static void ResetAudioRuntime(string reason)
+        {
+            AudioPatchRuntime.ResetForSession(reason);
         }
 
         private static void Notify(string message)

@@ -27,6 +27,7 @@ namespace RealisticSoundPlus.Patches
         private static readonly FieldInfo ShipGridField = AccessTools.Field(typeof(MyShipSoundComponent), "m_shipGrid");
         private static readonly Dictionary<MyEntity3DSoundEmitter, float> LastTransmissionByEmitter = new Dictionary<MyEntity3DSoundEmitter, float>();
         private static readonly Dictionary<MyEntity3DSoundEmitter, float> SpeedAmbientBaseVolumeByEmitter = new Dictionary<MyEntity3DSoundEmitter, float>();
+        private static readonly Dictionary<MyEntity3DSoundEmitter, float> CenteredSpoolBaseVolumeByEmitter = new Dictionary<MyEntity3DSoundEmitter, float>();
         private static readonly HashSet<MyEntity3DSoundEmitter> KnownThrusterEmitters = new HashSet<MyEntity3DSoundEmitter>();
 
         private static bool _disabled;
@@ -48,6 +49,7 @@ namespace RealisticSoundPlus.Patches
                 ExteriorSoundTransmission.ReportListenerInsideShip(insideShip);
                 AudioDiagnostics.UpdateGlobal(insideShip);
                 ApplySpeedAmbientWind(__instance, emitters);
+                ApplyCenteredSpoolSuppression(emitters);
 
                 if (!insideShip)
                 {
@@ -91,12 +93,75 @@ namespace RealisticSoundPlus.Patches
 
         public static void ResetRuntimeState()
         {
+            RestoreCachedTransmissions();
+            RestoreCachedSpeedAmbientVolumes();
+            RestoreCachedCenteredSpoolVolumes();
             LastTransmissionByEmitter.Clear();
             SpeedAmbientBaseVolumeByEmitter.Clear();
+            CenteredSpoolBaseVolumeByEmitter.Clear();
             KnownThrusterEmitters.Clear();
             _disabled = false;
             _patchHits = 0;
             _speedAmbientPatchHits = 0;
+        }
+
+        private static void RestoreCachedTransmissions()
+        {
+            foreach (KeyValuePair<MyEntity3DSoundEmitter, float> pair in LastTransmissionByEmitter)
+            {
+                if (pair.Key != null && pair.Value > 0f)
+                    pair.Key.VolumeMultiplier = pair.Key.VolumeMultiplier / pair.Value;
+            }
+        }
+
+        private static void RestoreCachedSpeedAmbientVolumes()
+        {
+            foreach (KeyValuePair<MyEntity3DSoundEmitter, float> pair in SpeedAmbientBaseVolumeByEmitter)
+            {
+                if (pair.Key != null)
+                    pair.Key.VolumeMultiplier = pair.Value;
+            }
+        }
+
+        private static void RestoreCachedCenteredSpoolVolumes()
+        {
+            foreach (KeyValuePair<MyEntity3DSoundEmitter, float> pair in CenteredSpoolBaseVolumeByEmitter)
+            {
+                if (pair.Key != null)
+                    pair.Key.VolumeMultiplier = pair.Value;
+            }
+        }
+
+        private static void ApplyCenteredSpoolSuppression(MyEntity3DSoundEmitter[] emitters)
+        {
+            foreach (MyEntity3DSoundEmitter emitter in emitters)
+            {
+                if (emitter == null || !IsCenteredSpoolEmitter(emitter))
+                    continue;
+
+                float baseVolume = RestoreCenteredSpoolEmitter(emitter);
+                emitter.VolumeMultiplier = 0f;
+                CenteredSpoolBaseVolumeByEmitter[emitter] = baseVolume;
+                AudioDiagnostics.RecordEmitter(emitter, "center-spool-muted", baseVolume, 0f, 0f, 0f, emitter.SourcePosition);
+            }
+        }
+
+        private static bool IsCenteredSpoolEmitter(MyEntity3DSoundEmitter emitter)
+        {
+            return EngineAudioClassifier.IsKnownCenteredShipSpoolCue(emitter.SoundId)
+                || EngineAudioClassifier.IsKnownCenteredShipSpoolCue(emitter.Sound?.CueEnum)
+                || EngineAudioClassifier.IsKnownCenteredShipSpoolCue(emitter.SecondarySound?.CueEnum);
+        }
+
+        private static float RestoreCenteredSpoolEmitter(MyEntity3DSoundEmitter emitter)
+        {
+            float volume = emitter.VolumeMultiplier;
+            if (!CenteredSpoolBaseVolumeByEmitter.TryGetValue(emitter, out float baseVolume))
+                return volume;
+
+            CenteredSpoolBaseVolumeByEmitter.Remove(emitter);
+            emitter.VolumeMultiplier = baseVolume;
+            return baseVolume;
         }
 
         private static void ApplySpeedAmbientWind(MyShipSoundComponent component, MyEntity3DSoundEmitter[] emitters)

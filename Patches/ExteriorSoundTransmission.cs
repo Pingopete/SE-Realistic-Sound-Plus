@@ -38,15 +38,18 @@ namespace RealisticSoundPlus.Patches
         public static float Calculate(Vector3D listenerPosition, Vector3D sourcePosition)
         {
             var settings = SettingsManager.Current;
+            double distance = Vector3D.Distance(listenerPosition, sourcePosition);
+            float nearDistance = Math.Min(settings.NearDistance, Math.Max(0f, settings.FarDistance - 0.001f));
+            float distanceRange = Math.Max(0.001f, settings.FarDistance - nearDistance);
+            float distanceBlend = Clamp01((float)((distance - nearDistance) / distanceRange));
+            float distanceTransmission = Lerp(1f, settings.FarDistanceTransmission, distanceBlend);
+
             float effectiveMuffling = CalculateEffectiveMufflingStrength(listenerPosition, sourcePosition, settings);
             if (effectiveMuffling <= 0f)
-                return 1f;
+                return Clamp01(distanceTransmission);
 
-            double distance = Vector3D.Distance(listenerPosition, sourcePosition);
-            float distanceBlend = Clamp01((float)((distance - settings.NearDistance) / (settings.FarDistance - settings.NearDistance)));
-            float distanceTransmission = Lerp(1f, settings.FarDistanceTransmission, distanceBlend);
-            float fullTransmission = Clamp01(settings.InteriorBaseTransmission * distanceTransmission);
-            return Clamp01(1f - (1f - fullTransmission) * effectiveMuffling);
+            float mufflingTransmission = Clamp01(1f - (1f - settings.InteriorBaseTransmission) * effectiveMuffling);
+            return Clamp01(distanceTransmission * mufflingTransmission);
         }
 
         public static float CalculateEffectiveMufflingStrength(Vector3D sourcePosition)

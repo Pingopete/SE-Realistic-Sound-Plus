@@ -34,7 +34,12 @@ namespace RealisticSoundPlus.Patches
                 InsideShip = insideShip,
                 EngineFilter = SettingsManager.Current.EngineFilter,
                 AmbientEnabled = SettingsManager.Current.AmbientMufflingEnabled,
-                SpatialEnabled = SettingsManager.Current.SpatialAudioEnabled
+                SpatialEnabled = SettingsManager.Current.SpatialAudioEnabled,
+                SpoolEnabled = SettingsManager.Current.DirectionalSpoolEnabled,
+                NearDistance = SettingsManager.Current.NearDistance,
+                FarDistance = SettingsManager.Current.FarDistance,
+                FarTransmission = SettingsManager.Current.FarDistanceTransmission,
+                SpoolGain = SettingsManager.Current.DirectionalSpoolGain
             };
         }
 
@@ -47,6 +52,37 @@ namespace RealisticSoundPlus.Patches
             RecordCue(emitter.SoundId.ToString(), snapshot);
             RecordCue(emitter.Sound?.CueEnum.ToString(), snapshot);
             RecordCue(emitter.SecondarySound?.CueEnum.ToString(), snapshot);
+        }
+
+
+        public static void RecordVirtualCue(string cueName, string route, float baseVolume, float transmission, float scale, float finalMultiplier, Vector3D sourcePosition)
+        {
+            if (string.IsNullOrWhiteSpace(cueName))
+                return;
+
+            RecordCue(cueName, CreateSnapshot(route, baseVolume, transmission, scale, finalMultiplier, sourcePosition));
+        }
+
+        public static List<VirtualCueSnapshot> GetVirtualCueSnapshots()
+        {
+            List<VirtualCueSnapshot> snapshots = new List<VirtualCueSnapshot>();
+            DateTime now = DateTime.UtcNow;
+            foreach (KeyValuePair<string, CueSnapshot> pair in CueSnapshots)
+            {
+                if (!pair.Key.StartsWith("RSP-", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                if (now - pair.Value.UpdatedUtc > CueLifetime)
+                    continue;
+
+                snapshots.Add(new VirtualCueSnapshot
+                {
+                    CueName = pair.Key,
+                    Snapshot = pair.Value
+                });
+            }
+
+            return snapshots;
         }
 
         public static bool TryGetCueSnapshot(string cueName, out CueSnapshot snapshot)
@@ -67,14 +103,19 @@ namespace RealisticSoundPlus.Patches
 
             return string.Format(
                 CultureInfo.InvariantCulture,
-                "atm={0:0.00} {1} speed={2:0.0} inside={3} filter={4} ambient={5} spatial={6}",
+                "atm={0:0.00} {1} speed={2:0.0} inside={3} filter={4} ambient={5} spatial={6} spool={7} near={8:0.0} far={9:0.0} ftx={10:0.00} spgain={11:0.00}",
                 snapshot.ListenerPressure,
                 altitude,
                 snapshot.ControlledSpeed,
                 snapshot.InsideShip ? "Y" : "N",
                 snapshot.EngineFilter,
                 snapshot.AmbientEnabled ? "on" : "off",
-                snapshot.SpatialEnabled ? "on" : "off");
+                snapshot.SpatialEnabled ? "on" : "off",
+                snapshot.SpoolEnabled ? "on" : "off",
+                snapshot.NearDistance,
+                snapshot.FarDistance,
+                snapshot.FarTransmission,
+                snapshot.SpoolGain);
         }
 
         public static string FormatCue(CueSnapshot snapshot)
@@ -167,6 +208,12 @@ namespace RealisticSoundPlus.Patches
             return 0f;
         }
 
+
+        public struct VirtualCueSnapshot
+        {
+            public string CueName;
+            public CueSnapshot Snapshot;
+        }
         private struct GlobalSnapshot
         {
             public DateTime UpdatedUtc;
@@ -177,6 +224,11 @@ namespace RealisticSoundPlus.Patches
             public string EngineFilter;
             public bool AmbientEnabled;
             public bool SpatialEnabled;
+            public bool SpoolEnabled;
+            public float NearDistance;
+            public float FarDistance;
+            public float FarTransmission;
+            public float SpoolGain;
         }
 
         public struct CueSnapshot

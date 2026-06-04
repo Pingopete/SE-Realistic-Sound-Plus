@@ -73,12 +73,22 @@ namespace RealisticSoundPlus.Patches
 
         public static void ResetRuntimeState()
         {
+            RestoreCachedTransmissions();
             LastTransmissionByEmitter.Clear();
             KnownHydrogenEngineEmitters.Clear();
             KnownAmbientEmitters.Clear();
             _disabled = false;
             _enginePatchHits = 0;
             _ambientPatchHits = 0;
+        }
+
+        private static void RestoreCachedTransmissions()
+        {
+            foreach (KeyValuePair<MyEntity3DSoundEmitter, float> pair in LastTransmissionByEmitter)
+            {
+                if (pair.Key != null && pair.Value > 0f)
+                    pair.Key.VolumeMultiplier = pair.Key.VolumeMultiplier / pair.Value;
+            }
         }
 
         public static bool IsKnownHydrogenEngineEmitter(MyEntity3DSoundEmitter emitter)
