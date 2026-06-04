@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
+using RealisticSoundPlus.AudioEngineV2;
 using Sandbox.Game.Entities;
 using VRage.Utils;
 using VRageMath;
@@ -37,6 +38,9 @@ namespace RealisticSoundPlus.Patches
                     return;
 
                 float baseVolume = RestoreEmitter(emitter);
+
+                if (SettingsManager.Current.AudioEngineV2Enabled)
+                    return;
 
                 if (!SettingsManager.Current.SpatialAudioEnabled)
                     return;

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using HarmonyLib;
+using RealisticSoundPlus.AudioEngineV2;
 using Sandbox.Game.Entities;
 using SpaceEngineers.Game.Entities.Blocks;
 using VRage.Utils;
@@ -23,6 +24,13 @@ namespace RealisticSoundPlus.Patches
 
             try
             {
+                if (AudioEngineV2Runtime.ShouldSkipEngineFilter(__instance))
+                {
+                    __result = MyStringHash.NullOrEmpty;
+                    AudioDiagnostics.RecordEmitter(__instance, "v2-filter-skip", __instance.VolumeMultiplier, 1f, 1f, __instance.VolumeMultiplier, __instance.SourcePosition);
+                    return;
+                }
+
                 if (SettingsManager.Current.AmbientMufflingEnabled && IsSpeedAmbientAudioEmitter(__instance))
                 {
                     string speedEffectSubtype = SettingsManager.GetSpeedAmbientFilterEffectSubtype();

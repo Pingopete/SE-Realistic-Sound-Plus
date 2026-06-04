@@ -18,6 +18,7 @@ namespace RealisticSoundPlus.Patches
             ExteriorSoundTransmission.ResetRuntimeState();
             AudioDiagnostics.ResetRuntimeState();
             AudioEngineV2Runtime.ResetForSession(reason);
+            V2ThrusterAudioPatch.ResetRuntimeState();
 
             MyLog.Default.WriteLineAndConsole("[RealisticSoundPlus] Audio runtime state reset: " + reason);
         }

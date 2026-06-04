@@ -12,7 +12,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             _snapshot = default(Snapshot);
         }
 
-        public static void Update(V2AudioListenerState listener)
+        public static void Update(V2AudioListenerState listener, int activeDetailSources, int activeStateSources)
         {
             RealisticSoundPlusSettings settings = SettingsManager.Current;
             _snapshot = new Snapshot
@@ -26,6 +26,8 @@ namespace RealisticSoundPlus.AudioEngineV2
                 StateGain = settings.V2StateGain,
                 Distance = settings.V2EmitterDistance,
                 DistanceCurve = settings.V2DistanceCurve,
+                ActiveDetailSources = activeDetailSources,
+                ActiveStateSources = activeStateSources,
                 Listener = listener
             };
         }
@@ -39,15 +41,17 @@ namespace RealisticSoundPlus.AudioEngineV2
             string room = Trim(snapshot.Listener.RoomName, 42);
             return string.Format(
                 CultureInfo.InvariantCulture,
-                "v2={0} mode={1} room={2} inside={3} detail={4}/{5:0.00} state={6}/{7:0.00} dist={8:0} curve={9:0.00} state2dpos={10} atm={11:0.00}",
+                "v2={0} mode={1} room={2} inside={3} detail={4}/{5:0.00}/x{6} state={7}/{8:0.00}/x{9} dist={10:0} curve={11:0.00} state2dpos={12} atm={13:0.00}",
                 snapshot.EngineEnabled ? "on" : "off",
                 snapshot.Listener.ModeName,
                 room,
                 snapshot.Listener.InsideShip ? "Y" : "N",
                 snapshot.DetailEnabled ? "on" : "off",
                 snapshot.DetailGain,
+                snapshot.ActiveDetailSources,
                 snapshot.StateEnabled ? "on" : "off",
                 snapshot.StateGain,
+                snapshot.ActiveStateSources,
                 snapshot.Distance,
                 snapshot.DistanceCurve,
                 snapshot.State2DPositionalTest ? "on" : "off",
@@ -73,6 +77,8 @@ namespace RealisticSoundPlus.AudioEngineV2
             public float StateGain;
             public float Distance;
             public float DistanceCurve;
+            public int ActiveDetailSources;
+            public int ActiveStateSources;
             public V2AudioListenerState Listener;
         }
     }
