@@ -80,8 +80,7 @@ Ship scale:
 Filtering and transmission:
 
 - `/rsp muffling 0.7` - shared V2 exterior/interior muffling strength.
-- `/rsp interior 0.9` - baseline interior transmission.
-- `/rsp far 0.6` - far-distance transmission amount.
+- `/rsp interior 0.9` - baseline transmission floor used by the V2 muffling model; source range is controlled by `/rsp dist` and `/rsp distcurve`.
 - `/rsp atmfloor 0.5` - amount of configured muffling retained at full planetary air density while inside.
 - `/rsp filter off|helmet|cockpit|cockpitnooxy|realship|deep` - V2 3D engine emitter filter mode.
 - `/rsp speedfilter off|helmet|cockpit|cockpitnooxy|realship|deep` - speed/ambient filter mode.

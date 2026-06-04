@@ -6,7 +6,7 @@ using VRage.Utils;
 
 namespace RealisticSoundPlus
 {
-        public sealed class RealisticSoundPlusSettings
+    public sealed class RealisticSoundPlusSettings
     {
         public float EngineGain { get; set; } = 1.0f;
         public float AudioCurveExponent { get; set; } = 1.0f;
@@ -15,9 +15,6 @@ namespace RealisticSoundPlus
         public float LoudShipForceLog10 { get; set; } = 7.0f;
         public float MufflingStrength { get; set; } = 1.0f;
         public float InteriorBaseTransmission { get; set; } = 0.2f;
-        public float NearDistance { get; set; } = 4f;
-        public float FarDistance { get; set; } = 36f;
-        public float FarDistanceTransmission { get; set; } = 1.0f;
         public float AtmosphericMufflingFloor { get; set; } = 0.5f;
         public string EngineFilter { get; set; } = "RealShip";
         public string SpeedAmbientFilter { get; set; } = "Off";
@@ -85,7 +82,7 @@ namespace RealisticSoundPlus
 
         public static string Summary()
         {
-            return string.Format(CultureInfo.InvariantCulture, "route=v2, gain={0:0.00}, curve={1:0.00}, presenceMin={2:0.00}, quietLog={3:0.00}, loudLog={4:0.00}, muffling={5:0.00}, interiorBase={6:0.00}, farTransmission={7:0.00}, filter={8}, speedFilter={9}, ambient={10}, smoothMs={11:0}, fade={12:0.000}, atmosphereFloor={13:0.00}, detail={14}({15:0.00}), state={16}({17:0.00}), dist={18:0}, distcurve={19:0.00}, state2dpos={20}", Current.EngineGain, Current.AudioCurveExponent, Current.MinimumShipPresence, Current.QuietShipForceLog10, Current.LoudShipForceLog10, Current.MufflingStrength, Current.InteriorBaseTransmission, Current.FarDistanceTransmission, Current.EngineFilter, Current.SpeedAmbientFilter, Current.AmbientMufflingEnabled ? "on" : "off", Current.V2SmoothingMs, Current.V2SoftFadeRatio, Current.AtmosphericMufflingFloor, Current.V2DetailEnabled ? "on" : "off", Current.V2DetailGain, Current.V2StateEnabled ? "on" : "off", Current.V2StateGain, Current.V2EmitterDistance, Current.V2DistanceCurve, Current.V2State2DPositionalTest ? "on" : "off");
+            return string.Format(CultureInfo.InvariantCulture, "route=v2, gain={0:0.00}, curve={1:0.00}, presenceMin={2:0.00}, quietLog={3:0.00}, loudLog={4:0.00}, muffling={5:0.00}, interiorBase={6:0.00}, filter={7}, speedFilter={8}, ambient={9}, smoothMs={10:0}, fade={11:0.000}, atmosphereFloor={12:0.00}, detail={13}({14:0.00}), state={15}({16:0.00}), dist={17:0}, distcurve={18:0.00}, state2dpos={19}", Current.EngineGain, Current.AudioCurveExponent, Current.MinimumShipPresence, Current.QuietShipForceLog10, Current.LoudShipForceLog10, Current.MufflingStrength, Current.InteriorBaseTransmission, Current.EngineFilter, Current.SpeedAmbientFilter, Current.AmbientMufflingEnabled ? "on" : "off", Current.V2SmoothingMs, Current.V2SoftFadeRatio, Current.AtmosphericMufflingFloor, Current.V2DetailEnabled ? "on" : "off", Current.V2DetailGain, Current.V2StateEnabled ? "on" : "off", Current.V2StateGain, Current.V2EmitterDistance, Current.V2DistanceCurve, Current.V2State2DPositionalTest ? "on" : "off");
         }
 
         public static bool TrySet(string name, float value)
@@ -121,10 +118,6 @@ namespace RealisticSoundPlus
                 case "interior":
                 case "interiorbase":
                     Current.InteriorBaseTransmission = value;
-                    break;
-                case "far":
-                case "fartransmission":
-                    Current.FarDistanceTransmission = value;
                     break;
                 case "atmospherefloor":
                 case "atmosphericfloor":
@@ -290,9 +283,6 @@ namespace RealisticSoundPlus
             Current.LoudShipForceLog10 = Math.Max(Current.QuietShipForceLog10 + 0.1f, Clamp(Current.LoudShipForceLog10, 1f, 12f));
             Current.MufflingStrength = Clamp(Current.MufflingStrength, 0f, 1f);
             Current.InteriorBaseTransmission = Clamp(Current.InteriorBaseTransmission, 0.05f, 1f);
-            Current.NearDistance = Clamp(Current.NearDistance, 0f, 100f);
-            Current.FarDistance = Math.Max(Current.NearDistance + 1f, Clamp(Current.FarDistance, 1f, 500f));
-            Current.FarDistanceTransmission = Clamp(Current.FarDistanceTransmission, 0.05f, 1f);
             Current.AtmosphericMufflingFloor = Clamp(Current.AtmosphericMufflingFloor, 0f, 1f);
             Current.EngineFilter = NormalizeFilter(Current.EngineFilter) ?? "Off";
             Current.SpeedAmbientFilter = NormalizeFilter(Current.SpeedAmbientFilter) ?? "Off";

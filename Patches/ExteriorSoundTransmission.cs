@@ -1,4 +1,5 @@
 using System;
+using RealisticSoundPlus.AudioEngineV2;
 using Sandbox.Game.Entities;
 using Sandbox.ModAPI;
 using VRage.Utils;
@@ -42,10 +43,9 @@ namespace RealisticSoundPlus.Patches
             if (effectiveMuffling <= 0f)
                 return 1f;
 
-            double distance = Vector3D.Distance(listenerPosition, sourcePosition);
-            float distanceBlend = Clamp01((float)((distance - settings.NearDistance) / (settings.FarDistance - settings.NearDistance)));
-            float distanceTransmission = Lerp(1f, settings.FarDistanceTransmission, distanceBlend);
-            float fullTransmission = Clamp01(settings.InteriorBaseTransmission * distanceTransmission);
+            float distance = (float)Vector3D.Distance(listenerPosition, sourcePosition);
+            float distanceGain = SixDirectionSourceModel.EvaluateDistanceGain(distance, settings.V2EmitterDistance, settings.V2DistanceCurve);
+            float fullTransmission = Clamp01(Lerp(settings.InteriorBaseTransmission, 1f, distanceGain));
             return Clamp01(1f - (1f - fullTransmission) * effectiveMuffling);
         }
 
