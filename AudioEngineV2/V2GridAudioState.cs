@@ -13,13 +13,14 @@ namespace RealisticSoundPlus.AudioEngineV2
     {
         private static readonly TimeSpan ContributionLifetime = TimeSpan.FromSeconds(5);
         private static readonly TimeSpan KnownSourceLifetime = TimeSpan.FromSeconds(30);
-        private static readonly TimeSpan DirectionUpdateInterval = TimeSpan.FromMilliseconds(16);
+        private static readonly TimeSpan DirectionUpdateInterval = TimeSpan.FromMilliseconds(50);
         private const float StartThreshold = 0.01f;
         private const float MaxLayerVolume = 1.0f;
         private const float VanillaFullSpeed = 96f;
         private const float DetailIdleInput = 0.035f;
         private const float StateIdleInput = 0.03f;
-        private const float ActiveCueThreshold = 0.015f;
+        private const float DetailActiveCueOnThreshold = 0.12f;
+        private const float DetailActiveCueOffThreshold = 0.05f;
 
         private readonly DirectionState[] _directions = new DirectionState[6];
         private DateTime _lastUpdateUtc = DateTime.MinValue;
@@ -210,6 +211,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             private string _knownActiveDetailCue;
             private string _knownIdleDetailCue;
             private DateTime _lastKnownUtc = DateTime.MinValue;
+            private bool _detailUsingActiveCue;
 
             public DirectionState(V2ThrustDirectionGroup direction)
             {
@@ -376,9 +378,9 @@ namespace RealisticSoundPlus.AudioEngineV2
                     : (totalGeometryWeight > 0f
                         ? geometryWeightedPosition / totalGeometryWeight
                         : (_hasKnownSource ? _knownPosition : (grid?.WorldMatrix.Translation ?? _lastPosition)));
-                string detailCue = strongestTarget > ActiveCueThreshold
-                    ? (strongestActiveDetailCue ?? strongestGeometryActiveDetailCue ?? _knownActiveDetailCue ?? _knownIdleDetailCue)
-                    : (strongestGeometryIdleDetailCue ?? _knownIdleDetailCue ?? strongestGeometryActiveDetailCue ?? _knownActiveDetailCue);
+                string activeDetailCue = strongestActiveDetailCue ?? strongestGeometryActiveDetailCue ?? _knownActiveDetailCue ?? _knownIdleDetailCue;
+                string idleDetailCue = strongestGeometryIdleDetailCue ?? _knownIdleDetailCue ?? strongestGeometryActiveDetailCue ?? _knownActiveDetailCue;
+                string detailCue = SelectDetailCue(strongestTarget, activeDetailCue, idleDetailCue);
 
                 return new DirectionSnapshot
                 {
@@ -388,6 +390,23 @@ namespace RealisticSoundPlus.AudioEngineV2
                     DetailCue = detailCue,
                     HasGeometry = totalGeometryWeight > 0f || _hasKnownSource
                 };
+            }
+
+            private string SelectDetailCue(float strongestTarget, string activeDetailCue, string idleDetailCue)
+            {
+                if (_detailUsingActiveCue)
+                {
+                    if (strongestTarget <= DetailActiveCueOffThreshold)
+                        _detailUsingActiveCue = false;
+                }
+                else if (strongestTarget >= DetailActiveCueOnThreshold)
+                {
+                    _detailUsingActiveCue = true;
+                }
+
+                return _detailUsingActiveCue
+                    ? (activeDetailCue ?? idleDetailCue)
+                    : (idleDetailCue ?? activeDetailCue);
             }
 
             private void RememberKnownSource(MyThrust thruster, Vector3D position, float geometryWeight, string activeDetailCue, string idleDetailCue, DateTime now)

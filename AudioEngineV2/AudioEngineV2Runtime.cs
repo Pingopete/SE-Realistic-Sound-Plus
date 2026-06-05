@@ -9,6 +9,7 @@ namespace RealisticSoundPlus.AudioEngineV2
 {
     internal static class AudioEngineV2Runtime
     {
+        private static readonly TimeSpan CensusInterval = TimeSpan.FromMilliseconds(50);
         private static readonly Dictionary<long, V2GridAudioState> GridStates = new Dictionary<long, V2GridAudioState>();
         private static readonly Dictionary<long, MyThrust> KnownThrusters = new Dictionary<long, MyThrust>();
         private static readonly HashSet<MyEntity3DSoundEmitter> V2Emitters = new HashSet<MyEntity3DSoundEmitter>();
@@ -23,6 +24,7 @@ namespace RealisticSoundPlus.AudioEngineV2
         private static int _gridMismatchThrusterReports;
         private static int _lastCensusProcessed;
         private static int _lastCensusRemoved;
+        private static DateTime _lastCensusUtc = DateTime.MinValue;
 
         public static V2AudioListenerState Listener => _listener;
 
@@ -43,6 +45,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             _gridMismatchThrusterReports = 0;
             _lastCensusProcessed = 0;
             _lastCensusRemoved = 0;
+            _lastCensusUtc = DateTime.MinValue;
             VanillaShipEnvironment.Reset();
             V2AudioDebugState.Reset();
 
@@ -61,7 +64,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             }
             else
             {
-                RefreshKnownThrusters();
+                RefreshKnownThrustersIfDue();
             }
 
             CleanupEmptyGridStates();
@@ -103,8 +106,12 @@ namespace RealisticSoundPlus.AudioEngineV2
                 return;
             }
 
-            if (_listener.GridEntityId != 0L && thruster.CubeGrid.EntityId != _listener.GridEntityId && !fromCensus)
-                _gridMismatchThrusterReports = SaturatingIncrement(_gridMismatchThrusterReports);
+            if (_listener.GridEntityId != 0L && thruster.CubeGrid.EntityId != _listener.GridEntityId)
+            {
+                if (!fromCensus)
+                    _gridMismatchThrusterReports = SaturatingIncrement(_gridMismatchThrusterReports);
+                return;
+            }
 
             if (fromCensus)
                 _censusThrusterReports = SaturatingIncrement(_censusThrusterReports);
@@ -226,6 +233,16 @@ namespace RealisticSoundPlus.AudioEngineV2
                 id = thruster.GetHashCode();
 
             KnownThrusters[id] = thruster;
+        }
+
+        private static void RefreshKnownThrustersIfDue()
+        {
+            DateTime now = DateTime.UtcNow;
+            if (now - _lastCensusUtc < CensusInterval)
+                return;
+
+            _lastCensusUtc = now;
+            RefreshKnownThrusters();
         }
 
         private static void RefreshKnownThrusters()
