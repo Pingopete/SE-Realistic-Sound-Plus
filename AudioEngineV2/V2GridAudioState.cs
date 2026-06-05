@@ -19,11 +19,14 @@ namespace RealisticSoundPlus.AudioEngineV2
         private const float MaxLayerVolume = 16.0f;
         private const float VanillaFullSpeed = 96f;
         private const float DetailIdleInput = 0.035f;
-        private const float DetailIdleFadeOutRange = 0.15f;
+        private const float DetailIdleFadeOutRange = 0.45f;
+        private const float DetailIdleUnderActive = 0.35f;
         private const float DetailActivePitchMin = 0.5f;
         private const float DetailActivePitchMax = 1.5f;
         private const float StateIdleInput = 0.03f;
         private const float DetailActiveCueOnThreshold = 0.12f;
+        private const float CurrentOutputAudibleThreshold = 0.015f;
+        private const float CurrentOutputNonSeatThreshold = 0.08f;
 
         private readonly DirectionState[] _directions = new DirectionState[6];
         private DateTime _lastUpdateUtc = DateTime.MinValue;
@@ -143,22 +146,21 @@ namespace RealisticSoundPlus.AudioEngineV2
                     return new DetailLoadSample(overrideValue, "ovr");
             }
 
-            if (!listener.HasMoveInput)
-                return new DetailLoadSample(0f, thruster.IsWorking ? "noinput" : "off");
+            bool hasCurrentOutput = TryReadCurrentThrustPercentage(thruster, out float currentPercentage);
+            float currentOutput = hasCurrentOutput ? Clamp01(currentPercentage) : 0f;
 
-            Vector3I direction = thruster.GridThrustDirection;
-            float value = CalculateDirectionalMoveLoad(direction, listener.MoveInput);
-
-            if (value > 0.001f)
+            if (listener.HasMoveInput)
             {
-                if (value < 0.999f)
+                Vector3I direction = thruster.GridThrustDirection;
+                float value = CalculateDirectionalMoveLoad(direction, listener.MoveInput);
+
+                if (value > 0.001f)
                     return new DetailLoadSample(value, "move");
-
-                if (TryReadCurrentThrustPercentage(thruster, out float currentPercentage) && currentPercentage > 0.001f)
-                    return new DetailLoadSample(Clamp01(currentPercentage), "cur");
-
-                return new DetailLoadSample(value, "move");
             }
+
+            float outputThreshold = listener.SeatedInShip ? CurrentOutputAudibleThreshold : CurrentOutputNonSeatThreshold;
+            if (currentOutput > outputThreshold)
+                return new DetailLoadSample(currentOutput, listener.SeatedInShip ? "dmp" : "out");
 
             return new DetailLoadSample(0f, thruster.IsWorking ? "idle" : "off");
         }
@@ -331,7 +333,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                 float shapedTarget = Clamp01((float)Math.Pow(snapshot.Target, settings.AudioCurveExponent));
                 float detailCommand = Clamp01(snapshot.Target);
                 float activeBlend = SmoothStep(detailCommand / DetailIdleFadeOutRange);
-                float idleInput = snapshot.HasGeometry ? DetailIdleInput * (1f - activeBlend) : 0f;
+                float idleInput = snapshot.HasGeometry ? DetailIdleInput * (1f - activeBlend * (1f - DetailIdleUnderActive)) : 0f;
                 float activeInput = detailCommand;
                 float activePitch = Lerp(DetailActivePitchMin, DetailActivePitchMax, detailCommand);
                 float detailOutputGain = CalculateDetailOutputGain(settings);
@@ -618,6 +620,8 @@ namespace RealisticSoundPlus.AudioEngineV2
             private static readonly string[] PitchMemberNames = { "FrequencyRatio", "PitchMultiplier", "Pitch" };
             private static readonly Dictionary<Type, MemberInfo> PitchMembers = new Dictionary<Type, MemberInfo>();
             private static readonly HashSet<Type> NoPitchMembers = new HashSet<Type>();
+            private static readonly HashSet<Type> PitchMemberLogs = new HashSet<Type>();
+            private static readonly HashSet<Type> PitchFailureLogs = new HashSet<Type>();
 
             private string _cueName;
             private bool _force2D;
@@ -757,10 +761,12 @@ namespace RealisticSoundPlus.AudioEngineV2
                     if (member == null)
                     {
                         NoPitchMembers.Add(type);
+                        LogPitchMember(type, null);
                         return false;
                     }
 
                     PitchMembers[type] = member;
+                    LogPitchMember(type, member);
                 }
 
                 try
@@ -788,9 +794,28 @@ namespace RealisticSoundPlus.AudioEngineV2
                 catch
                 {
                     NoPitchMembers.Add(type);
+                    LogPitchFailure(type, member);
                 }
 
                 return false;
+            }
+
+            private static void LogPitchMember(Type type, MemberInfo member)
+            {
+                if (type == null || !PitchMemberLogs.Add(type))
+                    return;
+
+                string memberName = member != null ? member.MemberType + ":" + member.Name : "missing";
+                V2DebugLog.WriteEvent("pitch-member", type.FullName + " member=" + memberName);
+            }
+
+            private static void LogPitchFailure(Type type, MemberInfo member)
+            {
+                if (type == null || !PitchFailureLogs.Add(type))
+                    return;
+
+                string memberName = member != null ? member.MemberType + ":" + member.Name : "unknown";
+                V2DebugLog.WriteEvent("pitch-set-failed", type.FullName + " member=" + memberName);
             }
 
             private static MemberInfo ResolvePitchMember(Type type)

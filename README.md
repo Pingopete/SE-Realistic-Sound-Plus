@@ -18,7 +18,7 @@ The current build creates a replacement ship engine soundscape for listener stat
 - Each relevant grid can create up to six grouped engine-detail emitters, one for each thrust direction.
 - Each relevant grid can create up to six grouped engine-state emitters using the same directional positions.
 - Detail emitters use vanilla ship sound group thruster cues by detected thruster type, with idle cue fallback when a direction has engines but no thrust command.
-- Detail intensity prefers the per-thruster `ThrustOverridePercentage` signal when it is nonzero. During direct movement input, V2 uses analog movement input when available, then falls back to movement-gated `CurrentThrustPercentage` for full-input states.
+- Detail intensity prefers the per-thruster `ThrustOverridePercentage` signal when it is nonzero. During direct ship-control input, V2 uses analog movement input for a linear 0-100% response. With no ship-control input, V2 can fall back to actual `CurrentThrustPercentage` so inertial dampener thrust has an audio path.
 - Detail emitters fall back to vanilla thruster block `PrimarySound` cues if a thruster type cannot be classified.
 - State emitters use confirmed vanilla ship sound group run-loop cues, classified as small/large by grid mass where available.
 - Inside state emitters force Keen's paired D2/local cue variant while still playing from the six directional emitter positions; detail emitters remain 3D/filterable.
@@ -101,9 +101,9 @@ Cue list notes:
 
 `UNCONTROLLED` beside a ship/engine cue means vanilla is playing that cue and RSP has not associated it with a V2-created emitter. V2-created cues should show an RSP route such as `v2-detail-*`, `v2-state-*`, or `filter`.
 
-V2 detail routes include their current command source, for example `v2-detail-Down-active/move cmd=0.40`. `ovr` means `ThrustOverridePercentage`, `move` means analog movement input, and `cur` means movement-gated `CurrentThrustPercentage` for full-input states.
+V2 detail routes include their current command source, for example `v2-detail-Down-active/move cmd=0.40`. `ovr` means `ThrustOverridePercentage`, `move` means analog ship-controller input, `dmp` means seated dampener/current-output thrust, and `out` means current-output thrust above the non-seated threshold. Character walking input should show `move=-` and should not drive engine-detail audio directly.
 
-Detail active volume follows `cmd` linearly, with the idle loop fading out over the first part of thrust input. Active detail also attempts a linear pitch shift from `0.5` at the lowest firing command to `1.5` at full command; idle detail is not pitch-shifted.
+Detail active volume follows `cmd` linearly. The idle loop now overlaps the firing loop across a broader input range to avoid a quiet dip during transition. Active detail also attempts a linear pitch shift from `0.5` at the lowest firing command to `1.5` at full command; idle detail is not pitch-shifted.
 
 Debug log:
 
@@ -134,7 +134,7 @@ The V2 branch writes a lightweight debug log by default:
 
 `%APPDATA%\SpaceEngineers\RealisticSoundPlus-v2-debug.log`
 
-The log records one line per second with the global audio state, V2 route/debug line, and current settings. It rotates to `RealisticSoundPlus-v2-debug.log.old` at about 2 MB.
+The log records one line per second with the global audio state, V2 route/debug line, and current settings. It also writes one-time `pitch-member` events showing whether the active game audio objects expose a writable pitch/frequency member. It rotates to `RealisticSoundPlus-v2-debug.log.old` at about 2 MB.
 
 Controls:
 

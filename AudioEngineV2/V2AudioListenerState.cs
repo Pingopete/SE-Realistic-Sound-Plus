@@ -80,10 +80,9 @@ namespace RealisticSoundPlus.AudioEngineV2
             if (controlled == null)
                 return false;
 
-            hasMoveInput = TryReadMoveInput(controlled, out moveInput);
-
             if (controlled is IMyShipController controller)
             {
+                hasMoveInput = TryReadMoveInput(controller, out moveInput);
                 gridEntityId = TryReadEntityId(controller.CubeGrid);
                 controlledPosition = TryReadPosition(controller);
                 return gridEntityId != 0L;
