@@ -26,6 +26,7 @@ namespace RealisticSoundPlus
         public float V2StateGain { get; set; } = 2.0f;
         public float V2EmitterDistance { get; set; } = 200f;
         public float V2DistanceCurve { get; set; } = 1.0f;
+        public bool V2DebugLogEnabled { get; set; } = true;
     }
 
     internal static class SettingsManager
@@ -81,7 +82,7 @@ namespace RealisticSoundPlus
 
         public static string Summary()
         {
-            return string.Format(CultureInfo.InvariantCulture, "route=v2, gain={0:0.00}, curve={1:0.00}, presenceMin={2:0.00}, quietLog={3:0.00}, loudLog={4:0.00}, muffling={5:0.00}, interiorBase={6:0.00}, filter={7}, smoothMs={8:0}, fade={9:0.000}, atmosphereFloor={10:0.00}, detail={11}({12:0.00}), state={13}({14:0.00}), dist={15:0}, distcurve={16:0.00}, state2dpos={17}", Current.EngineGain, Current.AudioCurveExponent, Current.MinimumShipPresence, Current.QuietShipForceLog10, Current.LoudShipForceLog10, Current.MufflingStrength, Current.InteriorBaseTransmission, Current.EngineFilter, Current.V2SmoothingMs, Current.V2SoftFadeRatio, Current.AtmosphericMufflingFloor, Current.V2DetailEnabled ? "on" : "off", Current.V2DetailGain, Current.V2StateEnabled ? "on" : "off", Current.V2StateGain, Current.V2EmitterDistance, Current.V2DistanceCurve, Current.V2State2DPositionalTest ? "on" : "off");
+            return string.Format(CultureInfo.InvariantCulture, "route=v2, gain={0:0.00}, curve={1:0.00}, presenceMin={2:0.00}, quietLog={3:0.00}, loudLog={4:0.00}, muffling={5:0.00}, interiorBase={6:0.00}, filter={7}, smoothMs={8:0}, fade={9:0.000}, atmosphereFloor={10:0.00}, detail={11}({12:0.00}), state={13}({14:0.00}), dist={15:0}, distcurve={16:0.00}, state2dpos={17}, log={18}", Current.EngineGain, Current.AudioCurveExponent, Current.MinimumShipPresence, Current.QuietShipForceLog10, Current.LoudShipForceLog10, Current.MufflingStrength, Current.InteriorBaseTransmission, Current.EngineFilter, Current.V2SmoothingMs, Current.V2SoftFadeRatio, Current.AtmosphericMufflingFloor, Current.V2DetailEnabled ? "on" : "off", Current.V2DetailGain, Current.V2StateEnabled ? "on" : "off", Current.V2StateGain, Current.V2EmitterDistance, Current.V2DistanceCurve, Current.V2State2DPositionalTest ? "on" : "off", Current.V2DebugLogEnabled ? "on" : "off");
         }
 
         public static bool TrySet(string name, float value)
@@ -188,6 +189,14 @@ namespace RealisticSoundPlus
             return true;
         }
 
+        public static bool TrySetV2DebugLog(string value)
+        {
+            if (!TryParseBool(value, out bool enabled))
+                return false;
+            Current.V2DebugLogEnabled = enabled;
+            return true;
+        }
+
         private static bool TryParseBool(string value, out bool enabled)
         {
             switch ((value ?? string.Empty).Trim().ToLowerInvariant())
@@ -284,6 +293,7 @@ namespace RealisticSoundPlus
                 Current.EngineFilter = "Deep";
             Current.V2DetailEnabled = true;
             Current.V2StateEnabled = true;
+            Current.V2DebugLogEnabled = true;
         }
 
         private static float Clamp(float value, float min, float max)

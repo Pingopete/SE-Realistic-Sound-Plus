@@ -35,6 +35,7 @@ namespace RealisticSoundPlus
             ResetAudioRuntimeIfSessionChanged();
             SettingsCommands.TryRegister();
             AudioEngineV2Runtime.Update();
+            V2DebugLog.Update();
             AudioDebugOverlay.Draw();
 
             if (++_settingsPollFrame >= 300)

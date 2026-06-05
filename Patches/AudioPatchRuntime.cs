@@ -13,6 +13,7 @@ namespace RealisticSoundPlus.Patches
             ExteriorSoundTransmission.ResetRuntimeState();
             AudioDiagnostics.ResetRuntimeState();
             AudioEngineV2Runtime.ResetForSession(reason);
+            V2DebugLog.ResetForSession(reason);
             V2ThrusterAudioPatch.ResetRuntimeState();
             V2ShipEnvironmentPatch.ResetRuntimeState();
             V2VanillaShipCueSuppressionPatch.ResetRuntimeState();

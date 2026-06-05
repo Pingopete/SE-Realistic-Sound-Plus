@@ -1,5 +1,6 @@
 using System;
 using System.Globalization;
+using RealisticSoundPlus.AudioEngineV2;
 using Sandbox.ModAPI;
 using VRage.Game.ModAPI;
 using VRage.Utils;
@@ -50,7 +51,7 @@ namespace RealisticSoundPlus
                 {
                     case "help":
                     case "?":
-                        Notify("/rsp show | /rsp detail on | /rsp state on | /rsp detailgain 1 | /rsp stategain 1 | /rsp dist 36 | /rsp distcurve 1 | /rsp state2dpos off | /rsp filter cockpit | /rsp sounds | /rsp save | /rsp reload");
+                        Notify("/rsp show | /rsp detail on | /rsp state on | /rsp detailgain 2 | /rsp stategain 2 | /rsp dist 200 | /rsp distcurve 1 | /rsp state2dpos off | /rsp filter deep | /rsp sounds | /rsp log | /rsp logpath | /rsp save | /rsp reload");
                         break;
                     case "show":
                         Notify(SettingsManager.Summary());
@@ -83,6 +84,13 @@ namespace RealisticSoundPlus
                     case "sounds":
                     case "audio":
                         ToggleAudioOverlay(parts);
+                        break;
+                    case "log":
+                    case "debuglog":
+                        ToggleDebugLog(parts);
+                        break;
+                    case "logpath":
+                        Notify(V2DebugLog.Path);
                         break;
                     default:
                         SetValue(command, parts);
@@ -117,6 +125,25 @@ namespace RealisticSoundPlus
             }
 
             Notify("Audio debug overlay " + (AudioDebugOverlay.Enabled ? "on" : "off") + ".");
+        }
+
+        private static void ToggleDebugLog(string[] parts)
+        {
+            if (parts.Length >= 2)
+            {
+                if (!SettingsManager.TrySetV2DebugLog(parts[1]))
+                {
+                    Notify("Usage: /rsp log [on|off]");
+                    return;
+                }
+            }
+            else
+            {
+                SettingsManager.Current.V2DebugLogEnabled = !SettingsManager.Current.V2DebugLogEnabled;
+            }
+
+            V2DebugLog.WriteEvent("command", "debug log " + (SettingsManager.Current.V2DebugLogEnabled ? "on" : "off"));
+            Notify("V2 debug log " + (SettingsManager.Current.V2DebugLogEnabled ? "on" : "off") + ": " + V2DebugLog.Path);
         }
 
         private static void SetV2Detail(string[] parts)

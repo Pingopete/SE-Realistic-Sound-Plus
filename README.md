@@ -52,6 +52,19 @@ Room readout note:
 
 The `room=` value is currently a reflective probe from vanilla `MyShipSoundComponent`. If Keen does not expose a useful room name/id in that object for a given state, the overlay will report that the vanilla room id is unavailable.
 
+## Debug Log
+
+The V2 branch writes a lightweight debug log by default:
+
+`%APPDATA%\SpaceEngineers\RealisticSoundPlus-v2-debug.log`
+
+The log records one line per second with the global audio state, V2 route/debug line, and current settings. It rotates to `RealisticSoundPlus-v2-debug.log.old` at about 2 MB.
+
+Controls:
+
+- `/rsp log on|off` - toggles the V2 debug log.
+- `/rsp logpath` - prints the current log path.
+
 ## Active Runtime Hooks
 
 For clean V2 testing, this branch keeps the active Harmony surface intentionally narrow:
@@ -102,6 +115,8 @@ Filtering and transmission:
 Utility:
 
 - `/rsp show` - prints current runtime settings.
+- `/rsp log on|off` - toggles the V2 debug log.
+- `/rsp logpath` - prints the V2 debug log path.
 - `/rsp save` - writes current values to XML.
 - `/rsp reload` - reloads XML config from disk.
 - `/rsp help` - prints the short in-game command list.
