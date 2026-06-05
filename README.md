@@ -75,6 +75,8 @@ Overlay fields to watch:
 | `groups` | Known six-direction source groups discovered from thrusters. | Greater than `0`; up to `6` for full direction coverage. |
 | `thr=patch/raw/accepted` | Thruster patch hits, reports received, reports accepted by V2. | All three numbers climbing while in a powered ship. |
 | `rej=fallback/grid` | Reports rejected by fallback state or grid mismatch. | Low or zero while inside the controlled ship. |
+| `emit=registered/unfiltered` | V2-created emitters currently registered with diagnostics/filtering. | Greater than `0` once V2 audio is actually alive. |
+| `flt=hits` | Number of times the low-pass filter hook has controlled an emitter. | Climbs when V2 3D emitters are active and filterable. |
 | `detail=on/gain/xN` | Detail layer toggle, gain, and active detail emitter count. | `xN` greater than `0` when thrusting. |
 | `state=on/gain/xN` | State layer toggle, gain, and active state emitter count. | `xN` greater than `0` after groups are discovered. |
 | `dist` | Shared hearing range. | Raise this if groups exist but no sound is heard. |
@@ -87,6 +89,10 @@ Marker colors:
 | Bright cyan | Active V2 engine-detail emitter. |
 | Bright orange | Active V2 engine-state emitter. |
 | Dim cyan/orange | Known source group, currently quiet or not actively playing. |
+
+Cue list note:
+
+`UNCONTROLLED` beside a ship/engine cue means vanilla is playing that cue and RSP has not associated it with a V2-created emitter. V2-created cues should show an RSP route such as `v2-detail-*`, `v2-state-*`, or `filter`.
 
 Debug log:
 

@@ -15,6 +15,10 @@ namespace RealisticSoundPlus.Patches
         private static bool _disabled;
         private static int _patchHits;
 
+        public static bool Disabled => _disabled;
+
+        public static int PatchHits => _patchHits;
+
         private static void Postfix(MyEntity3DSoundEmitter __instance, ref MyStringHash __result)
         {
             if (_disabled)

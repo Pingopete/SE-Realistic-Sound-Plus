@@ -42,7 +42,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             string room = Trim(snapshot.Listener.RoomName, 42);
             return string.Format(
                 CultureInfo.InvariantCulture,
-                "route=v2 mode={0} room={1} inside={2} groups={3} thr={4}/{5}/{6} rej={7}/{8}{9} detail={10}/{11:0.00}/x{12} state={13}/{14:0.00}/x{15} dist={16:0} curve={17:0.00} state2dpos={18} atm={19:0.00}",
+                "route=v2 mode={0} room={1} inside={2} groups={3} thr={4}/{5}/{6} rej={7}/{8}{9} emit={10}/{11} flt={12}{13} detail={14}/{15:0.00}/x{16} state={17}/{18:0.00}/x{19} dist={20:0} curve={21:0.00} state2dpos={22} atm={23:0.00}",
                 snapshot.Listener.ModeName,
                 room,
                 snapshot.Listener.InsideShip ? "Y" : "N",
@@ -53,6 +53,10 @@ namespace RealisticSoundPlus.AudioEngineV2
                 snapshot.Thrusters.FallbackRejectedReports,
                 snapshot.Thrusters.GridMismatchReports,
                 snapshot.Thrusters.PatchDisabled ? " DISABLED" : string.Empty,
+                snapshot.Thrusters.RegisteredEmitters,
+                snapshot.Thrusters.UnfilteredEmitters,
+                snapshot.Thrusters.FilterHits,
+                snapshot.Thrusters.FilterDisabled ? " DISABLED" : string.Empty,
                 snapshot.DetailEnabled ? "on" : "off",
                 snapshot.DetailGain,
                 snapshot.ActiveDetailSources,
@@ -98,6 +102,10 @@ namespace RealisticSoundPlus.AudioEngineV2
             public int AcceptedReports;
             public int FallbackRejectedReports;
             public int GridMismatchReports;
+            public int RegisteredEmitters;
+            public int UnfilteredEmitters;
+            public int FilterHits;
+            public bool FilterDisabled;
         }
     }
 }

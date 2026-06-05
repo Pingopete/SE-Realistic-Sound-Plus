@@ -12,6 +12,7 @@ namespace RealisticSoundPlus.AudioEngineV2
     internal sealed class V2GridAudioState
     {
         private static readonly TimeSpan ContributionLifetime = TimeSpan.FromSeconds(5);
+        private static readonly TimeSpan KnownSourceLifetime = TimeSpan.FromSeconds(30);
         private static readonly TimeSpan DirectionUpdateInterval = TimeSpan.FromMilliseconds(50);
         private const float StartThreshold = 0.01f;
         private const float MaxLayerVolume = 1.0f;
@@ -199,6 +200,12 @@ namespace RealisticSoundPlus.AudioEngineV2
             private DateTime _lastDetailUpdateUtc = DateTime.UtcNow;
             private DateTime _lastStateUpdateUtc = DateTime.UtcNow;
             private Vector3D _lastPosition;
+            private bool _hasKnownSource;
+            private Vector3D _knownPosition;
+            private float _knownGeometryWeight;
+            private MyThrust _knownAnchor;
+            private string _knownDetailCue;
+            private DateTime _lastKnownUtc = DateTime.MinValue;
 
             public DirectionState(V2ThrustDirectionGroup direction)
             {
@@ -209,7 +216,7 @@ namespace RealisticSoundPlus.AudioEngineV2
 
             public bool StateActive => _state != null && _state.IsPlaying;
 
-            public bool HasKnownContribution => _contributors.Count > 0;
+            public bool HasKnownContribution => _hasKnownSource || _contributors.Count > 0;
 
             public bool HasFreshContribution(DateTime now)
             {
@@ -224,6 +231,7 @@ namespace RealisticSoundPlus.AudioEngineV2
 
             public void Report(MyThrust thruster, Vector3D position, float target, float geometryWeight, string detailCue)
             {
+                DateTime now = DateTime.UtcNow;
                 _contributors[thruster] = new Contribution
                 {
                     Anchor = thruster,
@@ -231,8 +239,10 @@ namespace RealisticSoundPlus.AudioEngineV2
                     Target = target,
                     GeometryWeight = geometryWeight,
                     DetailCue = detailCue,
-                    UpdatedUtc = DateTime.UtcNow
+                    UpdatedUtc = now
                 };
+
+                RememberKnownSource(thruster, position, geometryWeight, detailCue, now);
             }
 
             public void Update(MyCubeGrid grid, V2AudioListenerState listener, string stateCue, DateTime now)
@@ -276,20 +286,20 @@ namespace RealisticSoundPlus.AudioEngineV2
                         return false;
                 }
 
-                return true;
+                return !_hasKnownSource || now - _lastKnownUtc > KnownSourceLifetime;
             }
 
             public void DrawDebugMarkers()
             {
                 if (_detail != null && _detail.IsPlaying)
                     DrawMarker(_detail.Position, new Color(90, 220, 255, 220), 0.7f);
-                else if (HasKnownContribution && _lastPosition != Vector3D.Zero)
-                    DrawMarker(_lastPosition, new Color(60, 150, 180, 120), 0.45f);
+                else if (HasKnownContribution)
+                    DrawMarker(GetBestDebugPosition(), new Color(60, 150, 180, 120), 0.45f);
 
                 if (_state != null && _state.IsPlaying)
                     DrawMarker(_state.Position, new Color(255, 180, 80, 230), 1.05f);
-                else if (HasKnownContribution && _lastPosition != Vector3D.Zero)
-                    DrawMarker(_lastPosition, new Color(180, 120, 60, 120), 0.65f);
+                else if (HasKnownContribution)
+                    DrawMarker(GetBestDebugPosition(), new Color(180, 120, 60, 120), 0.65f);
             }
 
             private DirectionSnapshot BuildSnapshot(MyCubeGrid grid, DateTime now)
@@ -351,16 +361,46 @@ namespace RealisticSoundPlus.AudioEngineV2
                 MyThrust anchor = strongestThruster ?? strongestGeometryThruster;
                 Vector3D position = totalWeight > 0f
                     ? weightedPosition / totalWeight
-                    : (totalGeometryWeight > 0f ? geometryWeightedPosition / totalGeometryWeight : (grid?.WorldMatrix.Translation ?? _lastPosition));
+                    : (totalGeometryWeight > 0f
+                        ? geometryWeightedPosition / totalGeometryWeight
+                        : (_hasKnownSource ? _knownPosition : (grid?.WorldMatrix.Translation ?? _lastPosition)));
+                anchor = anchor ?? _knownAnchor;
+                string detailCue = strongestDetailCue ?? strongestGeometryDetailCue ?? _knownDetailCue;
 
                 return new DirectionSnapshot
                 {
                     Anchor = anchor,
                     Position = position,
                     Target = strongestTarget,
-                    DetailCue = strongestDetailCue ?? strongestGeometryDetailCue,
-                    HasGeometry = totalGeometryWeight > 0f
+                    DetailCue = detailCue,
+                    HasGeometry = totalGeometryWeight > 0f || _hasKnownSource
                 };
+            }
+
+            private void RememberKnownSource(MyThrust thruster, Vector3D position, float geometryWeight, string detailCue, DateTime now)
+            {
+                if (position == Vector3D.Zero)
+                    return;
+
+                _hasKnownSource = true;
+                _lastKnownUtc = now;
+                _lastPosition = position;
+
+                if (!_hasKnownSource || _knownPosition == Vector3D.Zero || geometryWeight >= _knownGeometryWeight)
+                {
+                    _knownPosition = position;
+                    _knownGeometryWeight = geometryWeight;
+                    _knownAnchor = thruster;
+                    _knownDetailCue = detailCue;
+                }
+            }
+
+            private Vector3D GetBestDebugPosition()
+            {
+                if (_lastPosition != Vector3D.Zero)
+                    return _lastPosition;
+
+                return _knownPosition;
             }
 
             private void UpdateLayer(ref LayerEmitter emitter, ref float value, ref DateTime lastUpdateUtc, MyThrust anchor, Vector3D position, string cueName, float target, V2AudioLayer layer, bool force2D, bool force2DPositional)

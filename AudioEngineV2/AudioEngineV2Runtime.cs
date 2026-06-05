@@ -94,7 +94,11 @@ namespace RealisticSoundPlus.AudioEngineV2
                 RawReports = _rawThrusterReports,
                 AcceptedReports = _acceptedThrusterReports,
                 FallbackRejectedReports = _fallbackRejectedThrusterReports,
-                GridMismatchReports = _gridMismatchThrusterReports
+                GridMismatchReports = _gridMismatchThrusterReports,
+                RegisteredEmitters = V2Emitters.Count,
+                UnfilteredEmitters = UnfilteredV2Emitters.Count,
+                FilterHits = ThrusterFilterPatch.PatchHits,
+                FilterDisabled = ThrusterFilterPatch.Disabled
             };
         }
 
