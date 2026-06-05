@@ -20,7 +20,7 @@ The current build creates a replacement ship engine soundscape for listener stat
 - Detail emitters use vanilla ship sound group thruster cues by detected thruster type, with idle cue fallback when a direction has engines but no thrust input.
 - Detail emitters fall back to vanilla thruster block `PrimarySound` cues if a thruster type cannot be classified.
 - State emitters use confirmed vanilla ship sound group run-loop cues, classified as small/large by grid mass where available.
-- Inside state emitters force the cue through the 2D/local variant; detail emitters remain 3D/filterable.
+- Inside state emitters force Keen's paired D2/local cue variant while still playing from the six directional emitter positions; detail emitters remain 3D/filterable.
 - V2-created 3D engine emitters use the shared filter/transmission path.
 - Interior 2D/local state emitters are explicitly filter-exempt.
 - When V2 owns the inside soundscape, confirmed vanilla ship-state cues are suppressed so the replacement emitters are not hidden under the stock centered mix.
@@ -85,7 +85,7 @@ Overlay fields to watch:
 | `detail=on/gain/xN` | Detail layer toggle, gain, and active detail emitter count. | `xN` greater than `0` when thrusting. |
 | `state=on/gain/xN` | State layer toggle, gain, and active state emitter count. | `xN` greater than `0` after groups are discovered. |
 | `dist` | Shared hearing range. | Raise this if groups exist but no sound is heard. |
-| `state2dpos` | Whether 2D/local state cues are forced through positional emitters. | Default `off`; use only for the 2D positional experiment. |
+| `state2dpos` | Whether inside D2/local state cues are forced through positional emitters. | Default `on`; this is the intended inside state route. |
 
 Marker colors:
 
@@ -160,7 +160,7 @@ Settings are saved to `%APPDATA%\SpaceEngineers\RealisticSoundPlus.xml` and hot-
 | `/rsp state on|off` | `/rsp enginestate`, `/rsp statemachine` | `on` | bool | Toggles the grouped ship state/run-loop layer. |
 | `/rsp detailgain 2` | `/rsp v2detailgain` | `2.00` | `0..4` | Multiplies only the detail layer. |
 | `/rsp stategain 2` | `/rsp v2stategain` | `2.00` | `0..4` | Multiplies only the state layer. |
-| `/rsp state2dpos on|off` | `/rsp state2dposition`, `/rsp positional2d` | `off` | bool | Test mode: forces 2D/local state cues through positional emitters. |
+| `/rsp state2dpos on|off` | `/rsp state2dposition`, `/rsp positional2d` | `on` | bool | Forces inside D2/local state cues through positional emitters. |
 
 ### Distance And Response
 
