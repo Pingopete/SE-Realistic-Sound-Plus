@@ -37,6 +37,65 @@ Debug marker colors:
 5. Toggle `/rsp detail off` and `/rsp state off` independently to isolate each layer.
 6. Tune `/rsp dist`, `/rsp distcurve`, `/rsp detailgain`, and `/rsp stategain` while listening from inside the ship.
 
+## Second Monitor Test Reference
+
+Current live V2 test defaults:
+
+| Setting | Default | Purpose |
+| --- | ---: | --- |
+| `detail` | `on` | Enables grouped 3D engine-detail emitters. |
+| `state` | `on` | Enables grouped ship state/run-loop emitters. |
+| `gain` | `2.00` | Overall V2 engine gain applied to detail and state layers. |
+| `detailgain` | `2.00` | Extra gain for 3D engine-detail layer. |
+| `stategain` | `2.00` | Extra gain for ship state/run-loop layer. |
+| `dist` | `200` | Shared emitter hearing range in meters. |
+| `distcurve` | `1.00` | Distance falloff curve inside `dist`. |
+| `filter` | `Deep` | Low-pass effect for V2 3D engine emitters. |
+| `sounds` | `on` | Center debug overlay starts enabled on this branch. |
+| `log` | `on` | V2 debug log writes once per second. |
+
+Most useful first commands:
+
+```text
+/rsp show
+/rsp sounds on
+/rsp logpath
+/rsp dist 500
+/rsp gain 4
+/rsp detailgain 4
+/rsp stategain 4
+```
+
+Overlay fields to watch:
+
+| Field | Meaning | Good sign |
+| --- | --- | --- |
+| `mode` | V2 listener decision, such as `inside-seat`, `inside-room`, or fallback. | `inside-seat` or `inside-room` while testing inside. |
+| `inside` | Whether V2 thinks the listener is inside the ship. | `Y` inside the ship. |
+| `groups` | Known six-direction source groups discovered from thrusters. | Greater than `0`; up to `6` for full direction coverage. |
+| `thr=patch/raw/accepted` | Thruster patch hits, reports received, reports accepted by V2. | All three numbers climbing while in a powered ship. |
+| `rej=fallback/grid` | Reports rejected by fallback state or grid mismatch. | Low or zero while inside the controlled ship. |
+| `detail=on/gain/xN` | Detail layer toggle, gain, and active detail emitter count. | `xN` greater than `0` when thrusting. |
+| `state=on/gain/xN` | State layer toggle, gain, and active state emitter count. | `xN` greater than `0` after groups are discovered. |
+| `dist` | Shared hearing range. | Raise this if groups exist but no sound is heard. |
+| `state2dpos` | Whether 2D/local state cues are forced through positional emitters. | Default `off`; use only for the 2D positional experiment. |
+
+Marker colors:
+
+| Marker | Meaning |
+| --- | --- |
+| Bright cyan | Active V2 engine-detail emitter. |
+| Bright orange | Active V2 engine-state emitter. |
+| Dim cyan/orange | Known source group, currently quiet or not actively playing. |
+
+Debug log:
+
+```text
+%APPDATA%\SpaceEngineers\RealisticSoundPlus-v2-debug.log
+```
+
+The log records global audio state, the V2 overlay line, and `/rsp show` settings once per second. Use `/rsp logpath` in game to print the exact path.
+
 ## Debug Overlay
 
 Use `/rsp sounds on|off`. The overlay is enabled by default on this live V2 test branch.
@@ -82,41 +141,52 @@ Old weapon, ambient, hydrogen-engine, continuous-power, and per-thruster-spatial
 
 Settings are saved to `%APPDATA%\SpaceEngineers\RealisticSoundPlus.xml` and hot-reloaded every few seconds while the game is running.
 
-Layer controls:
+### Layer Controls
 
-- `/rsp detail on|off` - toggles V2 engine-detail emitters.
-- `/rsp state on|off` - toggles V2 engine-state emitters.
-- `/rsp detailgain 2.0` - adjusts V2 detail emitter gain.
-- `/rsp stategain 2.0` - adjusts V2 state emitter gain.
-- `/rsp state2dpos on|off` - test toggle for forcing 2D/local state cues through positional emitters.
+| Command | Aliases | Default | Range | Function |
+| --- | --- | ---: | --- | --- |
+| `/rsp detail on|off` | `/rsp enginedetail` | `on` | bool | Toggles the grouped 3D engine-detail layer. |
+| `/rsp state on|off` | `/rsp enginestate`, `/rsp statemachine` | `on` | bool | Toggles the grouped ship state/run-loop layer. |
+| `/rsp detailgain 2` | `/rsp v2detailgain` | `2.00` | `0..4` | Multiplies only the detail layer. |
+| `/rsp stategain 2` | `/rsp v2stategain` | `2.00` | `0..4` | Multiplies only the state layer. |
+| `/rsp state2dpos on|off` | `/rsp state2dposition`, `/rsp positional2d` | `off` | bool | Test mode: forces 2D/local state cues through positional emitters. |
 
-Distance and response:
+### Distance And Response
 
-- `/rsp dist 200` - shared V2 emitter distance range.
-- `/rsp distcurve 1` - shared distance falloff curve within `dist`.
-- `/rsp gain 2.0` - overall V2 engine gain.
-- `/rsp curve 0.65` - thrust-output curve shape.
-- `/rsp smooth 100` - V2 volume smoothing time in milliseconds.
-- `/rsp fade 0.04` - soft fade width near zero thrust output.
+| Command | Aliases | Default | Range | Function |
+| --- | --- | ---: | --- | --- |
+| `/rsp dist 200` | `/rsp v2dist`, `/rsp emitterdist` | `200` | `1..1000` | Shared V2 emitter range in meters. Volume reaches zero at this distance. |
+| `/rsp distcurve 1` | `/rsp v2distcurve` | `1.00` | `0.1..5` | Shapes distance falloff while respecting `dist`. Lower values stay louder longer; higher values drop faster near the source. |
+| `/rsp gain 2` | `/rsp enginegain` | `2.00` | `0..4` | Overall V2 engine gain for detail and state layers. |
+| `/rsp curve 1` | `/rsp exponent` | `1.00` | `0.25..10` | Shapes thrust output into volume. Less than `1` makes low thrust louder; greater than `1` makes low thrust quieter. |
+| `/rsp smooth 100` | `/rsp smoothing` | `100` | `0..500` ms | Volume smoothing time. Higher values fade more slowly. |
+| `/rsp fade 0.04` | `/rsp softfade` | `0.040` | `0.001..0.25` | Soft fade width near zero thrust output. |
 
-Ship scale:
+### Ship Scale
 
-- `/rsp presence 0.45` - minimum thruster-size presence.
-- `/rsp quietlog 4` - log10 force treated as the quiet/small end of the thruster-size scale.
-- `/rsp loudlog 8` - log10 force treated as the loud/large end of the thruster-size scale.
+| Command | Aliases | Default | Range | Function |
+| --- | --- | ---: | --- | --- |
+| `/rsp presence 0.35` | `/rsp minpresence` | `0.35` | `0..1` | Minimum presence for smaller thrusters so small ships are not inaudible. |
+| `/rsp quietlog 4` | `/rsp quietforce`, `/rsp smallforce` | `4.00` | `1..10` | `log10(force)` treated as the small/quiet end of thruster scaling. |
+| `/rsp loudlog 7` | `/rsp loudforce`, `/rsp largeforce` | `7.00` | `quietlog+0.1..12` | `log10(force)` treated as the large/loud end of thruster scaling. |
 
-Filtering and transmission:
+### Filtering And Transmission
 
-- `/rsp muffling 0.7` - shared V2 exterior/interior muffling strength.
-- `/rsp interior 0.9` - baseline transmission floor used by the V2 muffling model; source range is controlled by `/rsp dist` and `/rsp distcurve`.
-- `/rsp atmfloor 0.5` - amount of configured muffling retained at full planetary air density while inside.
-- `/rsp filter off|helmet|cockpit|cockpitnooxy|realship|deep` - V2 3D engine emitter filter mode.
+| Command | Aliases | Default | Range | Function |
+| --- | --- | ---: | --- | --- |
+| `/rsp muffling 1` | `/rsp muffle` | `1.00` | `0..1` | Strength of the shared V2 muffling/filter transmission model. |
+| `/rsp interior 0.2` | `/rsp interiorbase` | `0.20` | `0.05..1` | Baseline transmission floor while muffled. Source range is still controlled by `dist` and `distcurve`. |
+| `/rsp atmfloor 0.5` | `/rsp atmospherefloor`, `/rsp atmosphericfloor` | `0.50` | `0..1` | Amount of muffling retained at full planetary air density while inside. |
+| `/rsp filter deep` | none | `deep` | options | Selects low-pass effect for V2 3D engine emitters. Options: `off`, `helmet`, `cockpit`, `cockpitnooxy`, `realship`, `deep`. |
 
-Utility:
+### Debug And Utility
 
-- `/rsp show` - prints current runtime settings.
-- `/rsp log on|off` - toggles the V2 debug log.
-- `/rsp logpath` - prints the V2 debug log path.
-- `/rsp save` - writes current values to XML.
-- `/rsp reload` - reloads XML config from disk.
-- `/rsp help` - prints the short in-game command list.
+| Command | Aliases | Default | Function |
+| --- | --- | ---: | --- |
+| `/rsp show` | none | n/a | Prints current runtime settings. |
+| `/rsp sounds on|off` | `/rsp audio` | `on` | Toggles centered audio overlay. |
+| `/rsp log on|off` | `/rsp debuglog` | `on` | Toggles V2 file logging. |
+| `/rsp logpath` | none | n/a | Prints the V2 debug log path. |
+| `/rsp save` | none | n/a | Writes current settings to XML. |
+| `/rsp reload` | none | n/a | Reloads settings from XML. |
+| `/rsp help` | `/rsp ?` | n/a | Prints the short in-game command list. |
