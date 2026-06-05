@@ -8,6 +8,8 @@ namespace RealisticSoundPlus.Patches
         public static void ResetForSession(string reason)
         {
             ThrusterFilterPatch.ResetRuntimeState();
+            CharacterBreathPatch.ResetRuntimeState();
+            ShipSeatAudioPatch.ResetRuntimeState();
             ExteriorSoundTransmission.ResetRuntimeState();
             AudioDiagnostics.ResetRuntimeState();
             AudioEngineV2Runtime.ResetForSession(reason);

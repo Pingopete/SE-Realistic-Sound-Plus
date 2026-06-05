@@ -39,7 +39,7 @@ Debug marker colors:
 
 ## Debug Overlay
 
-Use `/rsp sounds on|off`.
+Use `/rsp sounds on|off`. The overlay is enabled by default on this live V2 test branch.
 
 The centered overlay shows:
 
@@ -60,8 +60,10 @@ For clean V2 testing, this branch keeps the active Harmony surface intentionally
 - `MyShipSoundComponent.UpdateVolumes` reports vanilla inside/room state to the V2 listener model and overlay.
 - `MyEntity3DSoundEmitter.PlaySound` and `PlaySoundWithDistance` suppress confirmed vanilla ship-state cues only while V2 owns the inside soundscape.
 - `MyEntity3DSoundEmitter.SelectEffect` applies filters only to V2-registered emitters.
+- `MyCharacterBreath.Update` suppresses the vanilla breathing loop while the helmet/visor is open.
+- `MyShipSoundComponent.UpdateShouldPlay2D` and `UpdateSoundDimension` prevent vanilla seat/bed/desk states from forcing a different ship-audio dimension.
 
-Old weapon, breath, ambient, hydrogen-engine, seat, continuous-power, and per-thruster-spatial patches are not active on this branch.
+Old weapon, ambient, hydrogen-engine, continuous-power, and per-thruster-spatial patches are not active on this branch.
 
 ## Runtime Controls
 
@@ -71,15 +73,15 @@ Layer controls:
 
 - `/rsp detail on|off` - toggles V2 engine-detail emitters.
 - `/rsp state on|off` - toggles V2 engine-state emitters.
-- `/rsp detailgain 1.0` - adjusts V2 detail emitter gain.
-- `/rsp stategain 1.0` - adjusts V2 state emitter gain.
+- `/rsp detailgain 2.0` - adjusts V2 detail emitter gain.
+- `/rsp stategain 2.0` - adjusts V2 state emitter gain.
 - `/rsp state2dpos on|off` - test toggle for forcing 2D/local state cues through positional emitters.
 
 Distance and response:
 
-- `/rsp dist 36` - shared V2 emitter distance range.
+- `/rsp dist 200` - shared V2 emitter distance range.
 - `/rsp distcurve 1` - shared distance falloff curve within `dist`.
-- `/rsp gain 1.5` - overall V2 engine gain.
+- `/rsp gain 2.0` - overall V2 engine gain.
 - `/rsp curve 0.65` - thrust-output curve shape.
 - `/rsp smooth 100` - V2 volume smoothing time in milliseconds.
 - `/rsp fade 0.04` - soft fade width near zero thrust output.

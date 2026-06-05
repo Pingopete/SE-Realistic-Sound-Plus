@@ -12,7 +12,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             _snapshot = default(Snapshot);
         }
 
-        public static void Update(V2AudioListenerState listener, int activeDetailSources, int activeStateSources, int knownSourceGroups)
+        public static void Update(V2AudioListenerState listener, int activeDetailSources, int activeStateSources, int knownSourceGroups, ThrusterReportSnapshot thrusters)
         {
             RealisticSoundPlusSettings settings = SettingsManager.Current;
             _snapshot = new Snapshot
@@ -28,6 +28,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                 ActiveDetailSources = activeDetailSources,
                 ActiveStateSources = activeStateSources,
                 KnownSourceGroups = knownSourceGroups,
+                Thrusters = thrusters,
                 Listener = listener
             };
         }
@@ -41,11 +42,17 @@ namespace RealisticSoundPlus.AudioEngineV2
             string room = Trim(snapshot.Listener.RoomName, 42);
             return string.Format(
                 CultureInfo.InvariantCulture,
-                "route=v2 mode={0} room={1} inside={2} groups={3} detail={4}/{5:0.00}/x{6} state={7}/{8:0.00}/x{9} dist={10:0} curve={11:0.00} state2dpos={12} atm={13:0.00}",
+                "route=v2 mode={0} room={1} inside={2} groups={3} thr={4}/{5}/{6} rej={7}/{8}{9} detail={10}/{11:0.00}/x{12} state={13}/{14:0.00}/x{15} dist={16:0} curve={17:0.00} state2dpos={18} atm={19:0.00}",
                 snapshot.Listener.ModeName,
                 room,
                 snapshot.Listener.InsideShip ? "Y" : "N",
                 snapshot.KnownSourceGroups,
+                snapshot.Thrusters.PatchHits,
+                snapshot.Thrusters.RawReports,
+                snapshot.Thrusters.AcceptedReports,
+                snapshot.Thrusters.FallbackRejectedReports,
+                snapshot.Thrusters.GridMismatchReports,
+                snapshot.Thrusters.PatchDisabled ? " DISABLED" : string.Empty,
                 snapshot.DetailEnabled ? "on" : "off",
                 snapshot.DetailGain,
                 snapshot.ActiveDetailSources,
@@ -79,7 +86,18 @@ namespace RealisticSoundPlus.AudioEngineV2
             public int ActiveDetailSources;
             public int ActiveStateSources;
             public int KnownSourceGroups;
+            public ThrusterReportSnapshot Thrusters;
             public V2AudioListenerState Listener;
+        }
+
+        public struct ThrusterReportSnapshot
+        {
+            public int PatchHits;
+            public bool PatchDisabled;
+            public int RawReports;
+            public int AcceptedReports;
+            public int FallbackRejectedReports;
+            public int GridMismatchReports;
         }
     }
 }

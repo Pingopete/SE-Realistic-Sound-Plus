@@ -15,6 +15,10 @@ namespace RealisticSoundPlus.AudioEngineV2
         private static bool _loggedEnabled;
         private static bool _hasListener;
         private static V2AudioListenerState _listener;
+        private static int _rawThrusterReports;
+        private static int _acceptedThrusterReports;
+        private static int _fallbackRejectedThrusterReports;
+        private static int _gridMismatchThrusterReports;
 
         public static V2AudioListenerState Listener => _listener;
 
@@ -27,6 +31,10 @@ namespace RealisticSoundPlus.AudioEngineV2
             _loggedEnabled = false;
             _hasListener = false;
             _listener = default(V2AudioListenerState);
+            _rawThrusterReports = 0;
+            _acceptedThrusterReports = 0;
+            _fallbackRejectedThrusterReports = 0;
+            _gridMismatchThrusterReports = 0;
             VanillaShipEnvironment.Reset();
             V2AudioDebugState.Reset();
 
@@ -41,7 +49,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                 StopAllEmitters();
 
             CleanupEmptyGridStates();
-            V2AudioDebugState.Update(_listener, CountActiveDetailSources(), CountActiveStateSources(), CountKnownSourceGroups());
+            V2AudioDebugState.Update(_listener, CountActiveDetailSources(), CountActiveStateSources(), CountKnownSourceGroups(), CreateThrusterReportSnapshot());
 
             if (!_loggedEnabled)
             {
@@ -52,6 +60,8 @@ namespace RealisticSoundPlus.AudioEngineV2
 
         public static void ReportThruster(MyThrust thruster)
         {
+            _rawThrusterReports = SaturatingIncrement(_rawThrusterReports);
+
             if (thruster == null || thruster.CubeGrid == null)
                 return;
 
@@ -62,13 +72,30 @@ namespace RealisticSoundPlus.AudioEngineV2
             }
 
             if (_listener.VanillaFallback)
+            {
+                _fallbackRejectedThrusterReports = SaturatingIncrement(_fallbackRejectedThrusterReports);
                 return;
+            }
 
             if (_listener.GridEntityId != 0L && thruster.CubeGrid.EntityId != _listener.GridEntityId)
-                return;
+                _gridMismatchThrusterReports = SaturatingIncrement(_gridMismatchThrusterReports);
 
+            _acceptedThrusterReports = SaturatingIncrement(_acceptedThrusterReports);
             V2GridAudioState state = GetOrCreateGridState(thruster.CubeGrid);
             state.ReportThruster(thruster, _listener);
+        }
+
+        private static V2AudioDebugState.ThrusterReportSnapshot CreateThrusterReportSnapshot()
+        {
+            return new V2AudioDebugState.ThrusterReportSnapshot
+            {
+                PatchHits = V2ThrusterAudioPatch.PatchHits,
+                PatchDisabled = V2ThrusterAudioPatch.Disabled,
+                RawReports = _rawThrusterReports,
+                AcceptedReports = _acceptedThrusterReports,
+                FallbackRejectedReports = _fallbackRejectedThrusterReports,
+                GridMismatchReports = _gridMismatchThrusterReports
+            };
         }
 
         public static bool ShouldSuppressVanillaShipCue(MyEntity3DSoundEmitter emitter, string cueName)
@@ -207,6 +234,11 @@ namespace RealisticSoundPlus.AudioEngineV2
                 count += state.CountKnownSourceGroups(now);
 
             return count;
+        }
+
+        private static int SaturatingIncrement(int value)
+        {
+            return value == int.MaxValue ? value : value + 1;
         }
     }
 }

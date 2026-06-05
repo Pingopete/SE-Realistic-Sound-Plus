@@ -18,7 +18,7 @@ namespace RealisticSoundPlus
         private static readonly Color TextColor = new Color(230, 235, 240, 255);
         private static readonly Color QuietColor = new Color(170, 180, 190, 255);
 
-        public static bool Enabled { get; private set; }
+        public static bool Enabled { get; private set; } = true;
 
         public static void Toggle()
         {

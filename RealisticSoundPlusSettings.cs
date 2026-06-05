@@ -8,7 +8,7 @@ namespace RealisticSoundPlus
 {
     public sealed class RealisticSoundPlusSettings
     {
-        public float EngineGain { get; set; } = 1.0f;
+        public float EngineGain { get; set; } = 2.0f;
         public float AudioCurveExponent { get; set; } = 1.0f;
         public float MinimumShipPresence { get; set; } = 0.35f;
         public float QuietShipForceLog10 { get; set; } = 4.0f;
@@ -16,15 +16,15 @@ namespace RealisticSoundPlus
         public float MufflingStrength { get; set; } = 1.0f;
         public float InteriorBaseTransmission { get; set; } = 0.2f;
         public float AtmosphericMufflingFloor { get; set; } = 0.5f;
-        public string EngineFilter { get; set; } = "RealShip";
+        public string EngineFilter { get; set; } = "Deep";
         public float V2SmoothingMs { get; set; } = 100f;
         public float V2SoftFadeRatio { get; set; } = 0.04f;
         public bool V2DetailEnabled { get; set; } = true;
         public bool V2StateEnabled { get; set; } = true;
         public bool V2State2DPositionalTest { get; set; }
-        public float V2DetailGain { get; set; } = 1.0f;
-        public float V2StateGain { get; set; } = 1.0f;
-        public float V2EmitterDistance { get; set; } = 36f;
+        public float V2DetailGain { get; set; } = 2.0f;
+        public float V2StateGain { get; set; } = 2.0f;
+        public float V2EmitterDistance { get; set; } = 200f;
         public float V2DistanceCurve { get; set; } = 1.0f;
     }
 
@@ -63,6 +63,7 @@ namespace RealisticSoundPlus
         {
             using (FileStream stream = File.OpenRead(ConfigPath))
                 Current = (RealisticSoundPlusSettings)Serializer.Deserialize(stream);
+            ApplyLiveV2TestDefaults();
             Clamp();
             _lastWriteUtc = File.GetLastWriteTimeUtc(ConfigPath);
             MyLog.Default.WriteLineAndConsole("[RealisticSoundPlus] Loaded settings from " + ConfigPath + ": " + Summary());
@@ -267,6 +268,22 @@ namespace RealisticSoundPlus
             Current.V2StateGain = Clamp(Current.V2StateGain, 0f, 4f);
             Current.V2EmitterDistance = Clamp(Current.V2EmitterDistance, 1f, 1000f);
             Current.V2DistanceCurve = Clamp(Current.V2DistanceCurve, 0.1f, 5f);
+        }
+
+        private static void ApplyLiveV2TestDefaults()
+        {
+            if (Current.EngineGain <= 1.0f)
+                Current.EngineGain = 2.0f;
+            if (Current.V2DetailGain <= 1.0f)
+                Current.V2DetailGain = 2.0f;
+            if (Current.V2StateGain <= 1.0f)
+                Current.V2StateGain = 2.0f;
+            if (Current.V2EmitterDistance <= 36.0f)
+                Current.V2EmitterDistance = 200.0f;
+            if (string.Equals(Current.EngineFilter, "RealShip", StringComparison.OrdinalIgnoreCase))
+                Current.EngineFilter = "Deep";
+            Current.V2DetailEnabled = true;
+            Current.V2StateEnabled = true;
         }
 
         private static float Clamp(float value, float min, float max)

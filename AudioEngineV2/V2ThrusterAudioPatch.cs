@@ -11,6 +11,10 @@ namespace RealisticSoundPlus.AudioEngineV2
         private static bool _disabled;
         private static int _patchHits;
 
+        public static bool Disabled => _disabled;
+
+        public static int PatchHits => _patchHits;
+
         [HarmonyPatch(typeof(MyThrust), "UpdateAfterSimulation")]
         [HarmonyPostfix]
         private static void AfterSimulation(MyThrust __instance)
