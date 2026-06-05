@@ -20,7 +20,6 @@ namespace RealisticSoundPlus.AudioEngineV2
         private const float DetailIdleInput = 0.035f;
         private const float StateIdleInput = 0.03f;
         private const float DetailActiveCueOnThreshold = 0.12f;
-        private const float DetailActiveCueOffThreshold = 0.05f;
 
         private readonly DirectionState[] _directions = new DirectionState[6];
         private DateTime _lastUpdateUtc = DateTime.MinValue;
@@ -144,20 +143,28 @@ namespace RealisticSoundPlus.AudioEngineV2
                 return new DetailLoadSample(0f, thruster.IsWorking ? "noinput" : "off");
 
             Vector3I direction = thruster.GridThrustDirection;
-            Vector3 input = listener.MoveInput;
-            float value;
-
-            if (Math.Abs(direction.X) >= Math.Abs(direction.Y) && Math.Abs(direction.X) >= Math.Abs(direction.Z))
-                value = direction.X >= 0 ? Clamp01(input.X) : Clamp01(-input.X);
-            else if (Math.Abs(direction.Y) >= Math.Abs(direction.Z))
-                value = direction.Y >= 0 ? Clamp01(input.Y) : Clamp01(-input.Y);
-            else
-                value = direction.Z >= 0 ? Clamp01(input.Z) : Clamp01(-input.Z);
+            float value = CalculateDirectionalMoveLoad(direction, listener.MoveInput);
 
             if (value > 0.001f)
+            {
+                if (TryReadCurrentThrustPercentage(thruster, out float currentPercentage) && currentPercentage > 0.001f)
+                    return new DetailLoadSample(Clamp01(currentPercentage), "cur");
+
                 return new DetailLoadSample(value, "move");
+            }
 
             return new DetailLoadSample(0f, thruster.IsWorking ? "idle" : "off");
+        }
+
+        private static float CalculateDirectionalMoveLoad(Vector3I direction, Vector3 input)
+        {
+            if (Math.Abs(direction.X) >= Math.Abs(direction.Y) && Math.Abs(direction.X) >= Math.Abs(direction.Z))
+                return direction.X >= 0 ? Clamp01(input.X) : Clamp01(-input.X);
+
+            if (Math.Abs(direction.Y) >= Math.Abs(direction.Z))
+                return direction.Y >= 0 ? Clamp01(input.Y) : Clamp01(-input.Y);
+
+            return direction.Z >= 0 ? Clamp01(input.Z) : Clamp01(-input.Z);
         }
 
         private static bool TryReadThrustOverridePercentage(MyThrust thruster, out float percentage)
@@ -168,6 +175,24 @@ namespace RealisticSoundPlus.AudioEngineV2
                 if (thruster is Sandbox.ModAPI.Ingame.IMyThrust ingameThrust)
                 {
                     percentage = ingameThrust.ThrustOverridePercentage;
+                    return true;
+                }
+            }
+            catch
+            {
+            }
+
+            return false;
+        }
+
+        private static bool TryReadCurrentThrustPercentage(MyThrust thruster, out float percentage)
+        {
+            percentage = 0f;
+            try
+            {
+                if (thruster is Sandbox.ModAPI.Ingame.IMyThrust ingameThrust)
+                {
+                    percentage = ingameThrust.CurrentThrustPercentage;
                     return true;
                 }
             }
@@ -197,12 +222,12 @@ namespace RealisticSoundPlus.AudioEngineV2
         private static V2ThrustDirectionGroup DirectionFromVector(Vector3I direction)
         {
             if (Math.Abs(direction.X) >= Math.Abs(direction.Y) && Math.Abs(direction.X) >= Math.Abs(direction.Z))
-                return direction.X >= 0 ? V2ThrustDirectionGroup.Right : V2ThrustDirectionGroup.Left;
+                return direction.X >= 0 ? V2ThrustDirectionGroup.Left : V2ThrustDirectionGroup.Right;
 
             if (Math.Abs(direction.Y) >= Math.Abs(direction.Z))
-                return direction.Y >= 0 ? V2ThrustDirectionGroup.Up : V2ThrustDirectionGroup.Down;
+                return direction.Y >= 0 ? V2ThrustDirectionGroup.Down : V2ThrustDirectionGroup.Up;
 
-            return direction.Z >= 0 ? V2ThrustDirectionGroup.Backward : V2ThrustDirectionGroup.Forward;
+            return direction.Z >= 0 ? V2ThrustDirectionGroup.Forward : V2ThrustDirectionGroup.Backward;
         }
 
         private static float SmoothStep(float value)
@@ -231,11 +256,14 @@ namespace RealisticSoundPlus.AudioEngineV2
         {
             private readonly Dictionary<MyThrust, Contribution> _contributors = new Dictionary<MyThrust, Contribution>();
             private readonly V2ThrustDirectionGroup _direction;
-            private LayerEmitter _detail;
+            private LayerEmitter _detailIdle;
+            private LayerEmitter _detailActive;
             private LayerEmitter _state;
-            private float _detailValue;
+            private float _detailIdleValue;
+            private float _detailActiveValue;
             private float _stateValue;
-            private DateTime _lastDetailUpdateUtc = DateTime.UtcNow;
+            private DateTime _lastDetailIdleUpdateUtc = DateTime.UtcNow;
+            private DateTime _lastDetailActiveUpdateUtc = DateTime.UtcNow;
             private DateTime _lastStateUpdateUtc = DateTime.UtcNow;
             private Vector3D _lastPosition;
             private bool _hasKnownSource;
@@ -245,14 +273,13 @@ namespace RealisticSoundPlus.AudioEngineV2
             private string _knownActiveDetailCue;
             private string _knownIdleDetailCue;
             private DateTime _lastKnownUtc = DateTime.MinValue;
-            private bool _detailUsingActiveCue;
 
             public DirectionState(V2ThrustDirectionGroup direction)
             {
                 _direction = direction;
             }
 
-            public bool DetailActive => _detail != null && _detail.IsPlaying;
+            public bool DetailActive => (_detailIdle != null && _detailIdle.IsPlaying) || (_detailActive != null && _detailActive.IsPlaying);
 
             public bool StateActive => _state != null && _state.IsPlaying;
 
@@ -295,20 +322,27 @@ namespace RealisticSoundPlus.AudioEngineV2
                 RealisticSoundPlusSettings settings = SettingsManager.Current;
                 float distanceGain = CalculateDistanceGain(listener, snapshot.Position, settings);
                 float shapedTarget = Clamp01((float)Math.Pow(snapshot.Target, settings.AudioCurveExponent));
-                float detailInput = Math.Max(shapedTarget, snapshot.HasGeometry ? DetailIdleInput : 0f);
+                float activeBlend = SmoothStep(shapedTarget / DetailActiveCueOnThreshold);
+                float idleInput = snapshot.HasGeometry ? DetailIdleInput * (1f - activeBlend) : 0f;
+                float activeInput = shapedTarget;
                 float stateInput = Math.Max(Math.Max(shapedTarget, CalculateSpeedStateInput(grid)), snapshot.HasGeometry ? StateIdleInput : 0f);
-                float detailTarget = settings.V2DetailEnabled
-                    ? Clamp(detailInput * settings.EngineGain * settings.V2DetailGain * distanceGain, 0f, MaxLayerVolume)
+                float idleDetailTarget = settings.V2DetailEnabled
+                    ? Clamp(idleInput * settings.EngineGain * settings.V2DetailGain * distanceGain, 0f, MaxLayerVolume)
+                    : 0f;
+                float activeDetailTarget = settings.V2DetailEnabled
+                    ? Clamp(activeInput * settings.EngineGain * settings.V2DetailGain * distanceGain, 0f, MaxLayerVolume)
                     : 0f;
                 float stateTarget = settings.V2StateEnabled
                     ? Clamp(stateInput * settings.EngineGain * settings.V2StateGain * distanceGain, 0f, MaxLayerVolume)
                     : 0f;
 
-                detailTarget *= SmoothStep(detailInput / settings.V2SoftFadeRatio);
+                activeDetailTarget *= SmoothStep(activeInput / settings.V2SoftFadeRatio);
                 stateTarget *= SmoothStep(stateInput / settings.V2SoftFadeRatio);
 
-                string detailRoute = string.Format(System.Globalization.CultureInfo.InvariantCulture, "v2-detail-{0}/{1} cmd={2:0.00}", _direction, snapshot.DetailLoadSource ?? "?", snapshot.Target);
-                UpdateLayer(ref _detail, ref _detailValue, ref _lastDetailUpdateUtc, snapshot.Anchor, snapshot.Position, snapshot.DetailCue, detailTarget, V2AudioLayer.Detail, false, false, detailRoute);
+                string idleRoute = string.Format(System.Globalization.CultureInfo.InvariantCulture, "v2-detail-{0}-idle/{1} cmd={2:0.00}", _direction, snapshot.DetailLoadSource ?? "?", snapshot.Target);
+                string activeRoute = string.Format(System.Globalization.CultureInfo.InvariantCulture, "v2-detail-{0}-active/{1} cmd={2:0.00}", _direction, snapshot.DetailLoadSource ?? "?", snapshot.Target);
+                UpdateLayer(ref _detailIdle, ref _detailIdleValue, ref _lastDetailIdleUpdateUtc, snapshot.Anchor, snapshot.Position, snapshot.IdleDetailCue, idleDetailTarget, V2AudioLayer.Detail, false, false, idleRoute, true);
+                UpdateLayer(ref _detailActive, ref _detailActiveValue, ref _lastDetailActiveUpdateUtc, snapshot.Anchor, snapshot.Position, snapshot.ActiveDetailCue, activeDetailTarget, V2AudioLayer.Detail, false, false, activeRoute, true);
                 bool state2D = listener.InsideShip;
                 bool state2DPositional = state2D && settings.V2State2DPositionalTest;
                 UpdateLayer(ref _state, ref _stateValue, ref _lastStateUpdateUtc, snapshot.Anchor, snapshot.Position, stateCue, stateTarget, V2AudioLayer.State, state2D, state2DPositional);
@@ -316,9 +350,11 @@ namespace RealisticSoundPlus.AudioEngineV2
 
             public void Stop()
             {
-                _detailValue = 0f;
+                _detailIdleValue = 0f;
+                _detailActiveValue = 0f;
                 _stateValue = 0f;
-                _detail?.Stop();
+                _detailIdle?.Stop();
+                _detailActive?.Stop();
                 _state?.Stop();
             }
 
@@ -335,8 +371,10 @@ namespace RealisticSoundPlus.AudioEngineV2
 
             public void DrawDebugMarkers()
             {
-                if (_detail != null && _detail.IsPlaying)
-                    DrawMarker(_detail.Position, new Color(90, 220, 255, 220), 0.7f);
+                if (_detailActive != null && _detailActive.IsPlaying)
+                    DrawMarker(_detailActive.Position, new Color(90, 220, 255, 220), 0.7f);
+                else if (_detailIdle != null && _detailIdle.IsPlaying)
+                    DrawMarker(_detailIdle.Position, new Color(60, 150, 180, 180), 0.55f);
                 else if (HasKnownContribution)
                     DrawMarker(GetBestDebugPosition(), new Color(60, 150, 180, 120), 0.45f);
 
@@ -420,7 +458,6 @@ namespace RealisticSoundPlus.AudioEngineV2
                         : (_hasKnownSource ? _knownPosition : (grid?.WorldMatrix.Translation ?? _lastPosition)));
                 string activeDetailCue = strongestActiveDetailCue ?? strongestGeometryActiveDetailCue ?? _knownActiveDetailCue ?? _knownIdleDetailCue;
                 string idleDetailCue = strongestGeometryIdleDetailCue ?? _knownIdleDetailCue ?? strongestGeometryActiveDetailCue ?? _knownActiveDetailCue;
-                string detailCue = SelectDetailCue(strongestTarget, activeDetailCue, idleDetailCue);
                 string loadSource = strongestLoadSource ?? strongestGeometryLoadSource ?? "none";
 
                 return new DirectionSnapshot
@@ -428,27 +465,11 @@ namespace RealisticSoundPlus.AudioEngineV2
                     Anchor = anchor,
                     Position = position,
                     Target = strongestTarget,
-                    DetailCue = detailCue,
+                    ActiveDetailCue = activeDetailCue,
+                    IdleDetailCue = idleDetailCue,
                     DetailLoadSource = loadSource,
                     HasGeometry = totalGeometryWeight > 0f || _hasKnownSource
                 };
-            }
-
-            private string SelectDetailCue(float strongestTarget, string activeDetailCue, string idleDetailCue)
-            {
-                if (_detailUsingActiveCue)
-                {
-                    if (strongestTarget <= DetailActiveCueOffThreshold)
-                        _detailUsingActiveCue = false;
-                }
-                else if (strongestTarget >= DetailActiveCueOnThreshold)
-                {
-                    _detailUsingActiveCue = true;
-                }
-
-                return _detailUsingActiveCue
-                    ? (activeDetailCue ?? idleDetailCue)
-                    : (idleDetailCue ?? activeDetailCue);
             }
 
             private void RememberKnownSource(MyThrust thruster, Vector3D position, float geometryWeight, string activeDetailCue, string idleDetailCue, DateTime now)
@@ -479,7 +500,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                 return _knownPosition;
             }
 
-            private void UpdateLayer(ref LayerEmitter emitter, ref float value, ref DateTime lastUpdateUtc, MyThrust anchor, Vector3D position, string cueName, float target, V2AudioLayer layer, bool force2D, bool force2DPositional, string diagnosticRoute = null)
+            private void UpdateLayer(ref LayerEmitter emitter, ref float value, ref DateTime lastUpdateUtc, MyThrust anchor, Vector3D position, string cueName, float target, V2AudioLayer layer, bool force2D, bool force2DPositional, string diagnosticRoute = null, bool startMuted = false)
             {
                 value = Smooth(value, target, ref lastUpdateUtc, SettingsManager.Current.V2SmoothingMs);
                 if (value <= StartThreshold || anchor == null || string.IsNullOrWhiteSpace(cueName))
@@ -489,17 +510,25 @@ namespace RealisticSoundPlus.AudioEngineV2
                     return;
                 }
 
-                if (emitter == null)
+                bool firstStart = emitter == null;
+                if (firstStart)
                 {
                     emitter = new LayerEmitter(anchor, layer, _direction);
                 }
 
                 bool force3D = !force2D || force2DPositional;
                 bool skipFilter = force2D;
-                emitter.Update(position, cueName, value, force2D, force3D, skipFilter);
+                if (firstStart && startMuted)
+                {
+                    value = 0f;
+                    lastUpdateUtc = DateTime.UtcNow;
+                }
+
+                float emitterVolume = value;
+                emitter.Update(position, cueName, emitterVolume, force2D, force3D, skipFilter);
                 string route = diagnosticRoute ?? emitter.RouteName;
-                AudioDiagnostics.RecordEmitter(emitter.Emitter, route, value, ExteriorSoundTransmission.Calculate(position), target, value, position);
-                AudioDiagnostics.RecordCueName(cueName, route, value, ExteriorSoundTransmission.Calculate(position), target, value, position);
+                AudioDiagnostics.RecordEmitter(emitter.Emitter, route, value, ExteriorSoundTransmission.Calculate(position), target, emitterVolume, position);
+                AudioDiagnostics.RecordCueName(cueName, route, value, ExteriorSoundTransmission.Calculate(position), target, emitterVolume, position);
             }
 
             private static float CalculateDistanceGain(V2AudioListenerState listener, Vector3D position, RealisticSoundPlusSettings settings)
@@ -674,7 +703,8 @@ namespace RealisticSoundPlus.AudioEngineV2
             public MyThrust Anchor;
             public Vector3D Position;
             public float Target;
-            public string DetailCue;
+            public string ActiveDetailCue;
+            public string IdleDetailCue;
             public string DetailLoadSource;
             public bool HasGeometry;
         }
