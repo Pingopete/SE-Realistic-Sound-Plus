@@ -17,8 +17,10 @@ The current build creates a replacement ship engine soundscape for listener stat
 - Exterior fallback states currently leave stock vanilla ship audio alone.
 - Each relevant grid can create up to six grouped engine-detail emitters, one for each thrust direction.
 - Each relevant grid can create up to six grouped engine-state emitters using the same directional positions.
-- Detail emitters use vanilla thruster block `PrimarySound` cues where available.
-- State emitters use confirmed vanilla ship sound group run-loop cues.
+- Detail emitters use vanilla ship sound group thruster cues by detected thruster type, with idle cue fallback when a direction has engines but no thrust input.
+- Detail emitters fall back to vanilla thruster block `PrimarySound` cues if a thruster type cannot be classified.
+- State emitters use confirmed vanilla ship sound group run-loop cues, classified as small/large by grid mass where available.
+- Inside state emitters force the cue through the 2D/local variant; detail emitters remain 3D/filterable.
 - V2-created 3D engine emitters use the shared filter/transmission path.
 - Interior 2D/local state emitters are explicitly filter-exempt.
 - When V2 owns the inside soundscape, confirmed vanilla ship-state cues are suppressed so the replacement emitters are not hidden under the stock centered mix.
