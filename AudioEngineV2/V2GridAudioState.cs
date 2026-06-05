@@ -11,11 +11,12 @@ namespace RealisticSoundPlus.AudioEngineV2
 {
     internal sealed class V2GridAudioState
     {
-        private static readonly TimeSpan ContributionLifetime = TimeSpan.FromMilliseconds(250);
+        private static readonly TimeSpan ContributionLifetime = TimeSpan.FromSeconds(5);
         private static readonly TimeSpan DirectionUpdateInterval = TimeSpan.FromMilliseconds(50);
         private const float StartThreshold = 0.01f;
         private const float MaxLayerVolume = 1.0f;
         private const float VanillaFullSpeed = 96f;
+        private const float StateIdleInput = 0.08f;
 
         private readonly DirectionState[] _directions = new DirectionState[6];
         private DateTime _lastUpdateUtc = DateTime.MinValue;
@@ -109,7 +110,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             int count = 0;
             for (int i = 0; i < _directions.Length; i++)
             {
-                if (_directions[i].HasFreshContribution(now))
+                if (_directions[i].HasKnownContribution)
                     count++;
             }
 
@@ -208,6 +209,8 @@ namespace RealisticSoundPlus.AudioEngineV2
 
             public bool StateActive => _state != null && _state.IsPlaying;
 
+            public bool HasKnownContribution => _contributors.Count > 0;
+
             public bool HasFreshContribution(DateTime now)
             {
                 foreach (Contribution contribution in _contributors.Values)
@@ -240,7 +243,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                 RealisticSoundPlusSettings settings = SettingsManager.Current;
                 float distanceGain = CalculateDistanceGain(listener, snapshot.Position, settings);
                 float shapedTarget = Clamp01((float)Math.Pow(snapshot.Target, settings.AudioCurveExponent));
-                float stateInput = Math.Max(shapedTarget, CalculateSpeedStateInput(grid));
+                float stateInput = Math.Max(Math.Max(shapedTarget, CalculateSpeedStateInput(grid)), snapshot.HasGeometry ? StateIdleInput : 0f);
                 float detailTarget = settings.V2DetailEnabled
                     ? Clamp(shapedTarget * settings.EngineGain * settings.V2DetailGain * distanceGain, 0f, MaxLayerVolume)
                     : 0f;
@@ -280,9 +283,13 @@ namespace RealisticSoundPlus.AudioEngineV2
             {
                 if (_detail != null && _detail.IsPlaying)
                     DrawMarker(_detail.Position, new Color(90, 220, 255, 220), 0.7f);
+                else if (HasKnownContribution && _lastPosition != Vector3D.Zero)
+                    DrawMarker(_lastPosition, new Color(60, 150, 180, 120), 0.45f);
 
                 if (_state != null && _state.IsPlaying)
                     DrawMarker(_state.Position, new Color(255, 180, 80, 230), 1.05f);
+                else if (HasKnownContribution && _lastPosition != Vector3D.Zero)
+                    DrawMarker(_lastPosition, new Color(180, 120, 60, 120), 0.65f);
             }
 
             private DirectionSnapshot BuildSnapshot(MyCubeGrid grid, DateTime now)
@@ -351,7 +358,8 @@ namespace RealisticSoundPlus.AudioEngineV2
                     Anchor = anchor,
                     Position = position,
                     Target = strongestTarget,
-                    DetailCue = strongestDetailCue ?? strongestGeometryDetailCue
+                    DetailCue = strongestDetailCue ?? strongestGeometryDetailCue,
+                    HasGeometry = totalGeometryWeight > 0f
                 };
             }
 
@@ -536,6 +544,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             public Vector3D Position;
             public float Target;
             public string DetailCue;
+            public bool HasGeometry;
         }
 
         private struct Contribution
