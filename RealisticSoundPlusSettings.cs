@@ -20,7 +20,7 @@ namespace RealisticSoundPlus
         public float V2SmoothingMs { get; set; } = 100f;
         public float V2SoftFadeRatio { get; set; } = 0.04f;
         public bool V2DetailEnabled { get; set; } = true;
-        public bool V2StateEnabled { get; set; } = true;
+        public bool V2StateEnabled { get; set; } = false;
         public bool V2State2DPositionalTest { get; set; } = true;
         public float V2DetailGain { get; set; } = 2.0f;
         public float V2StateGain { get; set; } = 2.0f;
@@ -292,7 +292,7 @@ namespace RealisticSoundPlus
             if (string.Equals(Current.EngineFilter, "RealShip", StringComparison.OrdinalIgnoreCase))
                 Current.EngineFilter = "Deep";
             Current.V2DetailEnabled = true;
-            Current.V2StateEnabled = true;
+            Current.V2StateEnabled = false;
             Current.V2State2DPositionalTest = true;
             Current.V2DebugLogEnabled = true;
         }

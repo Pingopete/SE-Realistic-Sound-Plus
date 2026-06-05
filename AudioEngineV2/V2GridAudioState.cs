@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using RealisticSoundPlus.Patches;
 using Sandbox.Game.Entities;
 using VRage.Audio;
@@ -18,6 +19,9 @@ namespace RealisticSoundPlus.AudioEngineV2
         private const float MaxLayerVolume = 16.0f;
         private const float VanillaFullSpeed = 96f;
         private const float DetailIdleInput = 0.035f;
+        private const float DetailIdleFadeOutRange = 0.15f;
+        private const float DetailActivePitchMin = 0.5f;
+        private const float DetailActivePitchMax = 1.5f;
         private const float StateIdleInput = 0.03f;
         private const float DetailActiveCueOnThreshold = 0.12f;
 
@@ -325,15 +329,18 @@ namespace RealisticSoundPlus.AudioEngineV2
                 RealisticSoundPlusSettings settings = SettingsManager.Current;
                 float distanceGain = CalculateDistanceGain(listener, snapshot.Position, settings);
                 float shapedTarget = Clamp01((float)Math.Pow(snapshot.Target, settings.AudioCurveExponent));
-                float activeBlend = SmoothStep(shapedTarget / DetailActiveCueOnThreshold);
+                float detailCommand = Clamp01(snapshot.Target);
+                float activeBlend = SmoothStep(detailCommand / DetailIdleFadeOutRange);
                 float idleInput = snapshot.HasGeometry ? DetailIdleInput * (1f - activeBlend) : 0f;
-                float activeInput = shapedTarget;
+                float activeInput = detailCommand;
+                float activePitch = Lerp(DetailActivePitchMin, DetailActivePitchMax, detailCommand);
+                float detailOutputGain = CalculateDetailOutputGain(settings);
                 float stateInput = Math.Max(Math.Max(shapedTarget, CalculateSpeedStateInput(grid)), snapshot.HasGeometry ? StateIdleInput : 0f);
                 float idleDetailTarget = settings.V2DetailEnabled
-                    ? Clamp(idleInput * settings.EngineGain * settings.V2DetailGain * distanceGain, 0f, MaxLayerVolume)
+                    ? Clamp(idleInput * detailOutputGain * distanceGain, 0f, MaxLayerVolume)
                     : 0f;
                 float activeDetailTarget = settings.V2DetailEnabled
-                    ? Clamp(activeInput * settings.EngineGain * settings.V2DetailGain * distanceGain, 0f, MaxLayerVolume)
+                    ? Clamp(activeInput * detailOutputGain * distanceGain, 0f, MaxLayerVolume)
                     : 0f;
                 float stateTarget = settings.V2StateEnabled
                     ? Clamp(stateInput * settings.EngineGain * settings.V2StateGain * distanceGain, 0f, MaxLayerVolume)
@@ -343,9 +350,10 @@ namespace RealisticSoundPlus.AudioEngineV2
                 stateTarget *= SmoothStep(stateInput / settings.V2SoftFadeRatio);
 
                 string idleRoute = string.Format(System.Globalization.CultureInfo.InvariantCulture, "v2-detail-{0}-idle/{1} cmd={2:0.00}", _direction, snapshot.DetailLoadSource ?? "?", snapshot.Target);
-                string activeRoute = string.Format(System.Globalization.CultureInfo.InvariantCulture, "v2-detail-{0}-active/{1} cmd={2:0.00}", _direction, snapshot.DetailLoadSource ?? "?", snapshot.Target);
-                UpdateLayer(ref _detailIdle, ref _detailIdleValue, ref _lastDetailIdleUpdateUtc, snapshot.Anchor, snapshot.Position, snapshot.IdleDetailCue, idleDetailTarget, V2AudioLayer.Detail, false, false, idleRoute, true);
-                UpdateLayer(ref _detailActive, ref _detailActiveValue, ref _lastDetailActiveUpdateUtc, snapshot.Anchor, snapshot.Position, snapshot.ActiveDetailCue, activeDetailTarget, V2AudioLayer.Detail, false, false, activeRoute, true);
+                string activeRoute = string.Format(System.Globalization.CultureInfo.InvariantCulture, "v2-detail-{0}-active/{1} cmd={2:0.00} pitch={3:0.00}", _direction, snapshot.DetailLoadSource ?? "?", snapshot.Target, activePitch);
+                bool keepDetailAlive = settings.V2DetailEnabled && snapshot.HasGeometry;
+                UpdateLayer(ref _detailIdle, ref _detailIdleValue, ref _lastDetailIdleUpdateUtc, snapshot.Anchor, snapshot.Position, snapshot.IdleDetailCue, idleDetailTarget, V2AudioLayer.Detail, false, false, idleRoute, true, keepDetailAlive);
+                UpdateLayer(ref _detailActive, ref _detailActiveValue, ref _lastDetailActiveUpdateUtc, snapshot.Anchor, snapshot.Position, snapshot.ActiveDetailCue, activeDetailTarget, V2AudioLayer.Detail, false, false, activeRoute, true, keepDetailAlive, activePitch);
                 bool state2D = listener.InsideShip;
                 bool state2DPositional = state2D && settings.V2State2DPositionalTest;
                 UpdateLayer(ref _state, ref _stateValue, ref _lastStateUpdateUtc, snapshot.Anchor, snapshot.Position, stateCue, stateTarget, V2AudioLayer.State, state2D, state2DPositional);
@@ -503,15 +511,19 @@ namespace RealisticSoundPlus.AudioEngineV2
                 return _knownPosition;
             }
 
-            private void UpdateLayer(ref LayerEmitter emitter, ref float value, ref DateTime lastUpdateUtc, MyThrust anchor, Vector3D position, string cueName, float target, V2AudioLayer layer, bool force2D, bool force2DPositional, string diagnosticRoute = null, bool startMuted = false)
+            private void UpdateLayer(ref LayerEmitter emitter, ref float value, ref DateTime lastUpdateUtc, MyThrust anchor, Vector3D position, string cueName, float target, V2AudioLayer layer, bool force2D, bool force2DPositional, string diagnosticRoute = null, bool startMuted = false, bool keepAliveAtZero = false, float pitch = 1f)
             {
                 value = Smooth(value, target, ref lastUpdateUtc, SettingsManager.Current.V2SmoothingMs);
-                if (value <= StartThreshold || anchor == null || string.IsNullOrWhiteSpace(cueName))
+                bool canPlay = anchor != null && !string.IsNullOrWhiteSpace(cueName);
+                if (!canPlay || (value <= StartThreshold && !keepAliveAtZero))
                 {
                     emitter?.SetVolume(0f);
                     emitter?.Stop();
                     return;
                 }
+
+                if (value <= StartThreshold)
+                    value = 0f;
 
                 bool firstStart = emitter == null;
                 if (firstStart)
@@ -528,7 +540,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                 }
 
                 float emitterVolume = value;
-                emitter.Update(position, cueName, emitterVolume, force2D, force3D, skipFilter);
+                emitter.Update(position, cueName, emitterVolume, force2D, force3D, skipFilter, pitch);
                 string route = diagnosticRoute ?? emitter.RouteName;
                 AudioDiagnostics.RecordEmitter(emitter.Emitter, route, value, ExteriorSoundTransmission.Calculate(position), target, emitterVolume, position);
                 AudioDiagnostics.RecordCueName(cueName, route, value, ExteriorSoundTransmission.Calculate(position), target, emitterVolume, position);
@@ -541,6 +553,18 @@ namespace RealisticSoundPlus.AudioEngineV2
 
                 float distance = (float)Vector3D.Distance(listener.Position, position);
                 return SixDirectionSourceModel.EvaluateDistanceGain(distance, settings.V2EmitterDistance, settings.V2DistanceCurve);
+            }
+
+            private static float CalculateDetailOutputGain(RealisticSoundPlusSettings settings)
+            {
+                float gainProduct = Math.Max(0f, settings.EngineGain * settings.V2DetailGain);
+                return Clamp(0.25f + gainProduct * 0.1875f, 0f, MaxLayerVolume);
+            }
+
+            private static float Lerp(float min, float max, float amount)
+            {
+                float t = Clamp01(amount);
+                return min + (max - min) * t;
             }
 
             private static float CalculateSpeedStateInput(MyCubeGrid grid)
@@ -590,9 +614,15 @@ namespace RealisticSoundPlus.AudioEngineV2
 
         private sealed class LayerEmitter
         {
+            private const BindingFlags InstanceMembers = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+            private static readonly string[] PitchMemberNames = { "FrequencyRatio", "PitchMultiplier", "Pitch" };
+            private static readonly Dictionary<Type, MemberInfo> PitchMembers = new Dictionary<Type, MemberInfo>();
+            private static readonly HashSet<Type> NoPitchMembers = new HashSet<Type>();
+
             private string _cueName;
             private bool _force2D;
             private bool _force3D;
+            private float _pitch = 1f;
 
             public LayerEmitter(MyThrust anchor, V2AudioLayer layer, V2ThrustDirectionGroup direction)
             {
@@ -626,7 +656,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                 }
             }
 
-            public void Update(Vector3D position, string cueName, float volume, bool force2D, bool force3D, bool skipFilter)
+            public void Update(Vector3D position, string cueName, float volume, bool force2D, bool force3D, bool skipFilter, float pitch = 1f)
             {
                 Position = position;
                 Emitter.SetPosition(position);
@@ -661,6 +691,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                         position.Z));
                 }
 
+                SetPitch(pitch);
                 SetVolume(volume);
             }
 
@@ -669,6 +700,23 @@ namespace RealisticSoundPlus.AudioEngineV2
                 Emitter.VolumeMultiplier = Clamp(volume, 0f, MaxLayerVolume);
                 Emitter.Update();
                 Emitter.FastUpdate(false);
+            }
+
+            private void SetPitch(float pitch)
+            {
+                _pitch = Clamp(pitch, 0.1f, 4f);
+                if (TrySetPitch(Emitter, _pitch))
+                    return;
+
+                try
+                {
+                    object sound = Emitter.Sound;
+                    if (TrySetPitch(sound, _pitch))
+                        return;
+                }
+                catch
+                {
+                }
             }
 
             public void Stop()
@@ -691,6 +739,92 @@ namespace RealisticSoundPlus.AudioEngineV2
                 {
                     IsPlaying = false;
                     _cueName = null;
+                }
+            }
+
+            private static bool TrySetPitch(object instance, float pitch)
+            {
+                if (instance == null)
+                    return false;
+
+                Type type = instance.GetType();
+                if (NoPitchMembers.Contains(type))
+                    return false;
+
+                if (!PitchMembers.TryGetValue(type, out MemberInfo member))
+                {
+                    member = ResolvePitchMember(type);
+                    if (member == null)
+                    {
+                        NoPitchMembers.Add(type);
+                        return false;
+                    }
+
+                    PitchMembers[type] = member;
+                }
+
+                try
+                {
+                    if (member is PropertyInfo property)
+                    {
+                        object converted = ConvertPitchValue(pitch, property.PropertyType);
+                        if (converted == null)
+                            return false;
+
+                        property.SetValue(instance, converted, null);
+                        return true;
+                    }
+
+                    if (member is FieldInfo field)
+                    {
+                        object converted = ConvertPitchValue(pitch, field.FieldType);
+                        if (converted == null)
+                            return false;
+
+                        field.SetValue(instance, converted);
+                        return true;
+                    }
+                }
+                catch
+                {
+                    NoPitchMembers.Add(type);
+                }
+
+                return false;
+            }
+
+            private static MemberInfo ResolvePitchMember(Type type)
+            {
+                for (int i = 0; i < PitchMemberNames.Length; i++)
+                {
+                    PropertyInfo property = type.GetProperty(PitchMemberNames[i], InstanceMembers);
+                    if (property != null && property.CanWrite)
+                        return property;
+
+                    FieldInfo field = type.GetField(PitchMemberNames[i], InstanceMembers);
+                    if (field != null)
+                        return field;
+                }
+
+                return null;
+            }
+
+            private static object ConvertPitchValue(float pitch, Type targetType)
+            {
+                try
+                {
+                    if (targetType == typeof(float))
+                        return pitch;
+                    if (targetType == typeof(double))
+                        return (double)pitch;
+                    if (targetType == typeof(int))
+                        return (int)Math.Round(pitch);
+
+                    return Convert.ChangeType(pitch, targetType, System.Globalization.CultureInfo.InvariantCulture);
+                }
+                catch
+                {
+                    return null;
                 }
             }
         }

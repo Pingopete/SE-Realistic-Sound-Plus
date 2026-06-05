@@ -47,7 +47,7 @@ Current live V2 test defaults:
 | Setting | Default | Purpose |
 | --- | ---: | --- |
 | `detail` | `on` | Enables grouped 3D engine-detail emitters. |
-| `state` | `on` | Enables grouped ship state/run-loop emitters. |
+| `state` | `off` | Enables grouped ship state/run-loop emitters. |
 | `gain` | `2.00` | Overall V2 engine gain applied to detail and state layers. |
 | `detailgain` | `2.00` | Extra gain for 3D engine-detail layer. |
 | `stategain` | `2.00` | Extra gain for ship state/run-loop layer. |
@@ -85,7 +85,7 @@ Overlay fields to watch:
 | `emit=registered/unfiltered` | V2-created emitters currently registered with diagnostics/filtering. | Greater than `0` once V2 audio is actually alive. |
 | `flt=hits` | Number of times the low-pass filter hook has controlled an emitter. | Climbs when V2 3D emitters are active and filterable. |
 | `detail=on/gain/xN` | Detail layer toggle, gain, and active detail emitter count. | `xN` greater than `0` when thrusting. |
-| `state=on/gain/xN` | State layer toggle, gain, and active state emitter count. | `xN` greater than `0` after groups are discovered. |
+| `state=off/gain/xN` | State layer toggle, gain, and active state emitter count. | Keep `off` while detail-only testing; turn on when testing state emitters. |
 | `dist` | Shared hearing range. | Raise this if groups exist but no sound is heard. |
 | `state2dpos` | Whether inside D2/local state cues are forced through positional emitters. | Default `on`; this is the intended inside state route. |
 
@@ -102,6 +102,8 @@ Cue list notes:
 `UNCONTROLLED` beside a ship/engine cue means vanilla is playing that cue and RSP has not associated it with a V2-created emitter. V2-created cues should show an RSP route such as `v2-detail-*`, `v2-state-*`, or `filter`.
 
 V2 detail routes include their current command source, for example `v2-detail-Down-active/move cmd=0.40`. `ovr` means `ThrustOverridePercentage`, `move` means analog movement input, and `cur` means movement-gated `CurrentThrustPercentage` for full-input states.
+
+Detail active volume follows `cmd` linearly, with the idle loop fading out over the first part of thrust input. Active detail also attempts a linear pitch shift from `0.5` at the lowest firing command to `1.5` at full command; idle detail is not pitch-shifted.
 
 Debug log:
 
@@ -161,7 +163,7 @@ Settings are saved to `%APPDATA%\SpaceEngineers\RealisticSoundPlus.xml` and hot-
 | Command | Aliases | Default | Range | Function |
 | --- | --- | ---: | --- | --- |
 | `/rsp detail on|off` | `/rsp enginedetail` | `on` | bool | Toggles the grouped 3D engine-detail layer. |
-| `/rsp state on|off` | `/rsp enginestate`, `/rsp statemachine` | `on` | bool | Toggles the grouped ship state/run-loop layer. |
+| `/rsp state on|off` | `/rsp enginestate`, `/rsp statemachine` | `off` | bool | Toggles the grouped ship state/run-loop layer. |
 | `/rsp detailgain 2` | `/rsp v2detailgain` | `2.00` | `0..4` | Multiplies only the detail layer. |
 | `/rsp stategain 2` | `/rsp v2stategain` | `2.00` | `0..4` | Multiplies only the state layer. |
 | `/rsp state2dpos on|off` | `/rsp state2dposition`, `/rsp positional2d` | `on` | bool | Forces inside D2/local state cues through positional emitters. |
@@ -173,7 +175,7 @@ Settings are saved to `%APPDATA%\SpaceEngineers\RealisticSoundPlus.xml` and hot-
 | `/rsp dist 200` | `/rsp v2dist`, `/rsp emitterdist` | `200` | `1..1000` | Shared V2 emitter range in meters. Volume reaches zero at this distance. |
 | `/rsp distcurve 1` | `/rsp v2distcurve` | `1.00` | `0.1..5` | Shapes distance falloff while respecting `dist`. Lower values stay louder longer; higher values drop faster near the source. |
 | `/rsp gain 2` | `/rsp enginegain` | `2.00` | `0..4` | Overall V2 engine gain for detail and state layers. |
-| `/rsp curve 1` | `/rsp exponent` | `1.00` | `0.25..10` | Shapes thrust output into volume. Less than `1` makes low thrust louder; greater than `1` makes low thrust quieter. |
+| `/rsp curve 1` | `/rsp exponent` | `1.00` | `0.25..10` | Shapes shared thrust output for non-detail layers. Detail active volume currently follows raw `cmd` linearly while this test pass isolates response. |
 | `/rsp smooth 100` | `/rsp smoothing` | `100` | `0..500` ms | Volume smoothing time. Higher values fade more slowly. |
 | `/rsp fade 0.04` | `/rsp softfade` | `0.040` | `0.001..0.25` | Soft fade width near zero thrust output. |
 
