@@ -130,14 +130,18 @@ namespace RealisticSoundPlus.AudioEngineV2
 
         private static DetailLoadSample CalculateCommandLoad(MyThrust thruster, V2AudioListenerState listener)
         {
-            if (thruster == null || !thruster.IsWorking)
+            if (thruster == null)
                 return new DetailLoadSample(0f, "off");
 
             if (TryReadThrustOverridePercentage(thruster, out float overridePercentage))
-                return new DetailLoadSample(Clamp01(overridePercentage), "ovr");
+            {
+                float overrideValue = Clamp01(overridePercentage);
+                if (overrideValue > 0.001f)
+                    return new DetailLoadSample(overrideValue, "ovr");
+            }
 
             if (!listener.HasMoveInput)
-                return new DetailLoadSample(0f, "noinput");
+                return new DetailLoadSample(0f, thruster.IsWorking ? "noinput" : "off");
 
             Vector3I direction = thruster.GridThrustDirection;
             Vector3 input = listener.MoveInput;
@@ -150,7 +154,10 @@ namespace RealisticSoundPlus.AudioEngineV2
             else
                 value = direction.Z >= 0 ? Clamp01(input.Z) : Clamp01(-input.Z);
 
-            return new DetailLoadSample(value, "move");
+            if (value > 0.001f)
+                return new DetailLoadSample(value, "move");
+
+            return new DetailLoadSample(0f, thruster.IsWorking ? "idle" : "off");
         }
 
         private static bool TryReadThrustOverridePercentage(MyThrust thruster, out float percentage)
