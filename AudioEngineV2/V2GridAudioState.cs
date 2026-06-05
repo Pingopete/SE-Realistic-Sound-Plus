@@ -539,13 +539,14 @@ namespace RealisticSoundPlus.AudioEngineV2
                     _force3D = force3D;
                     MySoundPair pair = new MySoundPair(cueName, false);
                     MyEntity3DSoundEmitter.PreloadSound(pair);
-                    Emitter.PlaySoundWithDistance(new MyCueId(MyStringHash.GetOrCompute(cueName)), true, false, force2D, true, false, force3D, true);
-                    IsPlaying = true;
+                    bool started = Emitter.PlaySound(pair, true, false, force2D, true, false, force3D, true);
+                    IsPlaying = started;
                     V2DebugLog.WriteEvent("emitter-start", string.Format(
                         System.Globalization.CultureInfo.InvariantCulture,
-                        "{0} cue={1} vol={2:0.00} force2d={3} force3d={4} skipFilter={5} pos={6:0.0},{7:0.0},{8:0.0}",
+                        "{0} cue={1} started={2} vol={3:0.00} force2d={4} force3d={5} skipFilter={6} pos={7:0.0},{8:0.0},{9:0.0}",
                         RouteName,
                         cueName,
+                        started ? "Y" : "N",
                         volume,
                         force2D ? "Y" : "N",
                         force3D ? "Y" : "N",
