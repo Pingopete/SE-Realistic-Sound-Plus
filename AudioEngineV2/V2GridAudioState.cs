@@ -537,6 +537,18 @@ namespace RealisticSoundPlus.AudioEngineV2
                     MyEntity3DSoundEmitter.PreloadSound(pair);
                     Emitter.PlaySoundWithDistance(new MyCueId(MyStringHash.GetOrCompute(cueName)), true, false, force2D, true, false, force3D, true);
                     IsPlaying = true;
+                    V2DebugLog.WriteEvent("emitter-start", string.Format(
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        "{0} cue={1} vol={2:0.00} force2d={3} force3d={4} skipFilter={5} pos={6:0.0},{7:0.0},{8:0.0}",
+                        RouteName,
+                        cueName,
+                        volume,
+                        force2D ? "Y" : "N",
+                        force3D ? "Y" : "N",
+                        skipFilter ? "Y" : "N",
+                        position.X,
+                        position.Y,
+                        position.Z));
                 }
 
                 SetVolume(volume);
@@ -559,6 +571,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                     Emitter.VolumeMultiplier = 0f;
                     Emitter.StopSound(false, false, false);
                     AudioEngineV2Runtime.UnregisterEmitter(Emitter);
+                    V2DebugLog.WriteEvent("emitter-stop", RouteName + " cue=" + (_cueName ?? "?"));
                 }
                 catch (Exception ex)
                 {

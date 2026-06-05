@@ -10,6 +10,7 @@ namespace RealisticSoundPlus.AudioEngineV2
     internal static class AudioEngineV2Runtime
     {
         private static readonly Dictionary<long, V2GridAudioState> GridStates = new Dictionary<long, V2GridAudioState>();
+        private static readonly Dictionary<long, MyThrust> KnownThrusters = new Dictionary<long, MyThrust>();
         private static readonly HashSet<MyEntity3DSoundEmitter> V2Emitters = new HashSet<MyEntity3DSoundEmitter>();
         private static readonly HashSet<MyEntity3DSoundEmitter> UnfilteredV2Emitters = new HashSet<MyEntity3DSoundEmitter>();
         private static bool _loggedEnabled;
@@ -17,8 +18,11 @@ namespace RealisticSoundPlus.AudioEngineV2
         private static V2AudioListenerState _listener;
         private static int _rawThrusterReports;
         private static int _acceptedThrusterReports;
+        private static int _censusThrusterReports;
         private static int _fallbackRejectedThrusterReports;
         private static int _gridMismatchThrusterReports;
+        private static int _lastCensusProcessed;
+        private static int _lastCensusRemoved;
 
         public static V2AudioListenerState Listener => _listener;
 
@@ -26,6 +30,7 @@ namespace RealisticSoundPlus.AudioEngineV2
         {
             StopAllEmitters();
             GridStates.Clear();
+            KnownThrusters.Clear();
             V2Emitters.Clear();
             UnfilteredV2Emitters.Clear();
             _loggedEnabled = false;
@@ -33,8 +38,11 @@ namespace RealisticSoundPlus.AudioEngineV2
             _listener = default(V2AudioListenerState);
             _rawThrusterReports = 0;
             _acceptedThrusterReports = 0;
+            _censusThrusterReports = 0;
             _fallbackRejectedThrusterReports = 0;
             _gridMismatchThrusterReports = 0;
+            _lastCensusProcessed = 0;
+            _lastCensusRemoved = 0;
             VanillaShipEnvironment.Reset();
             V2AudioDebugState.Reset();
 
@@ -46,10 +54,18 @@ namespace RealisticSoundPlus.AudioEngineV2
             _listener = V2AudioListenerState.Capture();
             _hasListener = true;
             if (_listener.VanillaFallback)
+            {
                 StopAllEmitters();
+                _lastCensusProcessed = 0;
+                _lastCensusRemoved = 0;
+            }
+            else
+            {
+                RefreshKnownThrusters();
+            }
 
             CleanupEmptyGridStates();
-            V2AudioDebugState.Update(_listener, CountActiveDetailSources(), CountActiveStateSources(), CountKnownSourceGroups(), CreateThrusterReportSnapshot());
+            V2AudioDebugState.Update(_listener, GridStates.Count, KnownThrusters.Count, _lastCensusProcessed, _lastCensusRemoved, CountActiveDetailSources(), CountActiveStateSources(), CountKnownSourceGroups(), CreateThrusterReportSnapshot());
 
             if (!_loggedEnabled)
             {
@@ -65,6 +81,15 @@ namespace RealisticSoundPlus.AudioEngineV2
             if (thruster == null || thruster.CubeGrid == null)
                 return;
 
+            RememberThruster(thruster);
+            ProcessThruster(thruster, false);
+        }
+
+        private static void ProcessThruster(MyThrust thruster, bool fromCensus)
+        {
+            if (thruster == null || thruster.CubeGrid == null)
+                return;
+
             if (!_hasListener)
             {
                 _listener = V2AudioListenerState.Capture();
@@ -73,14 +98,19 @@ namespace RealisticSoundPlus.AudioEngineV2
 
             if (_listener.VanillaFallback)
             {
-                _fallbackRejectedThrusterReports = SaturatingIncrement(_fallbackRejectedThrusterReports);
+                if (!fromCensus)
+                    _fallbackRejectedThrusterReports = SaturatingIncrement(_fallbackRejectedThrusterReports);
                 return;
             }
 
-            if (_listener.GridEntityId != 0L && thruster.CubeGrid.EntityId != _listener.GridEntityId)
+            if (_listener.GridEntityId != 0L && thruster.CubeGrid.EntityId != _listener.GridEntityId && !fromCensus)
                 _gridMismatchThrusterReports = SaturatingIncrement(_gridMismatchThrusterReports);
 
-            _acceptedThrusterReports = SaturatingIncrement(_acceptedThrusterReports);
+            if (fromCensus)
+                _censusThrusterReports = SaturatingIncrement(_censusThrusterReports);
+            else
+                _acceptedThrusterReports = SaturatingIncrement(_acceptedThrusterReports);
+
             V2GridAudioState state = GetOrCreateGridState(thruster.CubeGrid);
             state.ReportThruster(thruster, _listener);
         }
@@ -93,6 +123,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                 PatchDisabled = V2ThrusterAudioPatch.Disabled,
                 RawReports = _rawThrusterReports,
                 AcceptedReports = _acceptedThrusterReports,
+                CensusReports = _censusThrusterReports,
                 FallbackRejectedReports = _fallbackRejectedThrusterReports,
                 GridMismatchReports = _gridMismatchThrusterReports,
                 RegisteredEmitters = V2Emitters.Count,
@@ -181,7 +212,66 @@ namespace RealisticSoundPlus.AudioEngineV2
 
             state = new V2GridAudioState(grid);
             GridStates[id] = state;
+            V2DebugLog.WriteEvent("grid", "created id=" + id);
             return state;
+        }
+
+        private static void RememberThruster(MyThrust thruster)
+        {
+            if (thruster == null)
+                return;
+
+            long id = thruster.EntityId;
+            if (id == 0L)
+                id = thruster.GetHashCode();
+
+            KnownThrusters[id] = thruster;
+        }
+
+        private static void RefreshKnownThrusters()
+        {
+            if (KnownThrusters.Count == 0)
+            {
+                _lastCensusProcessed = 0;
+                _lastCensusRemoved = 0;
+                return;
+            }
+
+            List<long> stale = null;
+            int processed = 0;
+            foreach (KeyValuePair<long, MyThrust> pair in KnownThrusters)
+            {
+                MyThrust thruster = pair.Value;
+                try
+                {
+                    if (thruster == null || thruster.CubeGrid == null)
+                    {
+                        if (stale == null)
+                            stale = new List<long>();
+                        stale.Add(pair.Key);
+                        continue;
+                    }
+
+                    ProcessThruster(thruster, true);
+                    processed++;
+                }
+                catch (Exception ex)
+                {
+                    MyLog.Default.WriteLine("[RealisticSoundPlus] Removing V2 known thruster after census error: " + ex.Message);
+                    if (stale == null)
+                        stale = new List<long>();
+                    stale.Add(pair.Key);
+                }
+            }
+
+            _lastCensusProcessed = processed;
+            _lastCensusRemoved = stale == null ? 0 : stale.Count;
+
+            if (stale == null)
+                return;
+
+            foreach (long id in stale)
+                KnownThrusters.Remove(id);
         }
 
         private static void StopAllEmitters()

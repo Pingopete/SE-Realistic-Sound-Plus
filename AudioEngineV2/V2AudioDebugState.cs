@@ -12,7 +12,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             _snapshot = default(Snapshot);
         }
 
-        public static void Update(V2AudioListenerState listener, int activeDetailSources, int activeStateSources, int knownSourceGroups, ThrusterReportSnapshot thrusters)
+        public static void Update(V2AudioListenerState listener, int gridStates, int knownThrusters, int censusProcessed, int censusRemoved, int activeDetailSources, int activeStateSources, int knownSourceGroups, ThrusterReportSnapshot thrusters)
         {
             RealisticSoundPlusSettings settings = SettingsManager.Current;
             _snapshot = new Snapshot
@@ -25,6 +25,10 @@ namespace RealisticSoundPlus.AudioEngineV2
                 StateGain = settings.V2StateGain,
                 Distance = settings.V2EmitterDistance,
                 DistanceCurve = settings.V2DistanceCurve,
+                GridStates = gridStates,
+                KnownThrusters = knownThrusters,
+                CensusProcessed = censusProcessed,
+                CensusRemoved = censusRemoved,
                 ActiveDetailSources = activeDetailSources,
                 ActiveStateSources = activeStateSources,
                 KnownSourceGroups = knownSourceGroups,
@@ -42,14 +46,19 @@ namespace RealisticSoundPlus.AudioEngineV2
             string room = Trim(snapshot.Listener.RoomName, 42);
             return string.Format(
                 CultureInfo.InvariantCulture,
-                "route=v2 mode={0} room={1} inside={2} groups={3} thr={4}/{5}/{6} rej={7}/{8}{9} emit={10}/{11} flt={12}{13} detail={14}/{15:0.00}/x{16} state={17}/{18:0.00}/x{19} dist={20:0} curve={21:0.00} state2dpos={22} atm={23:0.00}",
+                "route=v2 mode={0} room={1} inside={2} grids={3} groups={4} known={5} scan={6}/{7} thr={8}/{9}/{10}+{11} rej={12}/{13}{14} emit={15}/{16} flt={17}{18} detail={19}/{20:0.00}/x{21} state={22}/{23:0.00}/x{24} dist={25:0} curve={26:0.00} state2dpos={27} atm={28:0.00}",
                 snapshot.Listener.ModeName,
                 room,
                 snapshot.Listener.InsideShip ? "Y" : "N",
+                snapshot.GridStates,
                 snapshot.KnownSourceGroups,
+                snapshot.KnownThrusters,
+                snapshot.CensusProcessed,
+                snapshot.CensusRemoved,
                 snapshot.Thrusters.PatchHits,
                 snapshot.Thrusters.RawReports,
                 snapshot.Thrusters.AcceptedReports,
+                snapshot.Thrusters.CensusReports,
                 snapshot.Thrusters.FallbackRejectedReports,
                 snapshot.Thrusters.GridMismatchReports,
                 snapshot.Thrusters.PatchDisabled ? " DISABLED" : string.Empty,
@@ -87,6 +96,10 @@ namespace RealisticSoundPlus.AudioEngineV2
             public float StateGain;
             public float Distance;
             public float DistanceCurve;
+            public int GridStates;
+            public int KnownThrusters;
+            public int CensusProcessed;
+            public int CensusRemoved;
             public int ActiveDetailSources;
             public int ActiveStateSources;
             public int KnownSourceGroups;
@@ -100,6 +113,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             public bool PatchDisabled;
             public int RawReports;
             public int AcceptedReports;
+            public int CensusReports;
             public int FallbackRejectedReports;
             public int GridMismatchReports;
             public int RegisteredEmitters;

@@ -72,8 +72,11 @@ Overlay fields to watch:
 | --- | --- | --- |
 | `mode` | V2 listener decision, such as `inside-seat`, `inside-room`, or fallback. | `inside-seat` or `inside-room` while testing inside. |
 | `inside` | Whether V2 thinks the listener is inside the ship. | `Y` inside the ship. |
+| `grids` | V2 grid audio models currently retained. | Greater than `0` while V2 owns a ship. |
 | `groups` | Known six-direction source groups discovered from thrusters. | Greater than `0`; up to `6` for full direction coverage. |
-| `thr=patch/raw/accepted` | Thruster patch hits, reports received, reports accepted by V2. | All three numbers climbing while in a powered ship. |
+| `known` | Cached thrusters discovered by the hook and kept for the V2 census. | Greater than `0`; should stay stable after world load. |
+| `scan=used/removed` | Cached thrusters evaluated this frame, and stale cached thrusters removed. | `used` greater than `0` while inside a discovered ship. |
+| `thr=patch/raw/accepted+census` | Hook hits, hook reports received, hook reports accepted, plus cached census reports. | `census` climbs while inside after discovery. |
 | `rej=fallback/grid` | Reports rejected by fallback state or grid mismatch. | Low or zero while inside the controlled ship. |
 | `emit=registered/unfiltered` | V2-created emitters currently registered with diagnostics/filtering. | Greater than `0` once V2 audio is actually alive. |
 | `flt=hits` | Number of times the low-pass filter hook has controlled an emitter. | Climbs when V2 3D emitters are active and filterable. |
