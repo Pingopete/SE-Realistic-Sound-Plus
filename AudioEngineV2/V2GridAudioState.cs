@@ -15,7 +15,7 @@ namespace RealisticSoundPlus.AudioEngineV2
         private static readonly TimeSpan KnownSourceLifetime = TimeSpan.FromSeconds(30);
         private static readonly TimeSpan DirectionUpdateInterval = TimeSpan.FromMilliseconds(50);
         private const float StartThreshold = 0.01f;
-        private const float MaxLayerVolume = 1.0f;
+        private const float MaxLayerVolume = 16.0f;
         private const float VanillaFullSpeed = 96f;
         private const float DetailIdleInput = 0.035f;
         private const float StateIdleInput = 0.03f;
@@ -147,6 +147,9 @@ namespace RealisticSoundPlus.AudioEngineV2
 
             if (value > 0.001f)
             {
+                if (value < 0.999f)
+                    return new DetailLoadSample(value, "move");
+
                 if (TryReadCurrentThrustPercentage(thruster, out float currentPercentage) && currentPercentage > 0.001f)
                     return new DetailLoadSample(Clamp01(currentPercentage), "cur");
 
@@ -159,12 +162,12 @@ namespace RealisticSoundPlus.AudioEngineV2
         private static float CalculateDirectionalMoveLoad(Vector3I direction, Vector3 input)
         {
             if (Math.Abs(direction.X) >= Math.Abs(direction.Y) && Math.Abs(direction.X) >= Math.Abs(direction.Z))
-                return direction.X >= 0 ? Clamp01(input.X) : Clamp01(-input.X);
+                return direction.X >= 0 ? Clamp01(-input.X) : Clamp01(input.X);
 
             if (Math.Abs(direction.Y) >= Math.Abs(direction.Z))
-                return direction.Y >= 0 ? Clamp01(input.Y) : Clamp01(-input.Y);
+                return direction.Y >= 0 ? Clamp01(-input.Y) : Clamp01(input.Y);
 
-            return direction.Z >= 0 ? Clamp01(input.Z) : Clamp01(-input.Z);
+            return direction.Z >= 0 ? Clamp01(-input.Z) : Clamp01(input.Z);
         }
 
         private static bool TryReadThrustOverridePercentage(MyThrust thruster, out float percentage)

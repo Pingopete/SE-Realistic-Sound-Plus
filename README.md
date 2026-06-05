@@ -18,7 +18,7 @@ The current build creates a replacement ship engine soundscape for listener stat
 - Each relevant grid can create up to six grouped engine-detail emitters, one for each thrust direction.
 - Each relevant grid can create up to six grouped engine-state emitters using the same directional positions.
 - Detail emitters use vanilla ship sound group thruster cues by detected thruster type, with idle cue fallback when a direction has engines but no thrust command.
-- Detail intensity prefers the per-thruster `ThrustOverridePercentage` signal when it is nonzero. During direct movement input, V2 can use `CurrentThrustPercentage` for intensity and falls back to controlled ship movement input when needed.
+- Detail intensity prefers the per-thruster `ThrustOverridePercentage` signal when it is nonzero. During direct movement input, V2 uses analog movement input when available, then falls back to movement-gated `CurrentThrustPercentage` for full-input states.
 - Detail emitters fall back to vanilla thruster block `PrimarySound` cues if a thruster type cannot be classified.
 - State emitters use confirmed vanilla ship sound group run-loop cues, classified as small/large by grid mass where available.
 - Inside state emitters force Keen's paired D2/local cue variant while still playing from the six directional emitter positions; detail emitters remain 3D/filterable.
@@ -101,7 +101,7 @@ Cue list notes:
 
 `UNCONTROLLED` beside a ship/engine cue means vanilla is playing that cue and RSP has not associated it with a V2-created emitter. V2-created cues should show an RSP route such as `v2-detail-*`, `v2-state-*`, or `filter`.
 
-V2 detail routes include their current command source, for example `v2-detail-Down-active/cur cmd=0.40`. `ovr` means `ThrustOverridePercentage`, `cur` means movement-gated `CurrentThrustPercentage`, and `move` means raw movement input.
+V2 detail routes include their current command source, for example `v2-detail-Down-active/move cmd=0.40`. `ovr` means `ThrustOverridePercentage`, `move` means analog movement input, and `cur` means movement-gated `CurrentThrustPercentage` for full-input states.
 
 Debug log:
 
