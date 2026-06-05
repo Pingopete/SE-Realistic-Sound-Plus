@@ -13,7 +13,7 @@ namespace RealisticSoundPlus.AudioEngineV2
     {
         private static readonly TimeSpan ContributionLifetime = TimeSpan.FromSeconds(5);
         private static readonly TimeSpan KnownSourceLifetime = TimeSpan.FromSeconds(30);
-        private static readonly TimeSpan DirectionUpdateInterval = TimeSpan.FromMilliseconds(50);
+        private static readonly TimeSpan DirectionUpdateInterval = TimeSpan.FromMilliseconds(16);
         private const float StartThreshold = 0.01f;
         private const float MaxLayerVolume = 1.0f;
         private const float VanillaFullSpeed = 96f;
@@ -327,9 +327,13 @@ namespace RealisticSoundPlus.AudioEngineV2
                         continue;
                     }
 
+                    Vector3D contributionPosition = contribution.Anchor != null
+                        ? contribution.Anchor.WorldMatrix.Translation
+                        : contribution.Position;
+
                     if (contribution.GeometryWeight > 0f)
                     {
-                        geometryWeightedPosition += contribution.Position * contribution.GeometryWeight;
+                        geometryWeightedPosition += contributionPosition * contribution.GeometryWeight;
                         totalGeometryWeight += contribution.GeometryWeight;
                         if (contribution.GeometryWeight > strongestGeometryWeight)
                         {
@@ -342,7 +346,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                     if (contribution.Target <= 0f)
                         continue;
 
-                    weightedPosition += contribution.Position * contribution.Target;
+                    weightedPosition += contributionPosition * contribution.Target;
                     totalWeight += contribution.Target;
                     if (contribution.Target > strongestTarget)
                     {
@@ -358,13 +362,12 @@ namespace RealisticSoundPlus.AudioEngineV2
                         _contributors.Remove(thruster);
                 }
 
-                MyThrust anchor = strongestThruster ?? strongestGeometryThruster;
+                MyThrust anchor = _knownAnchor ?? strongestGeometryThruster ?? strongestThruster;
                 Vector3D position = totalWeight > 0f
                     ? weightedPosition / totalWeight
                     : (totalGeometryWeight > 0f
                         ? geometryWeightedPosition / totalGeometryWeight
                         : (_hasKnownSource ? _knownPosition : (grid?.WorldMatrix.Translation ?? _lastPosition)));
-                anchor = anchor ?? _knownAnchor;
                 string detailCue = strongestDetailCue ?? strongestGeometryDetailCue ?? _knownDetailCue;
 
                 return new DirectionSnapshot
@@ -382,11 +385,12 @@ namespace RealisticSoundPlus.AudioEngineV2
                 if (position == Vector3D.Zero)
                     return;
 
+                bool firstKnownSource = !_hasKnownSource || _knownAnchor == null || _knownPosition == Vector3D.Zero;
                 _hasKnownSource = true;
                 _lastKnownUtc = now;
                 _lastPosition = position;
 
-                if (!_hasKnownSource || _knownPosition == Vector3D.Zero || geometryWeight >= _knownGeometryWeight)
+                if (firstKnownSource || geometryWeight > _knownGeometryWeight + 0.0001f)
                 {
                     _knownPosition = position;
                     _knownGeometryWeight = geometryWeight;
@@ -413,9 +417,8 @@ namespace RealisticSoundPlus.AudioEngineV2
                     return;
                 }
 
-                if (emitter == null || emitter.Anchor != anchor)
+                if (emitter == null)
                 {
-                    emitter?.Stop();
                     emitter = new LayerEmitter(anchor, layer, _direction);
                 }
 
@@ -423,6 +426,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                 bool skipFilter = force2D;
                 emitter.Update(position, cueName, value, force2D, force3D, skipFilter);
                 AudioDiagnostics.RecordEmitter(emitter.Emitter, emitter.RouteName, value, ExteriorSoundTransmission.Calculate(position), target, value, position);
+                AudioDiagnostics.RecordCueName(cueName, emitter.RouteName, value, ExteriorSoundTransmission.Calculate(position), target, value, position);
             }
 
             private static float CalculateDistanceGain(V2AudioListenerState listener, Vector3D position, RealisticSoundPlusSettings settings)
