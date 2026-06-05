@@ -44,12 +44,16 @@ namespace RealisticSoundPlus.AudioEngineV2
                 return "v2=uninitialized";
 
             string room = Trim(snapshot.Listener.RoomName, 42);
+            string move = snapshot.Listener.HasMoveInput
+                ? string.Format(CultureInfo.InvariantCulture, "{0:0.00},{1:0.00},{2:0.00}", snapshot.Listener.MoveInput.X, snapshot.Listener.MoveInput.Y, snapshot.Listener.MoveInput.Z)
+                : "-";
             return string.Format(
                 CultureInfo.InvariantCulture,
-                "route=v2 mode={0} room={1} inside={2} grids={3} groups={4} known={5} scan={6}/{7} thr={8}/{9}/{10}+{11} rej={12}/{13}{14} emit={15}/{16} flt={17}{18} detail={19}/{20:0.00}/x{21} state={22}/{23:0.00}/x{24} dist={25:0} curve={26:0.00} state2dpos={27} atm={28:0.00}",
+                "route=v2 mode={0} room={1} inside={2} move={3} grids={4} groups={5} known={6} scan={7}/{8} thr={9}/{10}/{11}+{12} rej={13}/{14}{15} emit={16}/{17} flt={18}{19} detail={20}/{21:0.00}/x{22} state={23}/{24:0.00}/x{25} dist={26:0} curve={27:0.00} state2dpos={28} atm={29:0.00}",
                 snapshot.Listener.ModeName,
                 room,
                 snapshot.Listener.InsideShip ? "Y" : "N",
+                move,
                 snapshot.GridStates,
                 snapshot.KnownSourceGroups,
                 snapshot.KnownThrusters,

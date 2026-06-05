@@ -17,7 +17,8 @@ The current build creates a replacement ship engine soundscape for listener stat
 - Exterior fallback states currently leave stock vanilla ship audio alone.
 - Each relevant grid can create up to six grouped engine-detail emitters, one for each thrust direction.
 - Each relevant grid can create up to six grouped engine-state emitters using the same directional positions.
-- Detail emitters use vanilla ship sound group thruster cues by detected thruster type, with idle cue fallback when a direction has engines but no thrust input.
+- Detail emitters use vanilla ship sound group thruster cues by detected thruster type, with idle cue fallback when a direction has engines but no thrust command.
+- Detail intensity prefers the per-thruster `ThrustOverridePercentage` signal. If that signal is unavailable, V2 falls back to controlled ship movement input.
 - Detail emitters fall back to vanilla thruster block `PrimarySound` cues if a thruster type cannot be classified.
 - State emitters use confirmed vanilla ship sound group run-loop cues, classified as small/large by grid mass where available.
 - Inside state emitters force Keen's paired D2/local cue variant while still playing from the six directional emitter positions; detail emitters remain 3D/filterable.
@@ -74,6 +75,7 @@ Overlay fields to watch:
 | --- | --- | --- |
 | `mode` | V2 listener decision, such as `inside-seat`, `inside-room`, or fallback. | `inside-seat` or `inside-room` while testing inside. |
 | `inside` | Whether V2 thinks the listener is inside the ship. | `Y` inside the ship. |
+| `move` | Controlled ship movement input read from the active ship controller. | Values change while pressing thrust keys; `-` means input was unavailable. |
 | `grids` | V2 grid audio models currently retained. | Greater than `0` while V2 owns a ship. |
 | `groups` | Known six-direction source groups discovered from thrusters. | Greater than `0`; up to `6` for full direction coverage. |
 | `known` | Cached thrusters discovered by the hook and kept for the V2 census. | Greater than `0`; should stay stable after world load. |
@@ -95,9 +97,11 @@ Marker colors:
 | Bright orange | Active V2 engine-state emitter. |
 | Dim cyan/orange | Known source group, currently quiet or not actively playing. |
 
-Cue list note:
+Cue list notes:
 
 `UNCONTROLLED` beside a ship/engine cue means vanilla is playing that cue and RSP has not associated it with a V2-created emitter. V2-created cues should show an RSP route such as `v2-detail-*`, `v2-state-*`, or `filter`.
+
+V2 detail routes include their current command source, for example `v2-detail-Down/ovr cmd=0.00`. `ovr` means the layer is using `ThrustOverridePercentage`; `move` means it fell back to movement input.
 
 Debug log:
 

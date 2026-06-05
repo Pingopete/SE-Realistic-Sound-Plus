@@ -19,11 +19,13 @@ namespace RealisticSoundPlus.AudioEngineV2
         public string RoomName;
         public long GridEntityId;
         public string ModeName;
+        public Vector3 MoveInput;
+        public bool HasMoveInput;
 
         public static V2AudioListenerState Capture()
         {
             Vector3D position = MyAPIGateway.Session?.Camera?.Position ?? Vector3D.Zero;
-            bool controlledShip = TryGetControlledShip(out long controlledGridId, out Vector3D controlledPosition);
+            bool controlledShip = TryGetControlledShip(out long controlledGridId, out Vector3D controlledPosition, out Vector3 moveInput, out bool hasMoveInput);
             bool seatedInteriorCamera = controlledShip && IsCameraNearControlledShip(position, controlledPosition);
             bool vanillaInside = false;
             string roomName = "room=?";
@@ -53,7 +55,9 @@ namespace RealisticSoundPlus.AudioEngineV2
                 VanillaFallback = !insideShip,
                 RoomName = roomName,
                 GridEntityId = gridEntityId,
-                ModeName = modeName
+                ModeName = modeName,
+                MoveInput = moveInput,
+                HasMoveInput = hasMoveInput
             };
         }
 
@@ -65,14 +69,18 @@ namespace RealisticSoundPlus.AudioEngineV2
             return Vector3D.DistanceSquared(cameraPosition, controlledPosition) <= SeatInteriorCameraRange * SeatInteriorCameraRange;
         }
 
-        private static bool TryGetControlledShip(out long gridEntityId, out Vector3D controlledPosition)
+        private static bool TryGetControlledShip(out long gridEntityId, out Vector3D controlledPosition, out Vector3 moveInput, out bool hasMoveInput)
         {
             gridEntityId = 0L;
             controlledPosition = Vector3D.Zero;
+            moveInput = Vector3.Zero;
+            hasMoveInput = false;
 
             object controlled = MyAPIGateway.Session?.ControlledObject;
             if (controlled == null)
                 return false;
+
+            hasMoveInput = TryReadMoveInput(controlled, out moveInput);
 
             if (controlled is IMyShipController controller)
             {
@@ -86,6 +94,47 @@ namespace RealisticSoundPlus.AudioEngineV2
             gridEntityId = TryReadEntityId(grid);
             controlledPosition = TryReadPosition(controlled);
             return gridEntityId != 0L;
+        }
+
+        private static bool TryReadVector3(object instance, string name, out Vector3 value)
+        {
+            value = Vector3.Zero;
+            object raw = TryReadMember(instance, name);
+            if (raw == null)
+                return false;
+
+            if (raw is Vector3 vector)
+            {
+                value = vector;
+                return true;
+            }
+
+            if (raw is Vector3D vectorD)
+            {
+                value = new Vector3((float)vectorD.X, (float)vectorD.Y, (float)vectorD.Z);
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool TryReadMoveInput(object controlled, out Vector3 moveInput)
+        {
+            moveInput = Vector3.Zero;
+
+            try
+            {
+                if (controlled is Sandbox.ModAPI.Ingame.IMyShipController controller)
+                {
+                    moveInput = controller.MoveIndicator;
+                    return true;
+                }
+            }
+            catch
+            {
+            }
+
+            return TryReadVector3(controlled, "MoveIndicator", out moveInput);
         }
 
         private static object TryReadMember(object instance, string name)
