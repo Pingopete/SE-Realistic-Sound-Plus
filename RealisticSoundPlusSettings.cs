@@ -18,6 +18,7 @@ namespace RealisticSoundPlus
         public float AtmosphericMufflingFloor { get; set; } = 0.5f;
         public string EngineFilter { get; set; } = "Deep";
         public float V2SmoothingMs { get; set; } = 100f;
+        public float V2DetailCommandSmoothingMs { get; set; } = 2000f;
         public float V2SoftFadeRatio { get; set; } = 0.04f;
         public bool V2DetailEnabled { get; set; } = true;
         public bool V2StateEnabled { get; set; } = false;
@@ -82,7 +83,7 @@ namespace RealisticSoundPlus
 
         public static string Summary()
         {
-            return string.Format(CultureInfo.InvariantCulture, "route=v2, gain={0:0.00}, curve={1:0.00}, presenceMin={2:0.00}, quietLog={3:0.00}, loudLog={4:0.00}, muffling={5:0.00}, interiorBase={6:0.00}, filter={7}, smoothMs={8:0}, fade={9:0.000}, atmosphereFloor={10:0.00}, detail={11}({12:0.00}), state={13}({14:0.00}), dist={15:0}, distcurve={16:0.00}, state2dpos={17}, log={18}", Current.EngineGain, Current.AudioCurveExponent, Current.MinimumShipPresence, Current.QuietShipForceLog10, Current.LoudShipForceLog10, Current.MufflingStrength, Current.InteriorBaseTransmission, Current.EngineFilter, Current.V2SmoothingMs, Current.V2SoftFadeRatio, Current.AtmosphericMufflingFloor, Current.V2DetailEnabled ? "on" : "off", Current.V2DetailGain, Current.V2StateEnabled ? "on" : "off", Current.V2StateGain, Current.V2EmitterDistance, Current.V2DistanceCurve, Current.V2State2DPositionalTest ? "on" : "off", Current.V2DebugLogEnabled ? "on" : "off");
+            return string.Format(CultureInfo.InvariantCulture, "route=v2, gain={0:0.00}, curve={1:0.00}, presenceMin={2:0.00}, quietLog={3:0.00}, loudLog={4:0.00}, muffling={5:0.00}, interiorBase={6:0.00}, filter={7}, smoothMs={8:0}, cmdSmoothMs={9:0}, fade={10:0.000}, atmosphereFloor={11:0.00}, detail={12}({13:0.00}), state={14}({15:0.00}), dist={16:0}, distcurve={17:0.00}, state2dpos={18}, log={19}", Current.EngineGain, Current.AudioCurveExponent, Current.MinimumShipPresence, Current.QuietShipForceLog10, Current.LoudShipForceLog10, Current.MufflingStrength, Current.InteriorBaseTransmission, Current.EngineFilter, Current.V2SmoothingMs, Current.V2DetailCommandSmoothingMs, Current.V2SoftFadeRatio, Current.AtmosphericMufflingFloor, Current.V2DetailEnabled ? "on" : "off", Current.V2DetailGain, Current.V2StateEnabled ? "on" : "off", Current.V2StateGain, Current.V2EmitterDistance, Current.V2DistanceCurve, Current.V2State2DPositionalTest ? "on" : "off", Current.V2DebugLogEnabled ? "on" : "off");
         }
 
         public static bool TrySet(string name, float value)
@@ -127,6 +128,12 @@ namespace RealisticSoundPlus
                 case "smooth":
                 case "smoothing":
                     Current.V2SmoothingMs = value;
+                    break;
+                case "cmdsmooth":
+                case "commandsmooth":
+                case "inputsmooth":
+                case "thrustsmooth":
+                    Current.V2DetailCommandSmoothingMs = value;
                     break;
                 case "fade":
                 case "softfade":
@@ -272,6 +279,7 @@ namespace RealisticSoundPlus
             Current.AtmosphericMufflingFloor = Clamp(Current.AtmosphericMufflingFloor, 0f, 1f);
             Current.EngineFilter = NormalizeFilter(Current.EngineFilter) ?? "Off";
             Current.V2SmoothingMs = Clamp(Current.V2SmoothingMs, 0f, 500f);
+            Current.V2DetailCommandSmoothingMs = Clamp(Current.V2DetailCommandSmoothingMs, 0f, 5000f);
             Current.V2SoftFadeRatio = Clamp(Current.V2SoftFadeRatio, 0.001f, 0.25f);
             Current.V2DetailGain = Clamp(Current.V2DetailGain, 0f, 4f);
             Current.V2StateGain = Clamp(Current.V2StateGain, 0f, 4f);
@@ -295,6 +303,8 @@ namespace RealisticSoundPlus
             Current.V2StateEnabled = false;
             Current.V2State2DPositionalTest = true;
             Current.V2DebugLogEnabled = true;
+            if (Current.V2DetailCommandSmoothingMs <= 0f)
+                Current.V2DetailCommandSmoothingMs = 2000f;
         }
 
         private static float Clamp(float value, float min, float max)

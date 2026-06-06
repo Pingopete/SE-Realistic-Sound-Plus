@@ -25,6 +25,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                 StateGain = settings.V2StateGain,
                 Distance = settings.V2EmitterDistance,
                 DistanceCurve = settings.V2DistanceCurve,
+                CommandSmoothingMs = settings.V2DetailCommandSmoothingMs,
                 GridStates = gridStates,
                 KnownThrusters = knownThrusters,
                 CensusProcessed = censusProcessed,
@@ -49,7 +50,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                 : "-";
             return string.Format(
                 CultureInfo.InvariantCulture,
-                "route=v2 mode={0} room={1} inside={2} move={3} grids={4} groups={5} known={6} scan={7}/{8} thr={9}/{10}/{11}+{12} rej={13}/{14}{15} emit={16}/{17} flt={18}{19} detail={20}/{21:0.00}/x{22} state={23}/{24:0.00}/x{25} dist={26:0} curve={27:0.00} state2dpos={28} atm={29:0.00}",
+                "route=v2 mode={0} room={1} inside={2} move={3} grids={4} groups={5} known={6} scan={7}/{8} thr={9}/{10}/{11}+{12} rej={13}/{14}{15} emit={16}/{17} flt={18}{19} detail={20}/{21:0.00}/x{22} state={23}/{24:0.00}/x{25} dist={26:0} curve={27:0.00} cmdsmooth={28:0} state2dpos={29} atm={30:0.00}",
                 snapshot.Listener.ModeName,
                 room,
                 snapshot.Listener.InsideShip ? "Y" : "N",
@@ -78,6 +79,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                 snapshot.ActiveStateSources,
                 snapshot.Distance,
                 snapshot.DistanceCurve,
+                snapshot.CommandSmoothingMs,
                 snapshot.State2DPositionalTest ? "on" : "off",
                 snapshot.Listener.Atmosphere);
         }
@@ -100,6 +102,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             public float StateGain;
             public float Distance;
             public float DistanceCurve;
+            public float CommandSmoothingMs;
             public int GridStates;
             public int KnownThrusters;
             public int CensusProcessed;
