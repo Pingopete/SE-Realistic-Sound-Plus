@@ -17,6 +17,7 @@ namespace RealisticSoundPlus
         public float InteriorBaseTransmission { get; set; } = 0.2f;
         public float AtmosphericMufflingFloor { get; set; } = 0.5f;
         public string EngineFilter { get; set; } = "Deep";
+        public string InternalEngineFilter { get; set; } = "Off";
         public float V2SmoothingMs { get; set; } = 100f;
         public float V2DetailCommandSmoothingMs { get; set; } = 2000f;
         public float V2SoftFadeRatio { get; set; } = 0.04f;
@@ -85,7 +86,7 @@ namespace RealisticSoundPlus
 
         public static string Summary()
         {
-            return string.Format(CultureInfo.InvariantCulture, "route=v2, gain={0:0.00}, curve={1:0.00}, presenceMin={2:0.00}, quietLog={3:0.00}, loudLog={4:0.00}, muffling={5:0.00}, interiorBase={6:0.00}, filter={7}, smoothMs={8:0}, cmdSmoothMs={9:0}, fade={10:0.000}, atmosphereFloor={11:0.00}, detail={12}({13:0.00}), idle={14}({15:0.00}), detail2dpos={16}, state={17}({18:0.00}), dist={19:0}, distcurve={20:0.00}, state2dpos={21}, log={22}", Current.EngineGain, Current.AudioCurveExponent, Current.MinimumShipPresence, Current.QuietShipForceLog10, Current.LoudShipForceLog10, Current.MufflingStrength, Current.InteriorBaseTransmission, Current.EngineFilter, Current.V2SmoothingMs, Current.V2DetailCommandSmoothingMs, Current.V2SoftFadeRatio, Current.AtmosphericMufflingFloor, Current.V2DetailEnabled ? "on" : "off", Current.V2DetailGain, Current.V2DetailIdleEnabled ? "on" : "off", Current.V2DetailIdleGain, Current.V2Detail2DPositionalTest ? "on" : "off", Current.V2StateEnabled ? "on" : "off", Current.V2StateGain, Current.V2EmitterDistance, Current.V2DistanceCurve, Current.V2State2DPositionalTest ? "on" : "off", Current.V2DebugLogEnabled ? "on" : "off");
+            return string.Format(CultureInfo.InvariantCulture, "route=v2, gain={0:0.00}, curve={1:0.00}, presenceMin={2:0.00}, quietLog={3:0.00}, loudLog={4:0.00}, muffling={5:0.00}, interiorBase={6:0.00}, filter={7}, internalFilter={8}, smoothMs={9:0}, cmdSmoothMs={10:0}, fade={11:0.000}, atmosphereFloor={12:0.00}, detail={13}({14:0.00}), idle={15}({16:0.00}), detail2dpos={17}, state={18}({19:0.00}), dist={20:0}, distcurve={21:0.00}, state2dpos={22}, log={23}", Current.EngineGain, Current.AudioCurveExponent, Current.MinimumShipPresence, Current.QuietShipForceLog10, Current.LoudShipForceLog10, Current.MufflingStrength, Current.InteriorBaseTransmission, Current.EngineFilter, Current.InternalEngineFilter, Current.V2SmoothingMs, Current.V2DetailCommandSmoothingMs, Current.V2SoftFadeRatio, Current.AtmosphericMufflingFloor, Current.V2DetailEnabled ? "on" : "off", Current.V2DetailGain, Current.V2DetailIdleEnabled ? "on" : "off", Current.V2DetailIdleGain, Current.V2Detail2DPositionalTest ? "on" : "off", Current.V2StateEnabled ? "on" : "off", Current.V2StateGain, Current.V2EmitterDistance, Current.V2DistanceCurve, Current.V2State2DPositionalTest ? "on" : "off", Current.V2DebugLogEnabled ? "on" : "off");
         }
 
         public static bool TrySet(string name, float value)
@@ -181,6 +182,15 @@ namespace RealisticSoundPlus
             return true;
         }
 
+        public static bool TrySetInternalFilter(string value)
+        {
+            string normalized = NormalizeFilter(value);
+            if (normalized == null)
+                return false;
+            Current.InternalEngineFilter = normalized;
+            return true;
+        }
+
         public static bool TrySetV2Detail(string value)
         {
             if (!TryParseBool(value, out bool enabled))
@@ -256,6 +266,11 @@ namespace RealisticSoundPlus
             return GetFilterEffectSubtype(Current.EngineFilter);
         }
 
+        public static string GetInternalEngineFilterEffectSubtype()
+        {
+            return GetFilterEffectSubtype(Current.InternalEngineFilter);
+        }
+
         private static string GetFilterEffectSubtype(string filter)
         {
             switch (NormalizeFilter(filter))
@@ -303,6 +318,7 @@ namespace RealisticSoundPlus
             Current.InteriorBaseTransmission = Clamp(Current.InteriorBaseTransmission, 0.05f, 1f);
             Current.AtmosphericMufflingFloor = Clamp(Current.AtmosphericMufflingFloor, 0f, 1f);
             Current.EngineFilter = NormalizeFilter(Current.EngineFilter) ?? "Off";
+            Current.InternalEngineFilter = NormalizeFilter(Current.InternalEngineFilter) ?? "Off";
             Current.V2SmoothingMs = Clamp(Current.V2SmoothingMs, 0f, 500f);
             Current.V2DetailCommandSmoothingMs = Clamp(Current.V2DetailCommandSmoothingMs, 0f, 5000f);
             Current.V2SoftFadeRatio = Clamp(Current.V2SoftFadeRatio, 0.001f, 0.25f);

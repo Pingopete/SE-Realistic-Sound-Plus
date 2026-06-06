@@ -12,9 +12,9 @@ V2 is now the active ship-engine audio route on this branch. There is no `/rsp v
 
 The current build creates a replacement ship engine soundscape for listener states where RSP should own the ship audio:
 
-- V2 takes over while the listener/camera is inside a ship, close to a controlled ship seat/cockpit, or controlling a ship from an outside/third-person camera.
+- V2 takes over while the listener/camera is inside a ship, close to a controlled ship seat/cockpit, controlling a ship from an outside/third-person camera, or physically standing/walking on a ship grid.
 - Controlled third-person/outside-camera ship states use the same six-direction V2 detail route with exterior/D3 source material.
-- Free exterior fallback states currently leave stock vanilla ship audio alone so Keen's realistic-audio vacuum/contact rules remain in charge.
+- Free exterior fallback states such as flying/falling/jumping near a ship currently leave stock vanilla ship audio alone so Keen's realistic-audio vacuum/contact rules remain in charge.
 - Each relevant grid can create up to six grouped engine-detail emitters, one for each thrust direction.
 - Each relevant grid can create up to six grouped engine-state emitters using the same directional positions.
 - Detail emitters use vanilla ship sound group thruster cues by detected thruster type, with idle cue fallback when a direction has engines but no thrust command.
@@ -24,7 +24,7 @@ The current build creates a replacement ship engine soundscape for listener stat
 - State emitters use confirmed vanilla ship sound group run-loop cues, classified as small/large by grid mass where available.
 - Inside state emitters force Keen's paired D2/local cue variant while still playing from the six directional emitter positions.
 - V2-created 3D engine emitters use the shared filter/transmission path.
-- Interior 2D/local state emitters are explicitly filter-exempt.
+- Exterior detail emitters use `/rsp filter`; inside/local detail and state emitters use `/rsp internalfilter`.
 - When V2 owns the current ship soundscape, confirmed vanilla ship-state cues are suppressed so the replacement emitters are not hidden under the stock centered mix.
 
 Debug marker colors:
@@ -59,6 +59,7 @@ Current live V2 test defaults:
 | `distcurve` | `1.00` | Distance falloff curve inside `dist`. |
 | `cmdsmooth` | `2000` | Detail command smoothing time in milliseconds. |
 | `filter` | `Deep` | Low-pass effect for V2 3D engine emitters. |
+| `internalfilter` | `Off` | Independent low-pass effect for inside/local detail and state emitters. |
 | `sounds` | `on` | Center debug overlay starts enabled on this branch. |
 | `log` | `on` | V2 debug log writes once per second. |
 
@@ -73,6 +74,7 @@ Most useful first commands:
 /rsp gain 4
 /rsp detailgain 4
 /rsp detail2dpos on
+/rsp internalfilter off
 /rsp idle off
 /rsp idlegain 0.25
 /rsp stategain 4
@@ -83,6 +85,9 @@ Overlay fields to watch:
 | Field | Meaning | Good sign |
 | --- | --- | --- |
 | `mode` | V2 listener decision, such as `inside-seat`, `inside-room`, or fallback. | `inside-seat` or `inside-room` while testing inside. |
+| `grid` | Short id of the listener grid V2 is trying to own. | Nonzero while seated, inside, or standing/walking on a ship grid. |
+| `char` | Character movement state used by the on-hull contact probe. | `Standing`, `Walking`, `Running`, etc. while on the hull; `Flying`/`Falling` should fall back. |
+| `contact=source/id` | Character grid contact source and short grid id. | `topgrid/...` or `relative/...` while physically on a grid. |
 | `inside` | Whether V2 thinks the listener is inside the ship. | `Y` inside the ship. |
 | `move` | Controlled ship movement input read from the active ship controller. | Values change while pressing thrust keys; `-` means input was unavailable. |
 | `grids` | V2 grid audio models currently retained. | Greater than `0` while V2 owns a ship. |
@@ -124,7 +129,7 @@ Debug log:
 %APPDATA%\SpaceEngineers\RealisticSoundPlus-v2-debug.log
 ```
 
-The log records global audio state, the V2 overlay line, `/rsp show` settings, current top source voices, and per-direction detail diagnostics once per second. Use `/rsp logpath` in game to print the exact path.
+The log records global audio state, the V2 overlay line, `/rsp show` settings, current top source voices, and per-direction detail diagnostics once per second. It also writes `event=listener` route-change lines with mode, grid id, character movement state, and contact source/grid so on-hull routing issues are easier to diagnose. Use `/rsp logpath` in game to print the exact path.
 
 ## Debug Overlay
 
@@ -132,7 +137,7 @@ Use `/rsp sounds on|off`. The overlay is enabled by default on this live V2 test
 
 The centered overlay shows:
 
-- Global listener state: atmosphere, altitude, controlled speed, inside state, active filter, and `route=v2`.
+- Global listener state: atmosphere, altitude, controlled speed, inside state, active exterior/internal filters, and `route=v2`.
 - V2 listener state: mode, vanilla room probe, inside state, active detail/state source counts, shared distance, curve, D2 positional test flags, and atmosphere.
 - Current audio voices: cue name, voice count, volume score, engine-candidate marker, and RSP diagnostics when available.
 - RSP diagnostics: route, transmission, scale, base volume, final multiplier, listener distance, and pressure.
@@ -161,7 +166,7 @@ For clean V2 testing, this branch keeps the active Harmony surface intentionally
 - `MyThrust.UpdateAfterSimulation` feeds thruster state into the V2 six-direction audio model.
 - `MyShipSoundComponent.UpdateVolumes` reports vanilla inside/room state to the V2 listener model and overlay.
 - `MyEntity3DSoundEmitter.PlaySound` and `PlaySoundWithDistance` suppress confirmed vanilla ship-state cues only while V2 owns the current ship soundscape.
-- `MyEntity3DSoundEmitter.SelectEffect` applies filters only to V2-registered emitters.
+- `MyEntity3DSoundEmitter.SelectEffect` applies the exterior or internal filter route only to V2-registered emitters.
 - `MyCharacterBreath.Update` suppresses the vanilla breathing loop while the helmet/visor is open.
 - `MyShipSoundComponent.UpdateShouldPlay2D` and `UpdateSoundDimension` prevent vanilla seat/bed/desk states from forcing a different ship-audio dimension.
 
@@ -211,7 +216,8 @@ Settings are saved to `%APPDATA%\SpaceEngineers\RealisticSoundPlus.xml` and hot-
 | `/rsp muffling 1` | `/rsp muffle` | `1.00` | `0..1` | Strength of the shared V2 muffling/filter transmission model. |
 | `/rsp interior 0.2` | `/rsp interiorbase` | `0.20` | `0.05..1` | Baseline transmission floor while muffled. Source range is still controlled by `dist` and `distcurve`. |
 | `/rsp atmfloor 0.5` | `/rsp atmospherefloor`, `/rsp atmosphericfloor` | `0.50` | `0..1` | Amount of muffling retained at full planetary air density while inside. |
-| `/rsp filter deep` | none | `deep` | options | Selects low-pass effect for V2 3D engine emitters. Options: `off`, `helmet`, `cockpit`, `cockpitnooxy`, `realship`, `deep`. |
+| `/rsp filter deep` | `/rsp externalfilter`, `/rsp extfilter` | `deep` | options | Selects the exterior low-pass effect for outside/on-hull V2 detail emitters. Options: `off`, `helmet`, `cockpit`, `cockpitnooxy`, `realship`, `deep`. |
+| `/rsp internalfilter off` | `/rsp intfilter`, `/rsp insidefilter` | `off` | options | Selects the independent inside/local low-pass effect for inside D2/local detail and state emitters. |
 
 ### Debug And Utility
 

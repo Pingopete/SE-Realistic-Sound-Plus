@@ -32,7 +32,8 @@ namespace RealisticSoundPlus.Patches
                 ListenerAltitude = TryGetAltitude(listenerPosition),
                 ControlledSpeed = TryGetControlledSpeed(),
                 InsideShip = insideShip,
-                EngineFilter = SettingsManager.Current.EngineFilter
+                EngineFilter = SettingsManager.Current.EngineFilter,
+                InternalEngineFilter = SettingsManager.Current.InternalEngineFilter
             };
         }
 
@@ -71,12 +72,13 @@ namespace RealisticSoundPlus.Patches
 
             return string.Format(
                 CultureInfo.InvariantCulture,
-                "atm={0:0.00} {1} speed={2:0.0} inside={3} filter={4} route=v2",
+                "atm={0:0.00} {1} speed={2:0.0} inside={3} filter={4} intfilter={5} route=v2",
                 snapshot.ListenerPressure,
                 altitude,
                 snapshot.ControlledSpeed,
                 snapshot.InsideShip ? "Y" : "N",
-                snapshot.EngineFilter);
+                snapshot.EngineFilter,
+                snapshot.InternalEngineFilter);
         }
 
         public static string FormatCue(CueSnapshot snapshot)
@@ -177,6 +179,7 @@ namespace RealisticSoundPlus.Patches
             public float ControlledSpeed;
             public bool InsideShip;
             public string EngineFilter;
+            public string InternalEngineFilter;
         }
 
         public struct CueSnapshot

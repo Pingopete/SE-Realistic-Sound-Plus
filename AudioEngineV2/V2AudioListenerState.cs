@@ -1,6 +1,7 @@
 using System;
 using System.Reflection;
 using RealisticSoundPlus.Patches;
+using Sandbox.Game.Entities;
 using Sandbox.ModAPI;
 using VRageMath;
 
@@ -21,11 +22,15 @@ namespace RealisticSoundPlus.AudioEngineV2
         public string ModeName;
         public Vector3 MoveInput;
         public bool HasMoveInput;
+        public long ContactGridEntityId;
+        public string ContactSource;
+        public string CharacterMovementState;
 
         public static V2AudioListenerState Capture()
         {
             Vector3D position = MyAPIGateway.Session?.Camera?.Position ?? Vector3D.Zero;
             bool controlledShip = TryGetControlledShip(out long controlledGridId, out Vector3D controlledPosition, out Vector3 moveInput, out bool hasMoveInput);
+            bool characterGridContact = TryGetCharacterGridContact(out long contactGridId, out string contactSource, out string characterMovementState);
             bool seatedInteriorCamera = controlledShip && IsCameraNearControlledShip(position, controlledPosition);
             bool vanillaInside = false;
             string roomName = "room=?";
@@ -40,12 +45,14 @@ namespace RealisticSoundPlus.AudioEngineV2
 
             if (controlledGridId != 0L)
                 gridEntityId = controlledGridId;
+            else if (contactGridId != 0L)
+                gridEntityId = contactGridId;
 
             bool insideShip = vanillaInside || seatedInteriorCamera;
-            bool routeActive = insideShip || controlledShip;
+            bool routeActive = insideShip || controlledShip || characterGridContact;
             string modeName = insideShip
                 ? (seatedInteriorCamera ? "inside-seat" : "inside-room")
-                : (controlledShip ? "outside-seat-camera" : "vanilla-fallback");
+                : (controlledShip ? "outside-seat-camera" : (characterGridContact ? "outside-grid-contact-" + contactSource : "vanilla-fallback"));
 
             return new V2AudioListenerState
             {
@@ -58,8 +65,94 @@ namespace RealisticSoundPlus.AudioEngineV2
                 GridEntityId = gridEntityId,
                 ModeName = modeName,
                 MoveInput = moveInput,
-                HasMoveInput = hasMoveInput
+                HasMoveInput = hasMoveInput,
+                ContactGridEntityId = contactGridId,
+                ContactSource = contactSource,
+                CharacterMovementState = characterMovementState
             };
+        }
+
+        private static bool TryGetCharacterGridContact(out long gridEntityId, out string source, out string movementState)
+        {
+            gridEntityId = 0L;
+            source = null;
+            movementState = null;
+
+            object controlled = MyAPIGateway.Session?.ControlledObject;
+            if (controlled == null)
+                return false;
+
+            object entity = TryReadMember(controlled, "Entity") ?? controlled;
+            movementState = ReadCharacterMovementState(entity);
+            if (!IsPhysicalCharacterContactStateName(movementState))
+                return false;
+
+            object topGrid = TryReadMember(entity, "m_topGrid");
+            if (TryResolveGridEntityId(topGrid, out gridEntityId))
+            {
+                source = "topgrid";
+                return true;
+            }
+
+            object relative = TryReadMember(entity, "RelativeDampeningEntity") ?? TryReadMember(entity, "m_relativeDampeningEntity");
+            if (TryResolveGridEntityId(relative, out gridEntityId))
+            {
+                source = "relative";
+                return true;
+            }
+
+            return false;
+        }
+
+        private static string ReadCharacterMovementState(object entity)
+        {
+            object state = TryReadMember(entity, "CurrentMovementState") ?? TryInvokeParameterless(entity, "GetWalkingState");
+            return state?.ToString();
+        }
+
+        private static bool IsPhysicalCharacterContactStateName(string stateName)
+        {
+            if (string.IsNullOrWhiteSpace(stateName))
+                return false;
+
+            switch (stateName.ToLowerInvariant())
+            {
+                case "flying":
+                case "falling":
+                case "jump":
+                case "died":
+                    return false;
+                default:
+                    return true;
+            }
+        }
+
+        private static bool TryResolveGridEntityId(object candidate, out long gridEntityId)
+        {
+            gridEntityId = 0L;
+            if (candidate == null)
+                return false;
+
+            if (candidate is MyCubeGrid grid)
+            {
+                gridEntityId = grid.EntityId;
+                return gridEntityId != 0L;
+            }
+
+            object cubeGrid = TryReadMember(candidate, "CubeGrid");
+            gridEntityId = TryReadEntityId(cubeGrid);
+            if (gridEntityId != 0L)
+                return true;
+
+            object topMostParent = TryInvokeParameterless(candidate, "GetTopMostParent");
+            if (topMostParent != null && !ReferenceEquals(topMostParent, candidate))
+                return TryResolveGridEntityId(topMostParent, out gridEntityId);
+
+            object parent = TryReadMember(candidate, "Parent");
+            if (parent != null && !ReferenceEquals(parent, candidate))
+                return TryResolveGridEntityId(parent, out gridEntityId);
+
+            return false;
         }
 
         private static bool IsCameraNearControlledShip(Vector3D cameraPosition, Vector3D controlledPosition)
@@ -150,6 +243,22 @@ namespace RealisticSoundPlus.AudioEngineV2
 
                 FieldInfo field = instance.GetType().GetField(name, InstanceMembers);
                 return field?.GetValue(instance);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static object TryInvokeParameterless(object instance, string name)
+        {
+            if (instance == null)
+                return null;
+
+            try
+            {
+                MethodInfo method = instance.GetType().GetMethod(name, InstanceMembers, null, Type.EmptyTypes, null);
+                return method?.Invoke(instance, null);
             }
             catch
             {

@@ -44,7 +44,7 @@ namespace RealisticSoundPlus.Patches
                     return;
                 }
 
-                string effectSubtype = SettingsManager.GetEngineFilterEffectSubtype();
+                string effectSubtype = AudioEngineV2Runtime.GetEngineFilterEffectSubtype(__instance);
                 if (string.IsNullOrEmpty(effectSubtype))
                 {
                     __result = MyStringHash.NullOrEmpty;

@@ -53,10 +53,14 @@ namespace RealisticSoundPlus.AudioEngineV2
                 : "-";
             return string.Format(
                 CultureInfo.InvariantCulture,
-                "route=v2 mode={0} room={1} inside={2} move={3} grids={4} groups={5} known={6} scan={7}/{8} thr={9}/{10}/{11}+{12} rej={13}/{14}{15} emit={16}/{17} flt={18}{19} detail={20}/{21:0.00}/x{22} idle={23}/{24:0.00} detail2dpos={25} state={26}/{27:0.00}/x{28} dist={29:0} curve={30:0.00} cmdsmooth={31:0} state2dpos={32} atm={33:0.00}",
+                "route=v2 mode={0} room={1} inside={2} grid={3} char={4} contact={5}/{6} move={7} grids={8} groups={9} known={10} scan={11}/{12} thr={13}/{14}/{15}+{16} rej={17}/{18}{19} emit={20}/{21} flt={22}{23} detail={24}/{25:0.00}/x{26} idle={27}/{28:0.00} detail2dpos={29} state={30}/{31:0.00}/x{32} dist={33:0} curve={34:0.00} cmdsmooth={35:0} state2dpos={36} atm={37:0.00}",
                 snapshot.Listener.ModeName,
                 room,
                 snapshot.Listener.InsideShip ? "Y" : "N",
+                ShortId(snapshot.Listener.GridEntityId),
+                Trim(snapshot.Listener.CharacterMovementState, 12),
+                snapshot.Listener.ContactSource ?? "-",
+                ShortId(snapshot.Listener.ContactGridEntityId),
                 move,
                 snapshot.GridStates,
                 snapshot.KnownSourceGroups,
@@ -88,6 +92,15 @@ namespace RealisticSoundPlus.AudioEngineV2
                 snapshot.CommandSmoothingMs,
                 snapshot.State2DPositionalTest ? "on" : "off",
                 snapshot.Listener.Atmosphere);
+        }
+
+        private static string ShortId(long id)
+        {
+            if (id == 0L)
+                return "0";
+
+            long positive = id < 0L ? -id : id;
+            return (positive % 1000000L).ToString(CultureInfo.InvariantCulture);
         }
 
         private static string Trim(string value, int maxLength)

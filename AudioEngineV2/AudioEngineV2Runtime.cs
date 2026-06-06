@@ -14,6 +14,7 @@ namespace RealisticSoundPlus.AudioEngineV2
         private static readonly Dictionary<long, MyThrust> KnownThrusters = new Dictionary<long, MyThrust>();
         private static readonly HashSet<MyEntity3DSoundEmitter> V2Emitters = new HashSet<MyEntity3DSoundEmitter>();
         private static readonly HashSet<MyEntity3DSoundEmitter> UnfilteredV2Emitters = new HashSet<MyEntity3DSoundEmitter>();
+        private static readonly Dictionary<MyEntity3DSoundEmitter, V2FilterRoute> V2EmitterFilterRoutes = new Dictionary<MyEntity3DSoundEmitter, V2FilterRoute>();
         private static readonly HashSet<string> MutedVanillaCues = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private static bool _loggedEnabled;
         private static bool _hasListener;
@@ -26,6 +27,12 @@ namespace RealisticSoundPlus.AudioEngineV2
         private static int _lastCensusProcessed;
         private static int _lastCensusRemoved;
         private static DateTime _lastCensusUtc = DateTime.MinValue;
+        private static string _lastLoggedListenerMode;
+        private static string _lastLoggedContactSource;
+        private static long _lastLoggedListenerGridId;
+        private static long _lastLoggedContactGridId;
+        private static bool _lastLoggedInsideShip;
+        private static bool _lastLoggedVanillaFallback;
 
         public static V2AudioListenerState Listener => _listener;
 
@@ -36,6 +43,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             KnownThrusters.Clear();
             V2Emitters.Clear();
             UnfilteredV2Emitters.Clear();
+            V2EmitterFilterRoutes.Clear();
             MutedVanillaCues.Clear();
             _loggedEnabled = false;
             _hasListener = false;
@@ -48,6 +56,12 @@ namespace RealisticSoundPlus.AudioEngineV2
             _lastCensusProcessed = 0;
             _lastCensusRemoved = 0;
             _lastCensusUtc = DateTime.MinValue;
+            _lastLoggedListenerMode = null;
+            _lastLoggedContactSource = null;
+            _lastLoggedListenerGridId = 0L;
+            _lastLoggedContactGridId = 0L;
+            _lastLoggedInsideShip = false;
+            _lastLoggedVanillaFallback = false;
             VanillaShipEnvironment.Reset();
             V2AudioDebugState.Reset();
 
@@ -58,6 +72,7 @@ namespace RealisticSoundPlus.AudioEngineV2
         {
             _listener = V2AudioListenerState.Capture();
             _hasListener = true;
+            LogListenerTransitionIfChanged(_listener);
             if (_listener.VanillaFallback)
             {
                 StopAllEmitters();
@@ -77,6 +92,37 @@ namespace RealisticSoundPlus.AudioEngineV2
                 _loggedEnabled = true;
                 MyLog.Default.WriteLineAndConsole("[RealisticSoundPlus] Audio Engine V2 is the active ship-engine route. Six-direction detail/state emitter routing is active while the listener is inside or controlling a ship.");
             }
+        }
+
+        private static void LogListenerTransitionIfChanged(V2AudioListenerState listener)
+        {
+            if (string.Equals(_lastLoggedListenerMode, listener.ModeName, StringComparison.Ordinal)
+                && string.Equals(_lastLoggedContactSource, listener.ContactSource, StringComparison.Ordinal)
+                && _lastLoggedListenerGridId == listener.GridEntityId
+                && _lastLoggedContactGridId == listener.ContactGridEntityId
+                && _lastLoggedInsideShip == listener.InsideShip
+                && _lastLoggedVanillaFallback == listener.VanillaFallback)
+            {
+                return;
+            }
+
+            _lastLoggedListenerMode = listener.ModeName;
+            _lastLoggedContactSource = listener.ContactSource;
+            _lastLoggedListenerGridId = listener.GridEntityId;
+            _lastLoggedContactGridId = listener.ContactGridEntityId;
+            _lastLoggedInsideShip = listener.InsideShip;
+            _lastLoggedVanillaFallback = listener.VanillaFallback;
+
+            V2DebugLog.WriteEvent("listener", string.Format(
+                System.Globalization.CultureInfo.InvariantCulture,
+                "mode={0} inside={1} fallback={2} grid={3} contact={4}/{5} char={6}",
+                listener.ModeName ?? "?",
+                listener.InsideShip ? "Y" : "N",
+                listener.VanillaFallback ? "Y" : "N",
+                listener.GridEntityId,
+                listener.ContactSource ?? "-",
+                listener.ContactGridEntityId,
+                listener.CharacterMovementState ?? "?"));
         }
 
         public static void ReportThruster(MyThrust thruster)
@@ -195,11 +241,17 @@ namespace RealisticSoundPlus.AudioEngineV2
 
         public static void RegisterEmitter(MyEntity3DSoundEmitter emitter, bool skipFilter)
         {
+            RegisterEmitter(emitter, skipFilter ? V2FilterRoute.None : V2FilterRoute.External);
+        }
+
+        public static void RegisterEmitter(MyEntity3DSoundEmitter emitter, V2FilterRoute filterRoute)
+        {
             if (emitter == null)
                 return;
 
             V2Emitters.Add(emitter);
-            if (skipFilter)
+            V2EmitterFilterRoutes[emitter] = filterRoute;
+            if (filterRoute == V2FilterRoute.None)
                 UnfilteredV2Emitters.Add(emitter);
             else
                 UnfilteredV2Emitters.Remove(emitter);
@@ -214,6 +266,7 @@ namespace RealisticSoundPlus.AudioEngineV2
 
             V2Emitters.Remove(emitter);
             UnfilteredV2Emitters.Remove(emitter);
+            V2EmitterFilterRoutes.Remove(emitter);
         }
 
         public static bool IsV2Emitter(MyEntity3DSoundEmitter emitter)
@@ -224,6 +277,24 @@ namespace RealisticSoundPlus.AudioEngineV2
         public static bool ShouldSkipEngineFilter(MyEntity3DSoundEmitter emitter)
         {
             return emitter != null && UnfilteredV2Emitters.Contains(emitter);
+        }
+
+        public static string GetEngineFilterEffectSubtype(MyEntity3DSoundEmitter emitter)
+        {
+            if (emitter != null && V2EmitterFilterRoutes.TryGetValue(emitter, out V2FilterRoute route))
+            {
+                switch (route)
+                {
+                    case V2FilterRoute.Internal:
+                        return SettingsManager.GetInternalEngineFilterEffectSubtype();
+                    case V2FilterRoute.External:
+                        return SettingsManager.GetEngineFilterEffectSubtype();
+                    default:
+                        return null;
+                }
+            }
+
+            return SettingsManager.GetEngineFilterEffectSubtype();
         }
 
         private static bool TryGetSuppressibleVanillaCue(MyEntity3DSoundEmitter emitter, out string cueName)
@@ -425,5 +496,12 @@ namespace RealisticSoundPlus.AudioEngineV2
         {
             return value == int.MaxValue ? value : value + 1;
         }
+    }
+
+    internal enum V2FilterRoute
+    {
+        None,
+        External,
+        Internal
     }
 }

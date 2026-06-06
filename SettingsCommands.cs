@@ -51,7 +51,7 @@ namespace RealisticSoundPlus
                 {
                     case "help":
                     case "?":
-                        Notify("/rsp show | /rsp detail on | /rsp idle off | /rsp state on | /rsp detailgain 2 | /rsp idlegain 1 | /rsp stategain 2 | /rsp dist 200 | /rsp distcurve 1 | /rsp cmdsmooth 2000 | /rsp statecurve 1 | /rsp detail2dpos on | /rsp state2dpos on | /rsp filter deep | /rsp sounds | /rsp logpath | /rsp save");
+                        Notify("/rsp show | /rsp detail on | /rsp idle off | /rsp state on | /rsp detailgain 2 | /rsp idlegain 1 | /rsp stategain 2 | /rsp dist 200 | /rsp distcurve 1 | /rsp cmdsmooth 2000 | /rsp statecurve 1 | /rsp detail2dpos on | /rsp state2dpos on | /rsp filter deep | /rsp internalfilter off | /rsp sounds | /rsp logpath | /rsp save");
                         break;
                     case "show":
                         Notify(SettingsManager.Summary());
@@ -65,7 +65,14 @@ namespace RealisticSoundPlus
                         Notify("Reloaded. " + SettingsManager.Summary());
                         break;
                     case "filter":
+                    case "externalfilter":
+                    case "extfilter":
                         SetFilter(parts);
+                        break;
+                    case "internalfilter":
+                    case "intfilter":
+                    case "insidefilter":
+                        SetInternalFilter(parts);
                         break;
                     case "detail":
                     case "enginedetail":
@@ -251,6 +258,23 @@ namespace RealisticSoundPlus
             if (!SettingsManager.TrySetFilter(parts[1]))
             {
                 Notify("Unknown filter. Options: " + SettingsManager.FilterOptions);
+                return;
+            }
+
+            Notify(SettingsManager.Summary());
+        }
+
+        private static void SetInternalFilter(string[] parts)
+        {
+            if (parts.Length < 2)
+            {
+                Notify("Usage: /rsp internalfilter <" + SettingsManager.FilterOptions + ">");
+                return;
+            }
+
+            if (!SettingsManager.TrySetInternalFilter(parts[1]))
+            {
+                Notify("Unknown internal filter. Options: " + SettingsManager.FilterOptions);
                 return;
             }
 
