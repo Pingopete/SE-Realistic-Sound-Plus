@@ -51,7 +51,7 @@ namespace RealisticSoundPlus
                 {
                     case "help":
                     case "?":
-                        Notify("/rsp show | /rsp detail on | /rsp idle off | /rsp state on | /rsp detailgain 2 | /rsp idlegain 1 | /rsp stategain 2 | /rsp dist 200 | /rsp distcurve 1 | /rsp cmdsmooth 2000 | /rsp statecurve 1 | /rsp state2dpos on | /rsp filter deep | /rsp sounds | /rsp logpath | /rsp save");
+                        Notify("/rsp show | /rsp detail on | /rsp idle off | /rsp state on | /rsp detailgain 2 | /rsp idlegain 1 | /rsp stategain 2 | /rsp dist 200 | /rsp distcurve 1 | /rsp cmdsmooth 2000 | /rsp statecurve 1 | /rsp detail2dpos on | /rsp state2dpos on | /rsp filter deep | /rsp sounds | /rsp logpath | /rsp save");
                         break;
                     case "show":
                         Notify(SettingsManager.Summary());
@@ -79,6 +79,11 @@ namespace RealisticSoundPlus
                     case "enginestate":
                     case "statemachine":
                         SetV2State(parts);
+                        break;
+                    case "detail2dpos":
+                    case "detail2dposition":
+                    case "detailpositional2d":
+                        SetV2Detail2DPositionalTest(parts);
                         break;
                     case "state2dpos":
                     case "state2dposition":
@@ -195,6 +200,23 @@ namespace RealisticSoundPlus
             if (!SettingsManager.TrySetV2State(parts[1]))
             {
                 Notify("Usage: /rsp state <on|off>");
+                return;
+            }
+
+            Notify(SettingsManager.Summary());
+        }
+
+        private static void SetV2Detail2DPositionalTest(string[] parts)
+        {
+            if (parts.Length < 2)
+            {
+                Notify("Usage: /rsp detail2dpos <on|off>");
+                return;
+            }
+
+            if (!SettingsManager.TrySetV2Detail2DPositionalTest(parts[1]))
+            {
+                Notify("Usage: /rsp detail2dpos <on|off>");
                 return;
             }
 

@@ -52,6 +52,30 @@ namespace RealisticSoundPlus.AudioEngineV2
             return SelectPrimarySoundFallback(thruster);
         }
 
+        public static bool HasDetailLocalVariant(string cueName)
+        {
+            switch ((cueName ?? string.Empty).Trim().ToLowerInvariant())
+            {
+                case "shiplargethrusterhydrogen":
+                case "shipsmallthrusterhydrogen":
+                case "shiplargethrusterhydrogenidle":
+                case "shiplargethrusterion":
+                case "shipsmallthrusterion":
+                case "shiplargethrusterionidle":
+                case "shipsmallthrusterionidle":
+                case "shiplargethrusteratmosphericslow":
+                case "shiplargethrusteratmosphericfast":
+                case "shiplargethrusteratmosphericidle":
+                case "shipsmallthrusteratmosphericslow":
+                case "shipsmallthrusteratmosphericfast":
+                case "shipsmallthrusteratmosphericidle":
+                case "shipthrusterprototech":
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
         public static string SelectPrimarySoundFallback(MyThrust thruster)
         {
             string primarySound = TryReadPrimarySound(thruster);

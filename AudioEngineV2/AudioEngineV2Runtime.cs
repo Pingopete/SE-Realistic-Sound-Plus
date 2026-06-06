@@ -75,7 +75,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             if (!_loggedEnabled)
             {
                 _loggedEnabled = true;
-                MyLog.Default.WriteLineAndConsole("[RealisticSoundPlus] Audio Engine V2 is the active ship-engine route. Six-direction detail/state emitter routing is active while the listener is inside a ship.");
+                MyLog.Default.WriteLineAndConsole("[RealisticSoundPlus] Audio Engine V2 is the active ship-engine route. Six-direction detail/state emitter routing is active while the listener is inside or controlling a ship.");
             }
         }
 
@@ -153,7 +153,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                 _hasListener = true;
             }
 
-            if (_listener.VanillaFallback || !_listener.InsideShip)
+            if (_listener.VanillaFallback)
                 return false;
 
             if (IsV2Emitter(emitter))

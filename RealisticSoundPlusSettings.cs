@@ -22,6 +22,7 @@ namespace RealisticSoundPlus
         public float V2SoftFadeRatio { get; set; } = 0.04f;
         public bool V2DetailEnabled { get; set; } = true;
         public bool V2DetailIdleEnabled { get; set; } = true;
+        public bool V2Detail2DPositionalTest { get; set; } = true;
         public bool V2StateEnabled { get; set; } = false;
         public bool V2State2DPositionalTest { get; set; } = true;
         public float V2DetailGain { get; set; } = 2.0f;
@@ -84,7 +85,7 @@ namespace RealisticSoundPlus
 
         public static string Summary()
         {
-            return string.Format(CultureInfo.InvariantCulture, "route=v2, gain={0:0.00}, curve={1:0.00}, presenceMin={2:0.00}, quietLog={3:0.00}, loudLog={4:0.00}, muffling={5:0.00}, interiorBase={6:0.00}, filter={7}, smoothMs={8:0}, cmdSmoothMs={9:0}, fade={10:0.000}, atmosphereFloor={11:0.00}, detail={12}({13:0.00}), idle={14}({15:0.00}), state={16}({17:0.00}), dist={18:0}, distcurve={19:0.00}, state2dpos={20}, log={21}", Current.EngineGain, Current.AudioCurveExponent, Current.MinimumShipPresence, Current.QuietShipForceLog10, Current.LoudShipForceLog10, Current.MufflingStrength, Current.InteriorBaseTransmission, Current.EngineFilter, Current.V2SmoothingMs, Current.V2DetailCommandSmoothingMs, Current.V2SoftFadeRatio, Current.AtmosphericMufflingFloor, Current.V2DetailEnabled ? "on" : "off", Current.V2DetailGain, Current.V2DetailIdleEnabled ? "on" : "off", Current.V2DetailIdleGain, Current.V2StateEnabled ? "on" : "off", Current.V2StateGain, Current.V2EmitterDistance, Current.V2DistanceCurve, Current.V2State2DPositionalTest ? "on" : "off", Current.V2DebugLogEnabled ? "on" : "off");
+            return string.Format(CultureInfo.InvariantCulture, "route=v2, gain={0:0.00}, curve={1:0.00}, presenceMin={2:0.00}, quietLog={3:0.00}, loudLog={4:0.00}, muffling={5:0.00}, interiorBase={6:0.00}, filter={7}, smoothMs={8:0}, cmdSmoothMs={9:0}, fade={10:0.000}, atmosphereFloor={11:0.00}, detail={12}({13:0.00}), idle={14}({15:0.00}), detail2dpos={16}, state={17}({18:0.00}), dist={19:0}, distcurve={20:0.00}, state2dpos={21}, log={22}", Current.EngineGain, Current.AudioCurveExponent, Current.MinimumShipPresence, Current.QuietShipForceLog10, Current.LoudShipForceLog10, Current.MufflingStrength, Current.InteriorBaseTransmission, Current.EngineFilter, Current.V2SmoothingMs, Current.V2DetailCommandSmoothingMs, Current.V2SoftFadeRatio, Current.AtmosphericMufflingFloor, Current.V2DetailEnabled ? "on" : "off", Current.V2DetailGain, Current.V2DetailIdleEnabled ? "on" : "off", Current.V2DetailIdleGain, Current.V2Detail2DPositionalTest ? "on" : "off", Current.V2StateEnabled ? "on" : "off", Current.V2StateGain, Current.V2EmitterDistance, Current.V2DistanceCurve, Current.V2State2DPositionalTest ? "on" : "off", Current.V2DebugLogEnabled ? "on" : "off");
         }
 
         public static bool TrySet(string name, float value)
@@ -193,6 +194,14 @@ namespace RealisticSoundPlus
             if (!TryParseBool(value, out bool enabled))
                 return false;
             Current.V2DetailIdleEnabled = enabled;
+            return true;
+        }
+
+        public static bool TrySetV2Detail2DPositionalTest(string value)
+        {
+            if (!TryParseBool(value, out bool enabled))
+                return false;
+            Current.V2Detail2DPositionalTest = enabled;
             return true;
         }
 

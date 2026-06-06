@@ -20,6 +20,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                 UpdatedUtc = DateTime.UtcNow,
                 DetailEnabled = settings.V2DetailEnabled,
                 DetailIdleEnabled = settings.V2DetailIdleEnabled,
+                Detail2DPositionalTest = settings.V2Detail2DPositionalTest,
                 StateEnabled = settings.V2StateEnabled,
                 State2DPositionalTest = settings.V2State2DPositionalTest,
                 DetailGain = settings.V2DetailGain,
@@ -52,7 +53,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                 : "-";
             return string.Format(
                 CultureInfo.InvariantCulture,
-                "route=v2 mode={0} room={1} inside={2} move={3} grids={4} groups={5} known={6} scan={7}/{8} thr={9}/{10}/{11}+{12} rej={13}/{14}{15} emit={16}/{17} flt={18}{19} detail={20}/{21:0.00}/x{22} idle={23}/{24:0.00} state={25}/{26:0.00}/x{27} dist={28:0} curve={29:0.00} cmdsmooth={30:0} state2dpos={31} atm={32:0.00}",
+                "route=v2 mode={0} room={1} inside={2} move={3} grids={4} groups={5} known={6} scan={7}/{8} thr={9}/{10}/{11}+{12} rej={13}/{14}{15} emit={16}/{17} flt={18}{19} detail={20}/{21:0.00}/x{22} idle={23}/{24:0.00} detail2dpos={25} state={26}/{27:0.00}/x{28} dist={29:0} curve={30:0.00} cmdsmooth={31:0} state2dpos={32} atm={33:0.00}",
                 snapshot.Listener.ModeName,
                 room,
                 snapshot.Listener.InsideShip ? "Y" : "N",
@@ -78,6 +79,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                 snapshot.ActiveDetailSources,
                 snapshot.DetailIdleEnabled ? "on" : "off",
                 snapshot.DetailIdleGain,
+                snapshot.Detail2DPositionalTest ? "on" : "off",
                 snapshot.StateEnabled ? "on" : "off",
                 snapshot.StateGain,
                 snapshot.ActiveStateSources,
@@ -101,6 +103,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             public DateTime UpdatedUtc;
             public bool DetailEnabled;
             public bool DetailIdleEnabled;
+            public bool Detail2DPositionalTest;
             public bool StateEnabled;
             public bool State2DPositionalTest;
             public float DetailGain;

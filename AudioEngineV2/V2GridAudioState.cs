@@ -346,10 +346,19 @@ namespace RealisticSoundPlus.AudioEngineV2
                 float activePitch = Lerp(DetailActivePitchMin, DetailActivePitchMax, detailCommand);
                 float detailOutputGain = CalculateDetailOutputGain(settings);
                 float stateInput = Math.Max(Math.Max(shapedTarget, CalculateSpeedStateInput(grid)), snapshot.HasGeometry ? StateIdleInput : 0f);
-                float idleDetailTarget = settings.V2DetailEnabled && settings.V2DetailIdleEnabled
+                bool requireDetailLocalVariant = listener.InsideShip && settings.V2Detail2DPositionalTest;
+                bool idleHasLocalVariant = V2CueCatalog.HasDetailLocalVariant(snapshot.IdleDetailCue);
+                bool activeHasLocalVariant = V2CueCatalog.HasDetailLocalVariant(snapshot.ActiveDetailCue);
+                bool idleDetailPlayable = !requireDetailLocalVariant || idleHasLocalVariant;
+                bool activeDetailPlayable = !requireDetailLocalVariant || activeHasLocalVariant;
+                bool idleDetail2DPositional = requireDetailLocalVariant && idleHasLocalVariant;
+                bool activeDetail2DPositional = requireDetailLocalVariant && activeHasLocalVariant;
+                string idleVariant = idleDetail2DPositional ? "d2pos" : (requireDetailLocalVariant ? "missing-d2" : "d3");
+                string activeVariant = activeDetail2DPositional ? "d2pos" : (requireDetailLocalVariant ? "missing-d2" : "d3");
+                float idleDetailTarget = settings.V2DetailEnabled && settings.V2DetailIdleEnabled && idleDetailPlayable
                     ? Clamp(idleInput * detailOutputGain * settings.V2DetailIdleGain * distanceGain, 0f, MaxLayerVolume)
                     : 0f;
-                float activeDetailTarget = settings.V2DetailEnabled
+                float activeDetailTarget = settings.V2DetailEnabled && activeDetailPlayable
                     ? Clamp(activeInput * detailOutputGain * distanceGain, 0f, MaxLayerVolume)
                     : 0f;
                 float stateTarget = settings.V2StateEnabled
@@ -358,14 +367,14 @@ namespace RealisticSoundPlus.AudioEngineV2
 
                 activeDetailTarget *= SmoothStep(activeInput / settings.V2SoftFadeRatio);
                 stateTarget *= SmoothStep(stateInput / settings.V2SoftFadeRatio);
-                LogDetailDiagnostics(settings, listener, snapshot, rawDetailCommand, detailCommand, activeInput, idleInput, idleDetailTarget, activeDetailTarget, distanceGain, activePitch, now);
+                LogDetailDiagnostics(settings, listener, snapshot, rawDetailCommand, detailCommand, activeInput, idleInput, idleDetailTarget, activeDetailTarget, distanceGain, activePitch, idleVariant, activeVariant, now);
 
-                string idleRoute = string.Format(System.Globalization.CultureInfo.InvariantCulture, "v2-detail-{0}-idle/{1} raw={2:0.00} cmd={3:0.00}", _direction, snapshot.DetailLoadSource ?? "?", rawDetailCommand, detailCommand);
-                string activeRoute = string.Format(System.Globalization.CultureInfo.InvariantCulture, "v2-detail-{0}-active/{1} raw={2:0.00} cmd={3:0.00} out={4:0.00} pitch={5:0.00}", _direction, snapshot.DetailLoadSource ?? "?", rawDetailCommand, detailCommand, activeInput, activePitch);
-                bool keepDetailAlive = settings.V2DetailEnabled && snapshot.HasGeometry;
-                bool keepIdleAlive = keepDetailAlive && settings.V2DetailIdleEnabled && settings.V2DetailIdleGain > 0f && detailOutputGain > 0f;
-                UpdateLayer(ref _detailIdle, ref _detailIdleValue, ref _lastDetailIdleUpdateUtc, snapshot.Anchor, snapshot.Position, snapshot.IdleDetailCue, idleDetailTarget, V2AudioLayer.Detail, false, false, idleRoute, true, keepIdleAlive);
-                UpdateLayer(ref _detailActive, ref _detailActiveValue, ref _lastDetailActiveUpdateUtc, snapshot.Anchor, snapshot.Position, snapshot.ActiveDetailCue, activeDetailTarget, V2AudioLayer.Detail, false, false, activeRoute, true, keepDetailAlive, activePitch);
+                string idleRoute = string.Format(System.Globalization.CultureInfo.InvariantCulture, "v2-detail-{0}-idle/{1}/{2} raw={3:0.00} cmd={4:0.00}", _direction, idleVariant, snapshot.DetailLoadSource ?? "?", rawDetailCommand, detailCommand);
+                string activeRoute = string.Format(System.Globalization.CultureInfo.InvariantCulture, "v2-detail-{0}-active/{1}/{2} raw={3:0.00} cmd={4:0.00} out={5:0.00} pitch={6:0.00}", _direction, activeVariant, snapshot.DetailLoadSource ?? "?", rawDetailCommand, detailCommand, activeInput, activePitch);
+                bool keepDetailAlive = settings.V2DetailEnabled && snapshot.HasGeometry && activeDetailPlayable;
+                bool keepIdleAlive = settings.V2DetailEnabled && snapshot.HasGeometry && idleDetailPlayable && settings.V2DetailIdleEnabled && settings.V2DetailIdleGain > 0f && detailOutputGain > 0f;
+                UpdateLayer(ref _detailIdle, ref _detailIdleValue, ref _lastDetailIdleUpdateUtc, snapshot.Anchor, snapshot.Position, idleDetailPlayable ? snapshot.IdleDetailCue : null, idleDetailTarget, V2AudioLayer.Detail, idleDetail2DPositional, idleDetail2DPositional, idleRoute, true, keepIdleAlive);
+                UpdateLayer(ref _detailActive, ref _detailActiveValue, ref _lastDetailActiveUpdateUtc, snapshot.Anchor, snapshot.Position, activeDetailPlayable ? snapshot.ActiveDetailCue : null, activeDetailTarget, V2AudioLayer.Detail, activeDetail2DPositional, activeDetail2DPositional, activeRoute, true, keepDetailAlive, activePitch);
                 bool state2D = listener.InsideShip;
                 bool state2DPositional = state2D && settings.V2State2DPositionalTest;
                 UpdateLayer(ref _state, ref _stateValue, ref _lastStateUpdateUtc, snapshot.Anchor, snapshot.Position, stateCue, stateTarget, V2AudioLayer.State, state2D, state2DPositional);
@@ -577,7 +586,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                 return SixDirectionSourceModel.EvaluateDistanceGain(distance, settings.V2EmitterDistance, settings.V2DistanceCurve);
             }
 
-            private void LogDetailDiagnostics(RealisticSoundPlusSettings settings, V2AudioListenerState listener, DirectionSnapshot snapshot, float rawDetailCommand, float detailCommand, float activeInput, float idleInput, float idleTarget, float activeTarget, float distanceGain, float pitch, DateTime now)
+            private void LogDetailDiagnostics(RealisticSoundPlusSettings settings, V2AudioListenerState listener, DirectionSnapshot snapshot, float rawDetailCommand, float detailCommand, float activeInput, float idleInput, float idleTarget, float activeTarget, float distanceGain, float pitch, string idleVariant, string activeVariant, DateTime now)
             {
                 if (!settings.V2DebugLogEnabled || !settings.V2DetailEnabled || !snapshot.HasGeometry)
                     return;
@@ -592,7 +601,7 @@ namespace RealisticSoundPlus.AudioEngineV2
 
                 V2DebugLog.WriteEvent("detail", string.Format(
                     System.Globalization.CultureInfo.InvariantCulture,
-                    "{0} src={1} raw={2:0.00} cmd={3:0.00} activeIn={4:0.00} idleIn={5:0.000} idleTarget={6:0.000} activeTarget={7:0.000} idle={8}/{9:0.00} dist={10:0.0}/{11:0} dgain={12:0.00} dcurve={13:0.00} pitch={14:0.00} idleCue={15} activeCue={16}",
+                    "{0} src={1} raw={2:0.00} cmd={3:0.00} activeIn={4:0.00} idleIn={5:0.000} idleTarget={6:0.000} activeTarget={7:0.000} idle={8}/{9:0.00} dist={10:0.0}/{11:0} dgain={12:0.00} dcurve={13:0.00} pitch={14:0.00} idleCue={15}/{16} activeCue={17}/{18}",
                     _direction,
                     snapshot.DetailLoadSource ?? "?",
                     rawDetailCommand,
@@ -608,7 +617,9 @@ namespace RealisticSoundPlus.AudioEngineV2
                     distanceGain,
                     settings.V2DistanceCurve,
                     pitch,
+                    idleVariant,
                     snapshot.IdleDetailCue ?? "?",
+                    activeVariant,
                     snapshot.ActiveDetailCue ?? "?"));
             }
 

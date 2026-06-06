@@ -42,17 +42,18 @@ namespace RealisticSoundPlus.AudioEngineV2
                 gridEntityId = controlledGridId;
 
             bool insideShip = vanillaInside || seatedInteriorCamera;
+            bool routeActive = insideShip || controlledShip;
             string modeName = insideShip
                 ? (seatedInteriorCamera ? "inside-seat" : "inside-room")
-                : (controlledShip ? "vanilla-fallback-seat-camera" : "vanilla-fallback");
+                : (controlledShip ? "outside-seat-camera" : "vanilla-fallback");
 
             return new V2AudioListenerState
             {
                 Position = position,
                 Atmosphere = ExteriorSoundTransmission.GetAtmosphericPressure(position),
                 InsideShip = insideShip,
-                SeatedInShip = seatedInteriorCamera,
-                VanillaFallback = !insideShip,
+                SeatedInShip = controlledShip,
+                VanillaFallback = !routeActive,
                 RoomName = roomName,
                 GridEntityId = gridEntityId,
                 ModeName = modeName,

@@ -12,19 +12,20 @@ V2 is now the active ship-engine audio route on this branch. There is no `/rsp v
 
 The current build creates a replacement ship engine soundscape for listener states where RSP should own the ship audio:
 
-- V2 takes over while the listener/camera is inside a ship or close to a controlled ship seat/cockpit.
-- Third-person/outside-camera seat states should fall back to stock vanilla ship audio.
-- Exterior fallback states currently leave stock vanilla ship audio alone.
+- V2 takes over while the listener/camera is inside a ship, close to a controlled ship seat/cockpit, or controlling a ship from an outside/third-person camera.
+- Controlled third-person/outside-camera ship states use the same six-direction V2 detail route with exterior/D3 source material.
+- Free exterior fallback states currently leave stock vanilla ship audio alone so Keen's realistic-audio vacuum/contact rules remain in charge.
 - Each relevant grid can create up to six grouped engine-detail emitters, one for each thrust direction.
 - Each relevant grid can create up to six grouped engine-state emitters using the same directional positions.
 - Detail emitters use vanilla ship sound group thruster cues by detected thruster type, with idle cue fallback when a direction has engines but no thrust command.
+- Inside detail emitters can force Keen's paired D2/local cue variants through the same six positional emitters. If an inside D2/local variant is not explicitly mapped, that detail cue is silent for easier debugging.
 - Detail intensity prefers the per-thruster `ThrustOverridePercentage` signal when it is nonzero. During direct ship-control input, V2 uses analog movement input for a linear 0-100% response. With no ship-control input, V2 can fall back to actual `CurrentThrustPercentage` so inertial dampener thrust has an audio path.
 - Detail emitters fall back to vanilla thruster block `PrimarySound` cues if a thruster type cannot be classified.
 - State emitters use confirmed vanilla ship sound group run-loop cues, classified as small/large by grid mass where available.
-- Inside state emitters force Keen's paired D2/local cue variant while still playing from the six directional emitter positions; detail emitters remain 3D/filterable.
+- Inside state emitters force Keen's paired D2/local cue variant while still playing from the six directional emitter positions.
 - V2-created 3D engine emitters use the shared filter/transmission path.
 - Interior 2D/local state emitters are explicitly filter-exempt.
-- When V2 owns the inside soundscape, confirmed vanilla ship-state cues are suppressed so the replacement emitters are not hidden under the stock centered mix.
+- When V2 owns the current ship soundscape, confirmed vanilla ship-state cues are suppressed so the replacement emitters are not hidden under the stock centered mix.
 
 Debug marker colors:
 
@@ -48,6 +49,7 @@ Current live V2 test defaults:
 | --- | ---: | --- |
 | `detail` | `on` | Enables grouped 3D engine-detail emitters. |
 | `idle` | `on` | Enables the detail idle layer while thrusters are powered and not firing. |
+| `detail2dpos` | `on` | Uses mapped D2/local detail cue variants while inside, still through positional emitters. |
 | `state` | `off` | Enables grouped ship state/run-loop emitters. |
 | `gain` | `2.00` | Overall V2 engine gain applied to detail and state layers. |
 | `detailgain` | `2.00` | Extra gain for 3D engine-detail layer. |
@@ -70,6 +72,7 @@ Most useful first commands:
 /rsp cmdsmooth 2000
 /rsp gain 4
 /rsp detailgain 4
+/rsp detail2dpos on
 /rsp idle off
 /rsp idlegain 0.25
 /rsp stategain 4
@@ -92,6 +95,7 @@ Overlay fields to watch:
 | `flt=hits` | Number of times the low-pass filter hook has controlled an emitter. | Climbs when V2 3D emitters are active and filterable. |
 | `detail=on/gain/xN` | Detail layer toggle, gain, and active detail emitter count. | `xN` greater than `0` when thrusting or when V2 is holding silent emitters for suppression. |
 | `idle=on/gain` | Detail idle layer toggle and gain. | Use `/rsp idle off` to test whether a no-thrust hum is RSP idle. |
+| `detail2dpos` | Whether inside D2/local detail cues are forced through positional emitters. | Default `on`; inside unmapped cues stay silent and appear as `missing-d2` in detail routes/logs. |
 | `state=off/gain/xN` | State layer toggle, gain, and active state emitter count. | Keep `off` while detail-only testing; turn on when testing state emitters. |
 | `dist` | Shared hearing range. | Raise this if groups exist but no sound is heard. |
 | `state2dpos` | Whether inside D2/local state cues are forced through positional emitters. | Default `on`; this is the intended inside state route. |
@@ -108,7 +112,7 @@ Cue list notes:
 
 `UNCONTROLLED` beside a ship/engine cue means vanilla is playing that cue and RSP has not associated it with a V2-created emitter. V2-created cues should show an RSP route such as `v2-detail-*`, `v2-state-*`, or `filter`.
 
-V2 detail routes include their current command source, for example `v2-detail-Down-active/move cmd=0.40`. `ovr` means `ThrustOverridePercentage`, `move` means analog ship-controller input, `dmp` means seated dampener/current-output thrust, and `out` means current-output thrust above the non-seated threshold. Character walking input should show `move=-` and should not drive engine-detail audio directly.
+V2 detail routes include their source-material mode and current command source, for example `v2-detail-Down-active/d2pos/move cmd=0.40` or `v2-detail-Down-active/d3/move cmd=0.40`. `missing-d2` means the listener is inside with `detail2dpos` enabled, but that cue is not explicitly mapped to a D2/local variant, so RSP leaves that detail cue silent. `ovr` means `ThrustOverridePercentage`, `move` means analog ship-controller input, `dmp` means seated dampener/current-output thrust, and `out` means current-output thrust above the non-seated threshold. Character walking input should show `move=-` and should not drive engine-detail audio directly.
 
 Detail active volume follows smoothed `cmd` linearly. Cue routes show `raw` for the immediate detected command and `cmd` for the post-smoothing command sent to volume, idle/firing crossfade, and pitch. Active detail attempts a linear pitch shift from `0.5` at the lowest firing command to `1.5` at full command; idle detail is not pitch-shifted. Idle detail now fades fully out as firing detail fades in.
 
@@ -129,7 +133,7 @@ Use `/rsp sounds on|off`. The overlay is enabled by default on this live V2 test
 The centered overlay shows:
 
 - Global listener state: atmosphere, altitude, controlled speed, inside state, active filter, and `route=v2`.
-- V2 listener state: mode, vanilla room probe, inside state, active detail/state source counts, shared distance, curve, 2D positional test flag, and atmosphere.
+- V2 listener state: mode, vanilla room probe, inside state, active detail/state source counts, shared distance, curve, D2 positional test flags, and atmosphere.
 - Current audio voices: cue name, voice count, volume score, engine-candidate marker, and RSP diagnostics when available.
 - RSP diagnostics: route, transmission, scale, base volume, final multiplier, listener distance, and pressure.
 
@@ -156,7 +160,7 @@ For clean V2 testing, this branch keeps the active Harmony surface intentionally
 
 - `MyThrust.UpdateAfterSimulation` feeds thruster state into the V2 six-direction audio model.
 - `MyShipSoundComponent.UpdateVolumes` reports vanilla inside/room state to the V2 listener model and overlay.
-- `MyEntity3DSoundEmitter.PlaySound` and `PlaySoundWithDistance` suppress confirmed vanilla ship-state cues only while V2 owns the inside soundscape.
+- `MyEntity3DSoundEmitter.PlaySound` and `PlaySoundWithDistance` suppress confirmed vanilla ship-state cues only while V2 owns the current ship soundscape.
 - `MyEntity3DSoundEmitter.SelectEffect` applies filters only to V2-registered emitters.
 - `MyCharacterBreath.Update` suppresses the vanilla breathing loop while the helmet/visor is open.
 - `MyShipSoundComponent.UpdateShouldPlay2D` and `UpdateSoundDimension` prevent vanilla seat/bed/desk states from forcing a different ship-audio dimension.
@@ -177,6 +181,7 @@ Settings are saved to `%APPDATA%\SpaceEngineers\RealisticSoundPlus.xml` and hot-
 | `/rsp detailgain 2` | `/rsp v2detailgain` | `2.00` | `0..4` | Multiplies only the detail layer. |
 | `/rsp idlegain 1` | `/rsp detailidlegain`, `/rsp v2idlegain` | `1.00` | `0..4` | Multiplies only the detail idle layer. |
 | `/rsp stategain 2` | `/rsp v2stategain` | `2.00` | `0..4` | Multiplies only the state layer. |
+| `/rsp detail2dpos on|off` | `/rsp detail2dposition`, `/rsp detailpositional2d` | `on` | bool | Forces mapped inside D2/local detail cues through positional emitters. Unmapped inside detail cues stay silent. |
 | `/rsp state2dpos on|off` | `/rsp state2dposition`, `/rsp positional2d` | `on` | bool | Forces inside D2/local state cues through positional emitters. |
 
 ### Distance And Response
