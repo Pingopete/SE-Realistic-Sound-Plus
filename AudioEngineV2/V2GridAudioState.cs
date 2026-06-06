@@ -20,7 +20,7 @@ namespace RealisticSoundPlus.AudioEngineV2
         private const float VanillaFullSpeed = 96f;
         private const float DetailIdleInput = 0.035f;
         private const float DetailIdleFadeOutRange = 0.45f;
-        private const float DetailIdleUnderActive = 0.35f;
+        private const float DetailIdleUnderActive = 0f;
         private const float DetailActivePitchMin = 0.5f;
         private const float DetailActivePitchMax = 1.5f;
         private const float StateIdleInput = 0.03f;
@@ -277,6 +277,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             private DateTime _lastDetailActiveUpdateUtc = DateTime.UtcNow;
             private DateTime _lastStateUpdateUtc = DateTime.UtcNow;
             private DateTime _lastDetailCommandUpdateUtc = DateTime.UtcNow;
+            private DateTime _lastDetailDiagnosticUtc = DateTime.MinValue;
             private Vector3D _lastPosition;
             private bool _hasKnownSource;
             private Vector3D _knownPosition;
@@ -356,6 +357,7 @@ namespace RealisticSoundPlus.AudioEngineV2
 
                 activeDetailTarget *= SmoothStep(activeInput / settings.V2SoftFadeRatio);
                 stateTarget *= SmoothStep(stateInput / settings.V2SoftFadeRatio);
+                LogDetailDiagnostics(settings, listener, snapshot, rawDetailCommand, detailCommand, activeInput, idleInput, idleDetailTarget, activeDetailTarget, distanceGain, activePitch, now);
 
                 string idleRoute = string.Format(System.Globalization.CultureInfo.InvariantCulture, "v2-detail-{0}-idle/{1} raw={2:0.00} cmd={3:0.00}", _direction, snapshot.DetailLoadSource ?? "?", rawDetailCommand, detailCommand);
                 string activeRoute = string.Format(System.Globalization.CultureInfo.InvariantCulture, "v2-detail-{0}-active/{1} raw={2:0.00} cmd={3:0.00} out={4:0.00} pitch={5:0.00}", _direction, snapshot.DetailLoadSource ?? "?", rawDetailCommand, detailCommand, activeInput, activePitch);
@@ -573,6 +575,39 @@ namespace RealisticSoundPlus.AudioEngineV2
                 return SixDirectionSourceModel.EvaluateDistanceGain(distance, settings.V2EmitterDistance, settings.V2DistanceCurve);
             }
 
+            private void LogDetailDiagnostics(RealisticSoundPlusSettings settings, V2AudioListenerState listener, DirectionSnapshot snapshot, float rawDetailCommand, float detailCommand, float activeInput, float idleInput, float idleTarget, float activeTarget, float distanceGain, float pitch, DateTime now)
+            {
+                if (!settings.V2DebugLogEnabled || !settings.V2DetailEnabled || !snapshot.HasGeometry)
+                    return;
+
+                if (now - _lastDetailDiagnosticUtc < TimeSpan.FromSeconds(1))
+                    return;
+
+                _lastDetailDiagnosticUtc = now;
+                float distance = listener.Position == Vector3D.Zero || snapshot.Position == Vector3D.Zero
+                    ? 0f
+                    : (float)Vector3D.Distance(listener.Position, snapshot.Position);
+
+                V2DebugLog.WriteEvent("detail", string.Format(
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    "{0} src={1} raw={2:0.00} cmd={3:0.00} activeIn={4:0.00} idleIn={5:0.000} idleTarget={6:0.000} activeTarget={7:0.000} dist={8:0.0}/{9:0} dgain={10:0.00} dcurve={11:0.00} pitch={12:0.00} idleCue={13} activeCue={14}",
+                    _direction,
+                    snapshot.DetailLoadSource ?? "?",
+                    rawDetailCommand,
+                    detailCommand,
+                    activeInput,
+                    idleInput,
+                    idleTarget,
+                    activeTarget,
+                    distance,
+                    settings.V2EmitterDistance,
+                    distanceGain,
+                    settings.V2DistanceCurve,
+                    pitch,
+                    snapshot.IdleDetailCue ?? "?",
+                    snapshot.ActiveDetailCue ?? "?"));
+            }
+
             private static float CalculateDetailOutputGain(RealisticSoundPlusSettings settings)
             {
                 float gainProduct = Math.Max(0f, settings.EngineGain * settings.V2DetailGain);
@@ -744,14 +779,21 @@ namespace RealisticSoundPlus.AudioEngineV2
             private void SetPitch(float pitch)
             {
                 _pitch = Clamp(pitch, 0.1f, 4f);
-                if (TrySetPitch(Emitter, _pitch))
-                    return;
+                TrySetPitch(Emitter, _pitch);
 
                 try
                 {
                     object sound = Emitter.Sound;
-                    if (TrySetPitch(sound, _pitch))
-                        return;
+                    TrySetPitch(sound, _pitch);
+                }
+                catch
+                {
+                }
+
+                try
+                {
+                    object secondarySound = Emitter.SecondarySound;
+                    TrySetPitch(secondarySound, _pitch);
                 }
                 catch
                 {

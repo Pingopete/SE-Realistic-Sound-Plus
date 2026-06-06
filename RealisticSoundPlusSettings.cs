@@ -65,7 +65,6 @@ namespace RealisticSoundPlus
         {
             using (FileStream stream = File.OpenRead(ConfigPath))
                 Current = (RealisticSoundPlusSettings)Serializer.Deserialize(stream);
-            ApplyLiveV2TestDefaults();
             Clamp();
             _lastWriteUtc = File.GetLastWriteTimeUtc(ConfigPath);
             MyLog.Default.WriteLineAndConsole("[RealisticSoundPlus] Loaded settings from " + ConfigPath + ": " + Summary());
@@ -96,6 +95,8 @@ namespace RealisticSoundPlus
                     break;
                 case "curve":
                 case "exponent":
+                case "statecurve":
+                case "outputcurve":
                     Current.AudioCurveExponent = value;
                     break;
                 case "presence":
@@ -285,26 +286,6 @@ namespace RealisticSoundPlus
             Current.V2StateGain = Clamp(Current.V2StateGain, 0f, 4f);
             Current.V2EmitterDistance = Clamp(Current.V2EmitterDistance, 1f, 1000f);
             Current.V2DistanceCurve = Clamp(Current.V2DistanceCurve, 0.1f, 5f);
-        }
-
-        private static void ApplyLiveV2TestDefaults()
-        {
-            if (Current.EngineGain <= 1.0f)
-                Current.EngineGain = 2.0f;
-            if (Current.V2DetailGain <= 1.0f)
-                Current.V2DetailGain = 2.0f;
-            if (Current.V2StateGain <= 1.0f)
-                Current.V2StateGain = 2.0f;
-            if (Current.V2EmitterDistance <= 36.0f)
-                Current.V2EmitterDistance = 200.0f;
-            if (string.Equals(Current.EngineFilter, "RealShip", StringComparison.OrdinalIgnoreCase))
-                Current.EngineFilter = "Deep";
-            Current.V2DetailEnabled = true;
-            Current.V2StateEnabled = false;
-            Current.V2State2DPositionalTest = true;
-            Current.V2DebugLogEnabled = true;
-            if (Current.V2DetailCommandSmoothingMs <= 0f)
-                Current.V2DetailCommandSmoothingMs = 2000f;
         }
 
         private static float Clamp(float value, float min, float max)

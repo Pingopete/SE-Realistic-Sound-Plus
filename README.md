@@ -105,7 +105,9 @@ Cue list notes:
 
 V2 detail routes include their current command source, for example `v2-detail-Down-active/move cmd=0.40`. `ovr` means `ThrustOverridePercentage`, `move` means analog ship-controller input, `dmp` means seated dampener/current-output thrust, and `out` means current-output thrust above the non-seated threshold. Character walking input should show `move=-` and should not drive engine-detail audio directly.
 
-Detail active volume follows smoothed `cmd` linearly. Cue routes show `raw` for the immediate detected command and `cmd` for the post-smoothing command sent to volume, idle/firing crossfade, and pitch. Active detail attempts a linear pitch shift from `0.5` at the lowest firing command to `1.5` at full command; idle detail is not pitch-shifted.
+Detail active volume follows smoothed `cmd` linearly. Cue routes show `raw` for the immediate detected command and `cmd` for the post-smoothing command sent to volume, idle/firing crossfade, and pitch. Active detail attempts a linear pitch shift from `0.5` at the lowest firing command to `1.5` at full command; idle detail is not pitch-shifted. Idle detail now fades fully out as firing detail fades in.
+
+With debug logging enabled, `detail` log lines show the current idle target, active target, distance gain, distance, and pitch target for each direction once per second.
 
 Debug log:
 
@@ -113,7 +115,7 @@ Debug log:
 %APPDATA%\SpaceEngineers\RealisticSoundPlus-v2-debug.log
 ```
 
-The log records global audio state, the V2 overlay line, and `/rsp show` settings once per second. Use `/rsp logpath` in game to print the exact path.
+The log records global audio state, the V2 overlay line, `/rsp show` settings, and per-direction detail diagnostics once per second. Use `/rsp logpath` in game to print the exact path.
 
 ## Debug Overlay
 
@@ -158,7 +160,7 @@ Old weapon, ambient, hydrogen-engine, continuous-power, and per-thruster-spatial
 
 ## Runtime Controls
 
-Settings are saved to `%APPDATA%\SpaceEngineers\RealisticSoundPlus.xml` and hot-reloaded every few seconds while the game is running.
+Settings are saved to `%APPDATA%\SpaceEngineers\RealisticSoundPlus.xml` and hot-reloaded every few seconds while the game is running. Saved XML values are also respected on the next world load; branch defaults only apply when a setting is missing or a new config is created.
 
 ### Layer Controls
 
@@ -177,7 +179,7 @@ Settings are saved to `%APPDATA%\SpaceEngineers\RealisticSoundPlus.xml` and hot-
 | `/rsp dist 200` | `/rsp v2dist`, `/rsp emitterdist` | `200` | `1..1000` | Shared V2 emitter range in meters. Volume reaches zero at this distance. |
 | `/rsp distcurve 1` | `/rsp v2distcurve` | `1.00` | `0.1..5` | Shapes distance falloff while respecting `dist`. Lower values stay louder longer; higher values drop faster near the source. |
 | `/rsp gain 2` | `/rsp enginegain` | `2.00` | `0..4` | Overall V2 engine gain for detail and state layers. |
-| `/rsp curve 1` | `/rsp exponent` | `1.00` | `0.25..10` | Shapes shared thrust output for non-detail layers. Detail active volume follows the smoothed `cmd` linearly while this test pass isolates response. |
+| `/rsp statecurve 1` | `/rsp curve`, `/rsp exponent`, `/rsp outputcurve` | `1.00` | `0.25..10` | Shapes thrust output for non-detail/state layers. Detail active volume follows smoothed `cmd` linearly, so this should usually be ignored during detail-only testing. |
 | `/rsp smooth 100` | `/rsp smoothing` | `100` | `0..500` ms | Volume smoothing time. Higher values fade more slowly. |
 | `/rsp cmdsmooth 2000` | `/rsp commandsmooth`, `/rsp inputsmooth`, `/rsp thrustsmooth` | `2000` | `0..5000` ms | Linear input-to-detail-output slide. A value of `2000` means a full 0-to-100% keyboard command takes about two seconds to reach full detail volume and pitch. |
 | `/rsp fade 0.04` | `/rsp softfade` | `0.040` | `0.001..0.25` | Soft fade width near zero thrust output. |
