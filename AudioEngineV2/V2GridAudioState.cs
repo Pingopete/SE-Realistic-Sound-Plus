@@ -628,6 +628,13 @@ namespace RealisticSoundPlus.AudioEngineV2
                     lastUpdateUtc = DateTime.UtcNow;
                 }
 
+                DateTime now = DateTime.UtcNow;
+                if (emitter.IsRetryBlocked(now))
+                {
+                    value = 0f;
+                    return;
+                }
+
                 float emitterVolume = value;
                 try
                 {
@@ -635,28 +642,25 @@ namespace RealisticSoundPlus.AudioEngineV2
                 }
                 catch (Exception ex)
                 {
-                    V2DebugLog.WriteEvent("emitter-update-failed", string.Format(
-                        System.Globalization.CultureInfo.InvariantCulture,
-                        "{0} cue={1} route={2} filter={3} force2d={4} force3d={5} vol={6:0.000} pos={7:0.0},{8:0.0},{9:0.0} {10}",
-                        layer,
-                        cueName ?? "?",
-                        diagnosticRoute ?? "?",
-                        filterRoute,
-                        force2D ? "Y" : "N",
-                        force3D ? "Y" : "N",
-                        emitterVolume,
-                        position.X,
-                        position.Y,
-                        position.Z,
-                        ex.Message));
-                    try
+                    if (emitter.ShouldLogUpdateFailure(now))
                     {
-                        emitter.SetVolume(0f);
-                    }
-                    catch
-                    {
+                        V2DebugLog.WriteEvent("emitter-update-failed", string.Format(
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            "{0} cue={1} route={2} filter={3} force2d={4} force3d={5} vol={6:0.000} pos={7:0.0},{8:0.0},{9:0.0} {10}",
+                            layer,
+                            cueName ?? "?",
+                            diagnosticRoute ?? "?",
+                            filterRoute,
+                            force2D ? "Y" : "N",
+                            force3D ? "Y" : "N",
+                            emitterVolume,
+                            position.X,
+                            position.Y,
+                            position.Z,
+                            ex.Message));
                     }
 
+                    emitter.RecoverAfterFailedUpdate(TimeSpan.FromSeconds(1));
                     return;
                 }
 
@@ -815,6 +819,8 @@ namespace RealisticSoundPlus.AudioEngineV2
             private string _filterEffectSignature;
             private DateTime _rebindFadeStartUtc = DateTime.MinValue;
             private DateTime _silentSinceUtc = DateTime.MinValue;
+            private DateTime _retryBlockedUntilUtc = DateTime.MinValue;
+            private DateTime _lastUpdateFailureLogUtc = DateTime.MinValue;
             private int _bindingGeneration = -1;
             private float _pitch = 1f;
 
@@ -928,6 +934,41 @@ namespace RealisticSoundPlus.AudioEngineV2
                     _silentSinceUtc = now;
 
                 return (now - _silentSinceUtc).TotalMilliseconds >= graceMs;
+            }
+
+            public bool IsRetryBlocked(DateTime now)
+            {
+                return _retryBlockedUntilUtc != DateTime.MinValue && now < _retryBlockedUntilUtc;
+            }
+
+            public bool ShouldLogUpdateFailure(DateTime now)
+            {
+                if (now - _lastUpdateFailureLogUtc < TimeSpan.FromSeconds(1))
+                    return false;
+
+                _lastUpdateFailureLogUtc = now;
+                return true;
+            }
+
+            public void RecoverAfterFailedUpdate(TimeSpan retryDelay)
+            {
+                try
+                {
+                    Emitter.VolumeMultiplier = 0f;
+                    Emitter.StopSound(false, false, false);
+                }
+                catch
+                {
+                }
+
+                AudioEngineV2Runtime.UnregisterEmitter(Emitter);
+                IsPlaying = false;
+                _cueName = null;
+                _filterEffectSubtype = null;
+                _filterEffectSignature = null;
+                _bindingGeneration = -1;
+                _silentSinceUtc = DateTime.UtcNow;
+                _retryBlockedUntilUtc = DateTime.UtcNow + retryDelay;
             }
 
             private void MuteBeforeRebind()

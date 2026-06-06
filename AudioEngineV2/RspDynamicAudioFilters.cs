@@ -11,6 +11,10 @@ namespace RealisticSoundPlus.AudioEngineV2
     {
         public const string Filter1Subtype = "RSPFilter1";
         public const string Filter2Subtype = "RSPFilter2";
+        public const float MinFilterFrequency = 20f;
+        public const float MaxFilterFrequency = 20000f;
+        public const float MinFilterQ = 0.1f;
+        public const float MaxFilterQ = 1.5f;
 
         private const BindingFlags StaticMembers = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
         private const BindingFlags InstanceMembers = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
@@ -108,7 +112,7 @@ namespace RealisticSoundPlus.AudioEngineV2
         private static void RegisterOrReplace(IDictionary effects, string subtype, float frequency, float q)
         {
             MyStringHash effectId = MyStringHash.GetOrCompute(subtype);
-            object effect = CreateEffect(effectId, frequency, q);
+            object effect = CreateEffect(effectId, SanitizeFrequency(frequency), SanitizeQ(q));
             effects[effectId] = effect;
         }
 
@@ -127,7 +131,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             DurationField.SetValue(soundEffect, 0f);
             FilterField.SetValue(soundEffect, Enum.Parse(FilterField.FieldType, "LowPass"));
             FrequencyField.SetValue(soundEffect, frequency);
-            OneOverQField.SetValue(soundEffect, 1f / Math.Max(0.001f, q));
+            OneOverQField.SetValue(soundEffect, q);
             StopAfterField?.SetValue(soundEffect, false);
 
             Type innerListType = typeof(System.Collections.Generic.List<>).MakeGenericType(SoundEffectType);
@@ -159,26 +163,40 @@ namespace RealisticSoundPlus.AudioEngineV2
                 CultureInfo.InvariantCulture,
                 "{0}:{1:0.###}:{2:0.###}|{3}:{4:0.###}:{5:0.###}",
                 Filter1Subtype,
-                settings.Filter1Frequency,
-                settings.Filter1Q,
+                SanitizeFrequency(settings.Filter1Frequency),
+                SanitizeQ(settings.Filter1Q),
                 Filter2Subtype,
-                settings.Filter2Frequency,
-                settings.Filter2Q);
+                SanitizeFrequency(settings.Filter2Frequency),
+                SanitizeQ(settings.Filter2Q));
         }
 
         private static string DescribeSettings(RealisticSoundPlusSettings settings)
         {
+            float filter1Frequency = SanitizeFrequency(settings.Filter1Frequency);
+            float filter1Q = SanitizeQ(settings.Filter1Q);
+            float filter2Frequency = SanitizeFrequency(settings.Filter2Frequency);
+            float filter2Q = SanitizeQ(settings.Filter2Q);
             return string.Format(
                 CultureInfo.InvariantCulture,
                 "{0} freq={1:0.###} q={2:0.###} oneOverQ={3:0.###}; {4} freq={5:0.###} q={6:0.###} oneOverQ={7:0.###}",
                 Filter1Subtype,
-                settings.Filter1Frequency,
-                settings.Filter1Q,
-                1f / Math.Max(0.001f, settings.Filter1Q),
+                filter1Frequency,
+                filter1Q,
+                filter1Q,
                 Filter2Subtype,
-                settings.Filter2Frequency,
-                settings.Filter2Q,
-                1f / Math.Max(0.001f, settings.Filter2Q));
+                filter2Frequency,
+                filter2Q,
+                filter2Q);
+        }
+
+        public static float SanitizeFrequency(float frequency)
+        {
+            return Math.Max(MinFilterFrequency, Math.Min(MaxFilterFrequency, frequency));
+        }
+
+        public static float SanitizeQ(float q)
+        {
+            return Math.Max(MinFilterQ, Math.Min(MaxFilterQ, q));
         }
 
         private static void LogReflectionFailure(string message)

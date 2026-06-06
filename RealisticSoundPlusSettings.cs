@@ -383,10 +383,10 @@ namespace RealisticSoundPlus
             Current.AtmosphericMufflingFloor = Clamp(Current.AtmosphericMufflingFloor, 0f, 1f);
             Current.EngineFilter = NormalizeFilter(Current.EngineFilter) ?? "Off";
             Current.InternalEngineFilter = NormalizeFilter(Current.InternalEngineFilter) ?? "Off";
-            Current.Filter1Frequency = Clamp(Current.Filter1Frequency, 20f, 20000f);
-            Current.Filter1Q = Clamp(Current.Filter1Q, 0.1f, 10f);
-            Current.Filter2Frequency = Clamp(Current.Filter2Frequency, 20f, 20000f);
-            Current.Filter2Q = Clamp(Current.Filter2Q, 0.1f, 10f);
+            Current.Filter1Frequency = Clamp(Current.Filter1Frequency, AudioEngineV2.RspDynamicAudioFilters.MinFilterFrequency, AudioEngineV2.RspDynamicAudioFilters.MaxFilterFrequency);
+            Current.Filter1Q = Clamp(Current.Filter1Q, AudioEngineV2.RspDynamicAudioFilters.MinFilterQ, AudioEngineV2.RspDynamicAudioFilters.MaxFilterQ);
+            Current.Filter2Frequency = Clamp(Current.Filter2Frequency, AudioEngineV2.RspDynamicAudioFilters.MinFilterFrequency, AudioEngineV2.RspDynamicAudioFilters.MaxFilterFrequency);
+            Current.Filter2Q = Clamp(Current.Filter2Q, AudioEngineV2.RspDynamicAudioFilters.MinFilterQ, AudioEngineV2.RspDynamicAudioFilters.MaxFilterQ);
             Current.V2SmoothingMs = Clamp(Current.V2SmoothingMs, 0f, 500f);
             Current.V2DetailCommandSmoothingMs = Clamp(Current.V2DetailCommandSmoothingMs, 0f, 5000f);
             Current.V2EmitterFadeInMs = Clamp(Current.V2EmitterFadeInMs, 0f, 1000f);
