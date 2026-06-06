@@ -14,6 +14,7 @@ namespace RealisticSoundPlus.AudioEngineV2
         private static readonly Dictionary<long, MyThrust> KnownThrusters = new Dictionary<long, MyThrust>();
         private static readonly HashSet<MyEntity3DSoundEmitter> V2Emitters = new HashSet<MyEntity3DSoundEmitter>();
         private static readonly HashSet<MyEntity3DSoundEmitter> UnfilteredV2Emitters = new HashSet<MyEntity3DSoundEmitter>();
+        private static readonly HashSet<string> MutedVanillaCues = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private static bool _loggedEnabled;
         private static bool _hasListener;
         private static V2AudioListenerState _listener;
@@ -35,6 +36,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             KnownThrusters.Clear();
             V2Emitters.Clear();
             UnfilteredV2Emitters.Clear();
+            MutedVanillaCues.Clear();
             _loggedEnabled = false;
             _hasListener = false;
             _listener = default(V2AudioListenerState);
@@ -167,6 +169,33 @@ namespace RealisticSoundPlus.AudioEngineV2
             return true;
         }
 
+        public static bool MuteVanillaShipCueIfNeeded(MyEntity3DSoundEmitter emitter)
+        {
+            if (emitter == null || IsV2Emitter(emitter))
+                return false;
+
+            if (!TryGetSuppressibleVanillaCue(emitter, out string cueName))
+                return false;
+
+            if (!ShouldSuppressVanillaShipCue(emitter, cueName))
+                return false;
+
+            try
+            {
+                emitter.VolumeMultiplier = 0f;
+                emitter.StopSound(false, false, false);
+                if (MutedVanillaCues.Add(cueName))
+                    V2DebugLog.WriteEvent("vanilla-muted", cueName);
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                MyLog.Default.WriteLine("[RealisticSoundPlus] Failed to mute vanilla ship cue " + cueName + ": " + ex.Message);
+                return false;
+            }
+        }
+
         public static void RegisterEmitter(MyEntity3DSoundEmitter emitter, bool skipFilter)
         {
             if (emitter == null)
@@ -198,6 +227,51 @@ namespace RealisticSoundPlus.AudioEngineV2
         public static bool ShouldSkipEngineFilter(MyEntity3DSoundEmitter emitter)
         {
             return emitter != null && UnfilteredV2Emitters.Contains(emitter);
+        }
+
+        private static bool TryGetSuppressibleVanillaCue(MyEntity3DSoundEmitter emitter, out string cueName)
+        {
+            cueName = null;
+            if (emitter == null)
+                return false;
+
+            if (IsSuppressibleCueName(emitter.SoundId.ToString(), out cueName))
+                return true;
+
+            try
+            {
+                if (IsSuppressibleCueName(emitter.Sound?.CueEnum.ToString(), out cueName))
+                    return true;
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                if (IsSuppressibleCueName(emitter.SecondarySound?.CueEnum.ToString(), out cueName))
+                    return true;
+            }
+            catch
+            {
+            }
+
+            cueName = null;
+            return false;
+        }
+
+        private static bool IsSuppressibleCueName(string value, out string cueName)
+        {
+            cueName = null;
+            if (string.IsNullOrWhiteSpace(value) || value == "NullOrEmpty")
+                return false;
+
+            string trimmed = value.Trim();
+            if (!EngineAudioClassifier.IsKnownVanillaShipStateCue(trimmed))
+                return false;
+
+            cueName = trimmed;
+            return true;
         }
 
         public static string FormatDebugLine()
