@@ -58,6 +58,14 @@ namespace RealisticSoundPlus.Patches
                     return;
                 }
 
+                if (RspDynamicAudioFilters.IsCustomFilterSubtype(effectSubtype) && !RspDynamicAudioFilters.UpdateFromSettings(SettingsManager.Current))
+                {
+                    __result = MyStringHash.NullOrEmpty;
+                    AudioDiagnostics.RecordEmitter(__instance, "filter-custom-missing", __instance.VolumeMultiplier, 1f, 1f, __instance.VolumeMultiplier, __instance.SourcePosition);
+                    LogFilterSelection(__instance, AudioEngineV2Runtime.GetEmitterFilterRouteName(__instance), effectSubtype, "custom-missing");
+                    return;
+                }
+
                 __result = MyStringHash.GetOrCompute(effectSubtype);
                 string filterRoute = AudioEngineV2Runtime.GetEmitterFilterRouteName(__instance);
                 AudioDiagnostics.RecordEmitter(__instance, "filter-" + filterRoute + "-" + effectSubtype, __instance.VolumeMultiplier, 1f, 1f, __instance.VolumeMultiplier, __instance.SourcePosition);

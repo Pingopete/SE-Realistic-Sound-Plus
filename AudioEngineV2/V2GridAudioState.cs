@@ -722,6 +722,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             private bool _force3D;
             private V2FilterRoute _filterRoute = V2FilterRoute.None;
             private string _filterEffectSubtype;
+            private string _filterEffectSignature;
             private DateTime _rebindFadeStartUtc = DateTime.MinValue;
             private float _pitch = 1f;
 
@@ -767,7 +768,8 @@ namespace RealisticSoundPlus.AudioEngineV2
                 Emitter.Force3D = force3D;
                 AudioEngineV2Runtime.RegisterEmitter(Emitter, filterRoute);
                 string filterEffectSubtype = AudioEngineV2Runtime.GetEngineFilterEffectSubtype(Emitter) ?? string.Empty;
-                bool filterChanged = _filterRoute != filterRoute || !string.Equals(_filterEffectSubtype, filterEffectSubtype, StringComparison.OrdinalIgnoreCase);
+                string filterEffectSignature = AudioEngineV2Runtime.GetEngineFilterEffectSignature(Emitter) ?? filterEffectSubtype;
+                bool filterChanged = _filterRoute != filterRoute || !string.Equals(_filterEffectSignature, filterEffectSignature, StringComparison.OrdinalIgnoreCase);
                 bool needsRebind = !IsPlaying
                     || !string.Equals(_cueName, cueName, StringComparison.OrdinalIgnoreCase)
                     || _force2D != force2D
@@ -785,6 +787,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                     _force3D = force3D;
                     _filterRoute = filterRoute;
                     _filterEffectSubtype = filterEffectSubtype;
+                    _filterEffectSignature = filterEffectSignature;
                     _rebindFadeStartUtc = DateTime.UtcNow;
                     MySoundPair pair = new MySoundPair(cueName, false);
                     MyEntity3DSoundEmitter.PreloadSound(pair);
@@ -800,7 +803,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                         force2D ? "Y" : "N",
                         force3D ? "Y" : "N",
                         filterRoute,
-                        string.IsNullOrEmpty(filterEffectSubtype) ? "none" : filterEffectSubtype,
+                        string.IsNullOrEmpty(filterEffectSignature) ? "none" : filterEffectSignature,
                         filterChanged ? "filter" : "cue",
                         position.X,
                         position.Y,

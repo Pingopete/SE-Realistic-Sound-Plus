@@ -64,12 +64,14 @@ namespace RealisticSoundPlus.AudioEngineV2
             _lastLoggedVanillaFallback = false;
             VanillaShipEnvironment.Reset();
             V2AudioDebugState.Reset();
+            RspDynamicAudioFilters.ResetRuntimeState();
 
             MyLog.Default.WriteLineAndConsole("[RealisticSoundPlus] V2 audio runtime reset: " + reason);
         }
 
         public static void Update()
         {
+            RspDynamicAudioFilters.UpdateFromSettings(SettingsManager.Current);
             _listener = V2AudioListenerState.Capture();
             _hasListener = true;
             LogListenerTransitionIfChanged(_listener);
@@ -293,6 +295,24 @@ namespace RealisticSoundPlus.AudioEngineV2
             }
 
             return SettingsManager.GetEngineFilterEffectSubtype();
+        }
+
+        public static string GetEngineFilterEffectSignature(MyEntity3DSoundEmitter emitter)
+        {
+            if (emitter != null && V2EmitterFilterRoutes.TryGetValue(emitter, out V2FilterRoute route))
+            {
+                switch (route)
+                {
+                    case V2FilterRoute.Internal:
+                        return SettingsManager.GetInternalEngineFilterEffectSignature();
+                    case V2FilterRoute.External:
+                        return SettingsManager.GetEngineFilterEffectSignature();
+                    default:
+                        return string.Empty;
+                }
+            }
+
+            return SettingsManager.GetEngineFilterEffectSignature();
         }
 
         public static string GetEmitterFilterRouteName(MyEntity3DSoundEmitter emitter)

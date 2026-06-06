@@ -18,6 +18,10 @@ namespace RealisticSoundPlus
         public float AtmosphericMufflingFloor { get; set; } = 0.5f;
         public string EngineFilter { get; set; } = "Deep";
         public string InternalEngineFilter { get; set; } = "Off";
+        public float Filter1Frequency { get; set; } = 300f;
+        public float Filter1Q { get; set; } = 0.7f;
+        public float Filter2Frequency { get; set; } = 1200f;
+        public float Filter2Q { get; set; } = 0.7f;
         public float V2SmoothingMs { get; set; } = 100f;
         public float V2DetailCommandSmoothingMs { get; set; } = 2000f;
         public float V2EmitterFadeInMs { get; set; } = 120f;
@@ -87,7 +91,7 @@ namespace RealisticSoundPlus
 
         public static string Summary()
         {
-            return string.Format(CultureInfo.InvariantCulture, "route=v2, gain={0:0.00}, curve={1:0.00}, presenceMin={2:0.00}, quietLog={3:0.00}, loudLog={4:0.00}, muffling={5:0.00}, interiorBase={6:0.00}, filter={7}, internalFilter={8}, smoothMs={9:0}, cmdSmoothMs={10:0}, emitterFadeMs={11:0}, fade={12:0.000}, atmosphereFloor={13:0.00}, detail={14}({15:0.00}), idle={16}({17:0.00}), detail2dpos={18}, state={19}({20:0.00}), dist={21:0}, distcurve={22:0.00}, state2dpos={23}, log={24}", Current.EngineGain, Current.AudioCurveExponent, Current.MinimumShipPresence, Current.QuietShipForceLog10, Current.LoudShipForceLog10, Current.MufflingStrength, Current.InteriorBaseTransmission, Current.EngineFilter, Current.InternalEngineFilter, Current.V2SmoothingMs, Current.V2DetailCommandSmoothingMs, Current.V2EmitterFadeInMs, Current.V2SoftFadeRatio, Current.AtmosphericMufflingFloor, Current.V2DetailEnabled ? "on" : "off", Current.V2DetailGain, Current.V2DetailIdleEnabled ? "on" : "off", Current.V2DetailIdleGain, Current.V2Detail2DPositionalTest ? "on" : "off", Current.V2StateEnabled ? "on" : "off", Current.V2StateGain, Current.V2EmitterDistance, Current.V2DistanceCurve, Current.V2State2DPositionalTest ? "on" : "off", Current.V2DebugLogEnabled ? "on" : "off");
+            return string.Format(CultureInfo.InvariantCulture, "route=v2, gain={0:0.00}, curve={1:0.00}, presenceMin={2:0.00}, quietLog={3:0.00}, loudLog={4:0.00}, muffling={5:0.00}, interiorBase={6:0.00}, filter={7}, internalFilter={8}, filter1={9:0}/{10:0.00}, filter2={11:0}/{12:0.00}, smoothMs={13:0}, cmdSmoothMs={14:0}, emitterFadeMs={15:0}, fade={16:0.000}, atmosphereFloor={17:0.00}, detail={18}({19:0.00}), idle={20}({21:0.00}), detail2dpos={22}, state={23}({24:0.00}), dist={25:0}, distcurve={26:0.00}, state2dpos={27}, log={28}", Current.EngineGain, Current.AudioCurveExponent, Current.MinimumShipPresence, Current.QuietShipForceLog10, Current.LoudShipForceLog10, Current.MufflingStrength, Current.InteriorBaseTransmission, Current.EngineFilter, Current.InternalEngineFilter, Current.Filter1Frequency, Current.Filter1Q, Current.Filter2Frequency, Current.Filter2Q, Current.V2SmoothingMs, Current.V2DetailCommandSmoothingMs, Current.V2EmitterFadeInMs, Current.V2SoftFadeRatio, Current.AtmosphericMufflingFloor, Current.V2DetailEnabled ? "on" : "off", Current.V2DetailGain, Current.V2DetailIdleEnabled ? "on" : "off", Current.V2DetailIdleGain, Current.V2Detail2DPositionalTest ? "on" : "off", Current.V2StateEnabled ? "on" : "off", Current.V2StateGain, Current.V2EmitterDistance, Current.V2DistanceCurve, Current.V2State2DPositionalTest ? "on" : "off", Current.V2DebugLogEnabled ? "on" : "off");
         }
 
         public static bool TrySet(string name, float value)
@@ -130,6 +134,24 @@ namespace RealisticSoundPlus
                 case "atmosphericfloor":
                 case "atmfloor":
                     Current.AtmosphericMufflingFloor = value;
+                    break;
+                case "filter1freq":
+                case "filter1frequency":
+                case "f1freq":
+                    Current.Filter1Frequency = value;
+                    break;
+                case "filter1q":
+                case "f1q":
+                    Current.Filter1Q = value;
+                    break;
+                case "filter2freq":
+                case "filter2frequency":
+                case "f2freq":
+                    Current.Filter2Frequency = value;
+                    break;
+                case "filter2q":
+                case "f2q":
+                    Current.Filter2Q = value;
                     break;
                 case "smooth":
                 case "smoothing":
@@ -282,6 +304,16 @@ namespace RealisticSoundPlus
             return GetFilterEffectSubtype(Current.InternalEngineFilter);
         }
 
+        public static string GetEngineFilterEffectSignature()
+        {
+            return GetFilterEffectSignature(Current.EngineFilter);
+        }
+
+        public static string GetInternalEngineFilterEffectSignature()
+        {
+            return GetFilterEffectSignature(Current.InternalEngineFilter);
+        }
+
         private static string GetFilterEffectSubtype(string filter)
         {
             switch (NormalizeFilter(filter))
@@ -291,11 +323,26 @@ namespace RealisticSoundPlus
                 case "CockpitNoOxy": return "LowPassCockpitNoOxy";
                 case "RealShip": return "realShipFilter";
                 case "Deep": return "LowPassNoHelmetNoOxy";
+                case "Filter1": return AudioEngineV2.RspDynamicAudioFilters.Filter1Subtype;
+                case "Filter2": return AudioEngineV2.RspDynamicAudioFilters.Filter2Subtype;
                 default: return null;
             }
         }
 
-        public static string FilterOptions => "off, helmet, cockpit, cockpitnooxy, realship, deep";
+        private static string GetFilterEffectSignature(string filter)
+        {
+            switch (NormalizeFilter(filter))
+            {
+                case "Filter1":
+                    return string.Format(CultureInfo.InvariantCulture, "{0}:{1:0.###}:{2:0.###}", AudioEngineV2.RspDynamicAudioFilters.Filter1Subtype, Current.Filter1Frequency, Current.Filter1Q);
+                case "Filter2":
+                    return string.Format(CultureInfo.InvariantCulture, "{0}:{1:0.###}:{2:0.###}", AudioEngineV2.RspDynamicAudioFilters.Filter2Subtype, Current.Filter2Frequency, Current.Filter2Q);
+                default:
+                    return GetFilterEffectSubtype(filter) ?? string.Empty;
+            }
+        }
+
+        public static string FilterOptions => "off, helmet, cockpit, cockpitnooxy, realship, deep, filter1, filter2";
 
         private static string NormalizeFilter(string value)
         {
@@ -314,6 +361,12 @@ namespace RealisticSoundPlus
                 case "ship": return "RealShip";
                 case "deep":
                 case "lowpass": return "Deep";
+                case "filter1":
+                case "custom1":
+                case "rsp1": return "Filter1";
+                case "filter2":
+                case "custom2":
+                case "rsp2": return "Filter2";
                 default: return null;
             }
         }
@@ -330,6 +383,10 @@ namespace RealisticSoundPlus
             Current.AtmosphericMufflingFloor = Clamp(Current.AtmosphericMufflingFloor, 0f, 1f);
             Current.EngineFilter = NormalizeFilter(Current.EngineFilter) ?? "Off";
             Current.InternalEngineFilter = NormalizeFilter(Current.InternalEngineFilter) ?? "Off";
+            Current.Filter1Frequency = Clamp(Current.Filter1Frequency, 20f, 20000f);
+            Current.Filter1Q = Clamp(Current.Filter1Q, 0.1f, 10f);
+            Current.Filter2Frequency = Clamp(Current.Filter2Frequency, 20f, 20000f);
+            Current.Filter2Q = Clamp(Current.Filter2Q, 0.1f, 10f);
             Current.V2SmoothingMs = Clamp(Current.V2SmoothingMs, 0f, 500f);
             Current.V2DetailCommandSmoothingMs = Clamp(Current.V2DetailCommandSmoothingMs, 0f, 5000f);
             Current.V2EmitterFadeInMs = Clamp(Current.V2EmitterFadeInMs, 0f, 1000f);

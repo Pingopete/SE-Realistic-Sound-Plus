@@ -61,6 +61,8 @@ Current live V2 test defaults:
 | `emitterfade` | `120` | Short fade after cue, dimension, filter, or route rebinds. |
 | `filter` | `Deep` | Low-pass effect for V2 3D engine emitters. |
 | `internalfilter` | `Off` | Independent low-pass effect for inside/local detail and state emitters. |
+| `filter1` | `300 Hz / Q 0.70` | Custom low-pass test filter selectable by exterior or internal route. |
+| `filter2` | `1200 Hz / Q 0.70` | Second custom low-pass test filter selectable by exterior or internal route. |
 | `sounds` | `on` | Center debug overlay starts enabled on this branch. |
 | `log` | `on` | V2 debug log writes once per second. |
 
@@ -76,7 +78,13 @@ Most useful first commands:
 /rsp gain 4
 /rsp detailgain 4
 /rsp detail2dpos on
+/rsp filter filter1
+/rsp filter1freq 300
+/rsp filter1q 0.7
 /rsp internalfilter off
+/rsp internalfilter filter2
+/rsp filter2freq 1200
+/rsp filter2q 0.7
 /rsp idle off
 /rsp idlegain 0.25
 /rsp stategain 4
@@ -220,8 +228,12 @@ Settings are saved to `%APPDATA%\SpaceEngineers\RealisticSoundPlus.xml` and hot-
 | `/rsp muffling 1` | `/rsp muffle` | `1.00` | `0..1` | Strength of the shared V2 muffling/filter transmission model. |
 | `/rsp interior 0.2` | `/rsp interiorbase` | `0.20` | `0.05..1` | Baseline transmission floor while muffled. Source range is still controlled by `dist` and `distcurve`. |
 | `/rsp atmfloor 0.5` | `/rsp atmospherefloor`, `/rsp atmosphericfloor` | `0.50` | `0..1` | Amount of muffling retained at full planetary air density while inside. |
-| `/rsp filter deep` | `/rsp externalfilter`, `/rsp extfilter` | `deep` | options | Selects the exterior low-pass effect for outside/on-hull V2 detail emitters. Options: `off`, `helmet`, `cockpit`, `cockpitnooxy`, `realship`, `deep`. |
-| `/rsp internalfilter off` | `/rsp intfilter`, `/rsp insidefilter` | `off` | options | Selects the independent inside/local low-pass effect for inside D2/local detail and state emitters. |
+| `/rsp filter deep` | `/rsp externalfilter`, `/rsp extfilter` | `deep` | options | Selects the exterior low-pass effect for outside/on-hull V2 detail emitters. Options: `off`, `helmet`, `cockpit`, `cockpitnooxy`, `realship`, `deep`, `filter1`, `filter2`. |
+| `/rsp internalfilter off` | `/rsp intfilter`, `/rsp insidefilter` | `off` | options | Selects the independent inside/local low-pass effect for inside D2/local detail and state emitters. Same options as `/rsp filter`. |
+| `/rsp filter1freq 300` | `/rsp filter1frequency`, `/rsp f1freq` | `300` | `20..20000` Hz | Sets custom low-pass filter 1 cutoff frequency. Emitters using `filter1` rebind live. |
+| `/rsp filter1q 0.7` | `/rsp f1q` | `0.70` | `0.1..10` | Sets custom low-pass filter 1 Q value. |
+| `/rsp filter2freq 1200` | `/rsp filter2frequency`, `/rsp f2freq` | `1200` | `20..20000` Hz | Sets custom low-pass filter 2 cutoff frequency. Emitters using `filter2` rebind live. |
+| `/rsp filter2q 0.7` | `/rsp f2q` | `0.70` | `0.1..10` | Sets custom low-pass filter 2 Q value. |
 
 ### Debug And Utility
 

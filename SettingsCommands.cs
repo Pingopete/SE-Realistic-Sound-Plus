@@ -51,7 +51,7 @@ namespace RealisticSoundPlus
                 {
                     case "help":
                     case "?":
-                        Notify("/rsp show | /rsp detail on | /rsp idle off | /rsp state on | /rsp detailgain 2 | /rsp idlegain 1 | /rsp stategain 2 | /rsp dist 200 | /rsp distcurve 1 | /rsp cmdsmooth 2000 | /rsp emitterfade 120 | /rsp statecurve 1 | /rsp detail2dpos on | /rsp state2dpos on | /rsp filter deep | /rsp internalfilter off | /rsp sounds | /rsp logpath | /rsp save");
+                        Notify("/rsp show | /rsp detail on | /rsp idle off | /rsp state on | /rsp detailgain 2 | /rsp idlegain 1 | /rsp stategain 2 | /rsp dist 200 | /rsp distcurve 1 | /rsp cmdsmooth 2000 | /rsp emitterfade 120 | /rsp statecurve 1 | /rsp detail2dpos on | /rsp state2dpos on | /rsp filter filter1 | /rsp internalfilter filter2 | /rsp filter1freq 300 | /rsp filter1q 0.7 | /rsp sounds | /rsp logpath | /rsp save");
                         break;
                     case "show":
                         Notify(SettingsManager.Summary());
