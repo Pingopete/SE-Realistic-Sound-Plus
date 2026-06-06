@@ -159,9 +159,6 @@ namespace RealisticSoundPlus.AudioEngineV2
             if (IsV2Emitter(emitter))
                 return false;
 
-            if (CountActiveDetailSources() + CountActiveStateSources() <= 0)
-                return false;
-
             if (!EngineAudioClassifier.IsKnownVanillaShipStateCue(cueName))
                 return false;
 

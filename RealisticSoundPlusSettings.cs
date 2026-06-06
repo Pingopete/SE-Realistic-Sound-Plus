@@ -21,9 +21,11 @@ namespace RealisticSoundPlus
         public float V2DetailCommandSmoothingMs { get; set; } = 2000f;
         public float V2SoftFadeRatio { get; set; } = 0.04f;
         public bool V2DetailEnabled { get; set; } = true;
+        public bool V2DetailIdleEnabled { get; set; } = true;
         public bool V2StateEnabled { get; set; } = false;
         public bool V2State2DPositionalTest { get; set; } = true;
         public float V2DetailGain { get; set; } = 2.0f;
+        public float V2DetailIdleGain { get; set; } = 1.0f;
         public float V2StateGain { get; set; } = 2.0f;
         public float V2EmitterDistance { get; set; } = 200f;
         public float V2DistanceCurve { get; set; } = 1.0f;
@@ -82,7 +84,7 @@ namespace RealisticSoundPlus
 
         public static string Summary()
         {
-            return string.Format(CultureInfo.InvariantCulture, "route=v2, gain={0:0.00}, curve={1:0.00}, presenceMin={2:0.00}, quietLog={3:0.00}, loudLog={4:0.00}, muffling={5:0.00}, interiorBase={6:0.00}, filter={7}, smoothMs={8:0}, cmdSmoothMs={9:0}, fade={10:0.000}, atmosphereFloor={11:0.00}, detail={12}({13:0.00}), state={14}({15:0.00}), dist={16:0}, distcurve={17:0.00}, state2dpos={18}, log={19}", Current.EngineGain, Current.AudioCurveExponent, Current.MinimumShipPresence, Current.QuietShipForceLog10, Current.LoudShipForceLog10, Current.MufflingStrength, Current.InteriorBaseTransmission, Current.EngineFilter, Current.V2SmoothingMs, Current.V2DetailCommandSmoothingMs, Current.V2SoftFadeRatio, Current.AtmosphericMufflingFloor, Current.V2DetailEnabled ? "on" : "off", Current.V2DetailGain, Current.V2StateEnabled ? "on" : "off", Current.V2StateGain, Current.V2EmitterDistance, Current.V2DistanceCurve, Current.V2State2DPositionalTest ? "on" : "off", Current.V2DebugLogEnabled ? "on" : "off");
+            return string.Format(CultureInfo.InvariantCulture, "route=v2, gain={0:0.00}, curve={1:0.00}, presenceMin={2:0.00}, quietLog={3:0.00}, loudLog={4:0.00}, muffling={5:0.00}, interiorBase={6:0.00}, filter={7}, smoothMs={8:0}, cmdSmoothMs={9:0}, fade={10:0.000}, atmosphereFloor={11:0.00}, detail={12}({13:0.00}), idle={14}({15:0.00}), state={16}({17:0.00}), dist={18:0}, distcurve={19:0.00}, state2dpos={20}, log={21}", Current.EngineGain, Current.AudioCurveExponent, Current.MinimumShipPresence, Current.QuietShipForceLog10, Current.LoudShipForceLog10, Current.MufflingStrength, Current.InteriorBaseTransmission, Current.EngineFilter, Current.V2SmoothingMs, Current.V2DetailCommandSmoothingMs, Current.V2SoftFadeRatio, Current.AtmosphericMufflingFloor, Current.V2DetailEnabled ? "on" : "off", Current.V2DetailGain, Current.V2DetailIdleEnabled ? "on" : "off", Current.V2DetailIdleGain, Current.V2StateEnabled ? "on" : "off", Current.V2StateGain, Current.V2EmitterDistance, Current.V2DistanceCurve, Current.V2State2DPositionalTest ? "on" : "off", Current.V2DebugLogEnabled ? "on" : "off");
         }
 
         public static bool TrySet(string name, float value)
@@ -153,6 +155,11 @@ namespace RealisticSoundPlus
                 case "v2detailgain":
                     Current.V2DetailGain = value;
                     break;
+                case "idlegain":
+                case "detailidlegain":
+                case "v2idlegain":
+                    Current.V2DetailIdleGain = value;
+                    break;
                 case "stategain":
                 case "v2stategain":
                     Current.V2StateGain = value;
@@ -178,6 +185,14 @@ namespace RealisticSoundPlus
             if (!TryParseBool(value, out bool enabled))
                 return false;
             Current.V2DetailEnabled = enabled;
+            return true;
+        }
+
+        public static bool TrySetV2DetailIdle(string value)
+        {
+            if (!TryParseBool(value, out bool enabled))
+                return false;
+            Current.V2DetailIdleEnabled = enabled;
             return true;
         }
 
@@ -283,6 +298,7 @@ namespace RealisticSoundPlus
             Current.V2DetailCommandSmoothingMs = Clamp(Current.V2DetailCommandSmoothingMs, 0f, 5000f);
             Current.V2SoftFadeRatio = Clamp(Current.V2SoftFadeRatio, 0.001f, 0.25f);
             Current.V2DetailGain = Clamp(Current.V2DetailGain, 0f, 4f);
+            Current.V2DetailIdleGain = Clamp(Current.V2DetailIdleGain, 0f, 4f);
             Current.V2StateGain = Clamp(Current.V2StateGain, 0f, 4f);
             Current.V2EmitterDistance = Clamp(Current.V2EmitterDistance, 1f, 1000f);
             Current.V2DistanceCurve = Clamp(Current.V2DistanceCurve, 0.1f, 5f);

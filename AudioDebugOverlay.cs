@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Text;
 using RealisticSoundPlus.AudioEngineV2;
 using RealisticSoundPlus.Patches;
 using Sandbox.ModAPI;
@@ -17,6 +18,7 @@ namespace RealisticSoundPlus
         private static readonly Color HeaderColor = new Color(120, 220, 255, 255);
         private static readonly Color TextColor = new Color(230, 235, 240, 255);
         private static readonly Color QuietColor = new Color(170, 180, 190, 255);
+        private static DateTime _lastVoiceLogUtc = DateTime.MinValue;
 
         public static bool Enabled { get; private set; } = true;
 
@@ -44,6 +46,7 @@ namespace RealisticSoundPlus
                 AddRows(rows, "H", played.Hud);
 
                 rows.Sort((left, right) => right.Score.CompareTo(left.Score));
+                LogTopRows(rows);
 
                 int shown = Math.Min(rows.Count, MaxRows);
                 Vector2 viewportSize = GetViewportSize();
@@ -128,6 +131,42 @@ namespace RealisticSoundPlus
                     row.Score /= row.Count;
                 rows.Add(row);
             }
+        }
+
+        private static void LogTopRows(List<Row> rows)
+        {
+            if (!SettingsManager.Current.V2DebugLogEnabled || rows == null)
+                return;
+
+            DateTime now = DateTime.UtcNow;
+            if (now - _lastVoiceLogUtc < TimeSpan.FromSeconds(1))
+                return;
+
+            _lastVoiceLogUtc = now;
+            int count = Math.Min(rows.Count, 12);
+            if (count <= 0)
+            {
+                V2DebugLog.WriteEvent("voices", "none");
+                return;
+            }
+
+            StringBuilder builder = new StringBuilder();
+            for (int i = 0; i < count; i++)
+            {
+                Row row = rows[i];
+                if (i > 0)
+                    builder.Append("; ");
+                builder.AppendFormat(
+                    CultureInfo.InvariantCulture,
+                    "{0}{1} x{2} {3:0.00} {4}",
+                    row.Kind,
+                    row.EngineCandidate ? "*" : "-",
+                    row.Count,
+                    row.Score,
+                    row.CueName);
+            }
+
+            V2DebugLog.WriteEvent("voices", builder.ToString());
         }
 
         private static Vector2 GetViewportSize()

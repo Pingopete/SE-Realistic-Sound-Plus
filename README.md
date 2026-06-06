@@ -47,9 +47,11 @@ Current live V2 test defaults:
 | Setting | Default | Purpose |
 | --- | ---: | --- |
 | `detail` | `on` | Enables grouped 3D engine-detail emitters. |
+| `idle` | `on` | Enables the detail idle layer while thrusters are powered and not firing. |
 | `state` | `off` | Enables grouped ship state/run-loop emitters. |
 | `gain` | `2.00` | Overall V2 engine gain applied to detail and state layers. |
 | `detailgain` | `2.00` | Extra gain for 3D engine-detail layer. |
+| `idlegain` | `1.00` | Extra gain for only the detail idle layer. |
 | `stategain` | `2.00` | Extra gain for ship state/run-loop layer. |
 | `dist` | `200` | Shared emitter hearing range in meters. |
 | `distcurve` | `1.00` | Distance falloff curve inside `dist`. |
@@ -68,6 +70,8 @@ Most useful first commands:
 /rsp cmdsmooth 2000
 /rsp gain 4
 /rsp detailgain 4
+/rsp idle off
+/rsp idlegain 0.25
 /rsp stategain 4
 ```
 
@@ -86,7 +90,8 @@ Overlay fields to watch:
 | `rej=fallback/grid` | Reports rejected by fallback state or grid mismatch. | Low or zero while inside the controlled ship. |
 | `emit=registered/unfiltered` | V2-created emitters currently registered with diagnostics/filtering. | Greater than `0` once V2 audio is actually alive. |
 | `flt=hits` | Number of times the low-pass filter hook has controlled an emitter. | Climbs when V2 3D emitters are active and filterable. |
-| `detail=on/gain/xN` | Detail layer toggle, gain, and active detail emitter count. | `xN` greater than `0` when thrusting. |
+| `detail=on/gain/xN` | Detail layer toggle, gain, and active detail emitter count. | `xN` greater than `0` when thrusting or when V2 is holding silent emitters for suppression. |
+| `idle=on/gain` | Detail idle layer toggle and gain. | Use `/rsp idle off` to test whether a no-thrust hum is RSP idle. |
 | `state=off/gain/xN` | State layer toggle, gain, and active state emitter count. | Keep `off` while detail-only testing; turn on when testing state emitters. |
 | `dist` | Shared hearing range. | Raise this if groups exist but no sound is heard. |
 | `state2dpos` | Whether inside D2/local state cues are forced through positional emitters. | Default `on`; this is the intended inside state route. |
@@ -115,7 +120,7 @@ Debug log:
 %APPDATA%\SpaceEngineers\RealisticSoundPlus-v2-debug.log
 ```
 
-The log records global audio state, the V2 overlay line, `/rsp show` settings, and per-direction detail diagnostics once per second. Use `/rsp logpath` in game to print the exact path.
+The log records global audio state, the V2 overlay line, `/rsp show` settings, current top source voices, and per-direction detail diagnostics once per second. Use `/rsp logpath` in game to print the exact path.
 
 ## Debug Overlay
 
@@ -138,7 +143,7 @@ The V2 branch writes a lightweight debug log by default:
 
 `%APPDATA%\SpaceEngineers\RealisticSoundPlus-v2-debug.log`
 
-The log records one line per second with the global audio state, V2 route/debug line, and current settings. It also writes one-time `pitch-member` events showing whether the active game audio objects expose a writable pitch/frequency member. It rotates to `RealisticSoundPlus-v2-debug.log.old` at about 2 MB.
+The log records one line per second with the global audio state, V2 route/debug line, current settings, top source voices, and V2 detail diagnostics. It also writes one-time `pitch-member` events showing whether the active game audio objects expose a writable pitch/frequency member. It rotates to `RealisticSoundPlus-v2-debug.log.old` at about 2 MB.
 
 Controls:
 
@@ -167,8 +172,10 @@ Settings are saved to `%APPDATA%\SpaceEngineers\RealisticSoundPlus.xml` and hot-
 | Command | Aliases | Default | Range | Function |
 | --- | --- | ---: | --- | --- |
 | `/rsp detail on|off` | `/rsp enginedetail` | `on` | bool | Toggles the grouped 3D engine-detail layer. |
+| `/rsp idle on|off` | `/rsp detailidle` | `on` | bool | Toggles only the V2 detail idle loop. This is useful for identifying no-thrust hums without letting vanilla ship-state audio return. |
 | `/rsp state on|off` | `/rsp enginestate`, `/rsp statemachine` | `off` | bool | Toggles the grouped ship state/run-loop layer. |
 | `/rsp detailgain 2` | `/rsp v2detailgain` | `2.00` | `0..4` | Multiplies only the detail layer. |
+| `/rsp idlegain 1` | `/rsp detailidlegain`, `/rsp v2idlegain` | `1.00` | `0..4` | Multiplies only the detail idle layer. |
 | `/rsp stategain 2` | `/rsp v2stategain` | `2.00` | `0..4` | Multiplies only the state layer. |
 | `/rsp state2dpos on|off` | `/rsp state2dposition`, `/rsp positional2d` | `on` | bool | Forces inside D2/local state cues through positional emitters. |
 

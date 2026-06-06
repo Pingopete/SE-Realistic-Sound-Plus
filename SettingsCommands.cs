@@ -51,7 +51,7 @@ namespace RealisticSoundPlus
                 {
                     case "help":
                     case "?":
-                        Notify("/rsp show | /rsp detail on | /rsp state on | /rsp detailgain 2 | /rsp stategain 2 | /rsp dist 200 | /rsp distcurve 1 | /rsp cmdsmooth 2000 | /rsp statecurve 1 | /rsp state2dpos on | /rsp filter deep | /rsp sounds | /rsp log | /rsp logpath | /rsp save | /rsp reload");
+                        Notify("/rsp show | /rsp detail on | /rsp idle off | /rsp state on | /rsp detailgain 2 | /rsp idlegain 1 | /rsp stategain 2 | /rsp dist 200 | /rsp distcurve 1 | /rsp cmdsmooth 2000 | /rsp statecurve 1 | /rsp state2dpos on | /rsp filter deep | /rsp sounds | /rsp logpath | /rsp save");
                         break;
                     case "show":
                         Notify(SettingsManager.Summary());
@@ -70,6 +70,10 @@ namespace RealisticSoundPlus
                     case "detail":
                     case "enginedetail":
                         SetV2Detail(parts);
+                        break;
+                    case "idle":
+                    case "detailidle":
+                        SetV2DetailIdle(parts);
                         break;
                     case "state":
                     case "enginestate":
@@ -157,6 +161,23 @@ namespace RealisticSoundPlus
             if (!SettingsManager.TrySetV2Detail(parts[1]))
             {
                 Notify("Usage: /rsp detail <on|off>");
+                return;
+            }
+
+            Notify(SettingsManager.Summary());
+        }
+
+        private static void SetV2DetailIdle(string[] parts)
+        {
+            if (parts.Length < 2)
+            {
+                Notify("Usage: /rsp idle <on|off>");
+                return;
+            }
+
+            if (!SettingsManager.TrySetV2DetailIdle(parts[1]))
+            {
+                Notify("Usage: /rsp idle <on|off>");
                 return;
             }
 
