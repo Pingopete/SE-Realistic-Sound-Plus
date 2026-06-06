@@ -29,6 +29,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                 Distance = settings.V2EmitterDistance,
                 DistanceCurve = settings.V2DistanceCurve,
                 CommandSmoothingMs = settings.V2DetailCommandSmoothingMs,
+                EmitterFadeMs = settings.V2EmitterFadeInMs,
                 GridStates = gridStates,
                 KnownThrusters = knownThrusters,
                 CensusProcessed = censusProcessed,
@@ -53,7 +54,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                 : "-";
             return string.Format(
                 CultureInfo.InvariantCulture,
-                "route=v2 mode={0} room={1} inside={2} grid={3} char={4} contact={5}/{6} move={7} grids={8} groups={9} known={10} scan={11}/{12} thr={13}/{14}/{15}+{16} rej={17}/{18}{19} emit={20}/{21} flt={22}{23} detail={24}/{25:0.00}/x{26} idle={27}/{28:0.00} detail2dpos={29} state={30}/{31:0.00}/x{32} dist={33:0} curve={34:0.00} cmdsmooth={35:0} state2dpos={36} atm={37:0.00}",
+                "route=v2 mode={0} room={1} inside={2} grid={3} char={4} contact={5}/{6} move={7} grids={8} groups={9} known={10} scan={11}/{12} thr={13}/{14}/{15}+{16} rej={17}/{18}{19} emit={20}/{21} flt={22}{23} detail={24}/{25:0.00}/x{26} idle={27}/{28:0.00} detail2dpos={29} state={30}/{31:0.00}/x{32} dist={33:0} curve={34:0.00} cmdsmooth={35:0} emitfade={36:0} state2dpos={37} atm={38:0.00}",
                 snapshot.Listener.ModeName,
                 room,
                 snapshot.Listener.InsideShip ? "Y" : "N",
@@ -90,6 +91,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                 snapshot.Distance,
                 snapshot.DistanceCurve,
                 snapshot.CommandSmoothingMs,
+                snapshot.EmitterFadeMs,
                 snapshot.State2DPositionalTest ? "on" : "off",
                 snapshot.Listener.Atmosphere);
         }
@@ -125,6 +127,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             public float Distance;
             public float DistanceCurve;
             public float CommandSmoothingMs;
+            public float EmitterFadeMs;
             public int GridStates;
             public int KnownThrusters;
             public int CensusProcessed;

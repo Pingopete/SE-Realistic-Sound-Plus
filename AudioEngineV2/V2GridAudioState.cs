@@ -572,9 +572,10 @@ namespace RealisticSoundPlus.AudioEngineV2
 
                 float emitterVolume = value;
                 emitter.Update(position, cueName, emitterVolume, force2D, force3D, filterRoute, pitch);
+                float finalEmitterVolume = emitter.VolumeMultiplier;
                 string route = diagnosticRoute ?? emitter.RouteName;
-                AudioDiagnostics.RecordEmitter(emitter.Emitter, route, value, ExteriorSoundTransmission.Calculate(position), target, emitterVolume, position);
-                AudioDiagnostics.RecordCueName(cueName, route, value, ExteriorSoundTransmission.Calculate(position), target, emitterVolume, position);
+                AudioDiagnostics.RecordEmitter(emitter.Emitter, route, value, ExteriorSoundTransmission.Calculate(position), target, finalEmitterVolume, position);
+                AudioDiagnostics.RecordCueName(cueName, route, value, ExteriorSoundTransmission.Calculate(position), target, finalEmitterVolume, position);
             }
 
             private static float CalculateDistanceGain(V2AudioListenerState listener, Vector3D position, RealisticSoundPlusSettings settings)
@@ -721,6 +722,9 @@ namespace RealisticSoundPlus.AudioEngineV2
             private string _cueName;
             private bool _force2D;
             private bool _force3D;
+            private V2FilterRoute _filterRoute = V2FilterRoute.None;
+            private string _filterEffectSubtype;
+            private DateTime _rebindFadeStartUtc = DateTime.MinValue;
             private float _pitch = 1f;
 
             public LayerEmitter(MyThrust anchor, V2AudioLayer layer, V2ThrustDirectionGroup direction)
@@ -745,6 +749,8 @@ namespace RealisticSoundPlus.AudioEngineV2
 
             public Vector3D Position { get; private set; }
 
+            public float VolumeMultiplier => Emitter.VolumeMultiplier;
+
             public string RouteName
             {
                 get
@@ -762,22 +768,33 @@ namespace RealisticSoundPlus.AudioEngineV2
                 Emitter.Force2D = force2D;
                 Emitter.Force3D = force3D;
                 AudioEngineV2Runtime.RegisterEmitter(Emitter, filterRoute);
-
-                if (!IsPlaying
+                string filterEffectSubtype = AudioEngineV2Runtime.GetEngineFilterEffectSubtype(Emitter) ?? string.Empty;
+                bool filterChanged = _filterRoute != filterRoute || !string.Equals(_filterEffectSubtype, filterEffectSubtype, StringComparison.OrdinalIgnoreCase);
+                bool needsRebind = !IsPlaying
                     || !string.Equals(_cueName, cueName, StringComparison.OrdinalIgnoreCase)
                     || _force2D != force2D
-                    || _force3D != force3D)
+                    || _force3D != force3D
+                    || filterChanged;
+
+                if (needsRebind)
                 {
+                    MuteBeforeRebind();
+                    if (IsPlaying)
+                        Emitter.StopSound(false, false, false);
+
                     _cueName = cueName;
                     _force2D = force2D;
                     _force3D = force3D;
+                    _filterRoute = filterRoute;
+                    _filterEffectSubtype = filterEffectSubtype;
+                    _rebindFadeStartUtc = DateTime.UtcNow;
                     MySoundPair pair = new MySoundPair(cueName, false);
                     MyEntity3DSoundEmitter.PreloadSound(pair);
                     bool started = Emitter.PlaySound(pair, true, false, force2D, true, false, force3D, true);
                     IsPlaying = started;
                     V2DebugLog.WriteEvent("emitter-start", string.Format(
                         System.Globalization.CultureInfo.InvariantCulture,
-                        "{0} cue={1} started={2} vol={3:0.00} force2d={4} force3d={5} filter={6} pos={7:0.0},{8:0.0},{9:0.0}",
+                        "{0} cue={1} started={2} vol={3:0.00} force2d={4} force3d={5} filter={6} effect={7} rebind={8} pos={9:0.0},{10:0.0},{11:0.0}",
                         RouteName,
                         cueName,
                         started ? "Y" : "N",
@@ -785,6 +802,8 @@ namespace RealisticSoundPlus.AudioEngineV2
                         force2D ? "Y" : "N",
                         force3D ? "Y" : "N",
                         filterRoute,
+                        string.IsNullOrEmpty(filterEffectSubtype) ? "none" : filterEffectSubtype,
+                        filterChanged ? "filter" : "cue",
                         position.X,
                         position.Y,
                         position.Z));
@@ -796,9 +815,35 @@ namespace RealisticSoundPlus.AudioEngineV2
 
             public void SetVolume(float volume)
             {
-                Emitter.VolumeMultiplier = Clamp(volume, 0f, MaxLayerVolume);
+                Emitter.VolumeMultiplier = Clamp(volume, 0f, MaxLayerVolume) * CalculateRebindGain();
                 Emitter.Update();
                 Emitter.FastUpdate(false);
+            }
+
+            private void MuteBeforeRebind()
+            {
+                try
+                {
+                    Emitter.VolumeMultiplier = 0f;
+                    Emitter.Update();
+                    Emitter.FastUpdate(false);
+                }
+                catch
+                {
+                }
+            }
+
+            private float CalculateRebindGain()
+            {
+                float fadeMs = SettingsManager.Current.V2EmitterFadeInMs;
+                if (fadeMs <= 0f || _rebindFadeStartUtc == DateTime.MinValue)
+                    return 1f;
+
+                float t = Clamp01((float)((DateTime.UtcNow - _rebindFadeStartUtc).TotalMilliseconds / fadeMs));
+                if (t >= 1f)
+                    return 1f;
+
+                return t * t * (3f - 2f * t);
             }
 
             private void SetPitch(float pitch)

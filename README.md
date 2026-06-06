@@ -58,6 +58,7 @@ Current live V2 test defaults:
 | `dist` | `200` | Shared emitter hearing range in meters. |
 | `distcurve` | `1.00` | Distance falloff curve inside `dist`. |
 | `cmdsmooth` | `2000` | Detail command smoothing time in milliseconds. |
+| `emitterfade` | `120` | Short fade after cue, dimension, filter, or route rebinds. |
 | `filter` | `Deep` | Low-pass effect for V2 3D engine emitters. |
 | `internalfilter` | `Off` | Independent low-pass effect for inside/local detail and state emitters. |
 | `sounds` | `on` | Center debug overlay starts enabled on this branch. |
@@ -71,6 +72,7 @@ Most useful first commands:
 /rsp logpath
 /rsp dist 500
 /rsp cmdsmooth 2000
+/rsp emitterfade 120
 /rsp gain 4
 /rsp detailgain 4
 /rsp detail2dpos on
@@ -103,6 +105,7 @@ Overlay fields to watch:
 | `detail2dpos` | Whether inside D2/local detail cues are forced through positional emitters. | Default `on`; inside unmapped cues stay silent and appear as `missing-d2` in detail routes/logs. |
 | `state=off/gain/xN` | State layer toggle, gain, and active state emitter count. | Keep `off` while detail-only testing; turn on when testing state emitters. |
 | `dist` | Shared hearing range. | Raise this if groups exist but no sound is heard. |
+| `emitfade` | Fade time used after V2 emitter starts/rebinds. | `120` by default; raise slightly if recontact or D3/D2 transitions click. |
 | `state2dpos` | Whether inside D2/local state cues are forced through positional emitters. | Default `on`; this is the intended inside state route. |
 
 Marker colors:
@@ -199,6 +202,7 @@ Settings are saved to `%APPDATA%\SpaceEngineers\RealisticSoundPlus.xml` and hot-
 | `/rsp statecurve 1` | `/rsp curve`, `/rsp exponent`, `/rsp outputcurve` | `1.00` | `0.25..10` | Shapes thrust output for non-detail/state layers. Detail active volume follows smoothed `cmd` linearly, so this should usually be ignored during detail-only testing. |
 | `/rsp smooth 100` | `/rsp smoothing` | `100` | `0..500` ms | Volume smoothing time. Higher values fade more slowly. |
 | `/rsp cmdsmooth 2000` | `/rsp commandsmooth`, `/rsp inputsmooth`, `/rsp thrustsmooth` | `2000` | `0..5000` ms | Linear input-to-detail-output slide. A value of `2000` means a full 0-to-100% keyboard command takes about two seconds to reach full detail volume and pitch. |
+| `/rsp emitterfade 120` | `/rsp emitterfadein`, `/rsp transitionfade`, `/rsp routefade`, `/rsp contactfade` | `120` | `0..1000` ms | Short fade after V2 emitter starts or rebinds to a new cue, D2/D3 dimension, or filter. This is intended to hide transition pops without slowing the contact gate itself. |
 | `/rsp fade 0.04` | `/rsp softfade` | `0.040` | `0.001..0.25` | Soft fade width near zero thrust output. |
 
 ### Ship Scale
