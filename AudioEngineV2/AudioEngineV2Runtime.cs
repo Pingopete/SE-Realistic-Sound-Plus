@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using RealisticSoundPlus.Patches;
 using Sandbox.Game.Entities;
+using VRage.Game.Entity;
 using VRage.Utils;
 using VRageMath;
 
@@ -10,6 +11,8 @@ namespace RealisticSoundPlus.AudioEngineV2
     internal static class AudioEngineV2Runtime
     {
         private static readonly TimeSpan CensusInterval = TimeSpan.FromMilliseconds(50);
+        private static readonly TimeSpan EmptySourceDiscoveryInterval = TimeSpan.FromMilliseconds(750);
+        private static readonly TimeSpan SuppressionBypassLogInterval = TimeSpan.FromSeconds(3);
         private static readonly Dictionary<long, V2GridAudioState> GridStates = new Dictionary<long, V2GridAudioState>();
         private static readonly Dictionary<long, MyThrust> KnownThrusters = new Dictionary<long, MyThrust>();
         private static readonly HashSet<MyEntity3DSoundEmitter> V2Emitters = new HashSet<MyEntity3DSoundEmitter>();
@@ -27,6 +30,9 @@ namespace RealisticSoundPlus.AudioEngineV2
         private static int _lastCensusProcessed;
         private static int _lastCensusRemoved;
         private static DateTime _lastCensusUtc = DateTime.MinValue;
+        private static DateTime _lastEmptySourceDiscoveryUtc = DateTime.MinValue;
+        private static DateTime _lastSuppressionBypassLogUtc = DateTime.MinValue;
+        private static long _lastEmptySourceDiscoveryGridId;
         private static string _lastLoggedListenerMode;
         private static string _lastLoggedContactSource;
         private static long _lastLoggedListenerGridId;
@@ -56,6 +62,9 @@ namespace RealisticSoundPlus.AudioEngineV2
             _lastCensusProcessed = 0;
             _lastCensusRemoved = 0;
             _lastCensusUtc = DateTime.MinValue;
+            _lastEmptySourceDiscoveryUtc = DateTime.MinValue;
+            _lastSuppressionBypassLogUtc = DateTime.MinValue;
+            _lastEmptySourceDiscoveryGridId = 0L;
             _lastLoggedListenerMode = null;
             _lastLoggedContactSource = null;
             _lastLoggedListenerGridId = 0L;
@@ -83,6 +92,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             }
             else
             {
+                EnsureListenerGridThrustersKnown("update");
                 RefreshKnownThrustersIfDue();
             }
 
@@ -207,6 +217,16 @@ namespace RealisticSoundPlus.AudioEngineV2
 
             if (_listener.VanillaFallback)
                 return false;
+
+            if (!SettingsManager.Current.V2DetailEnabled && !SettingsManager.Current.V2StateEnabled)
+                return false;
+
+            EnsureListenerGridThrustersKnown("suppress");
+            if (!HasReplacementSourcesReady())
+            {
+                LogSuppressionBypass(cueName, "no-v2-sources");
+                return false;
+            }
 
             AudioDiagnostics.RecordCueName(cueName, "v2-vanilla-muted", emitter.VolumeMultiplier, 0f, 0f, 0f, emitter.SourcePosition);
             return true;
@@ -460,6 +480,101 @@ namespace RealisticSoundPlus.AudioEngineV2
 
             foreach (long id in stale)
                 KnownThrusters.Remove(id);
+        }
+
+        private static void EnsureListenerGridThrustersKnown(string reason)
+        {
+            if (!_hasListener || _listener.VanillaFallback || _listener.GridEntityId == 0L)
+                return;
+
+            if (KnownThrusters.Count > 0)
+                return;
+
+            DateTime now = DateTime.UtcNow;
+            if (_lastEmptySourceDiscoveryGridId == _listener.GridEntityId && now - _lastEmptySourceDiscoveryUtc < EmptySourceDiscoveryInterval)
+                return;
+
+            _lastEmptySourceDiscoveryUtc = now;
+            _lastEmptySourceDiscoveryGridId = _listener.GridEntityId;
+
+            if (!TryGetGridById(_listener.GridEntityId, out MyCubeGrid grid))
+            {
+                V2DebugLog.WriteEvent("source-census", "reason=" + reason + " grid=" + _listener.GridEntityId + " result=grid-missing");
+                return;
+            }
+
+            int found = 0;
+            int acceptedBefore = _censusThrusterReports;
+            try
+            {
+                foreach (MyThrust thruster in grid.GetFatBlocks<MyThrust>())
+                {
+                    found++;
+                    RememberThruster(thruster);
+                    ProcessThruster(thruster, true);
+                }
+            }
+            catch (Exception ex)
+            {
+                V2DebugLog.WriteEvent("source-census", "reason=" + reason + " grid=" + grid.EntityId + " result=failed " + ex.Message);
+                return;
+            }
+
+            V2DebugLog.WriteEvent("source-census", string.Format(
+                System.Globalization.CultureInfo.InvariantCulture,
+                "reason={0} grid={1} found={2} accepted={3} known={4} states={5}",
+                reason,
+                grid.EntityId,
+                found,
+                _censusThrusterReports - acceptedBefore,
+                KnownThrusters.Count,
+                GridStates.Count));
+        }
+
+        private static bool TryGetGridById(long gridId, out MyCubeGrid grid)
+        {
+            grid = null;
+            if (gridId == 0L)
+                return false;
+
+            try
+            {
+                MyEntity entity;
+                if (!MyEntities.TryGetEntityById(gridId, out entity))
+                    return false;
+
+                grid = entity as MyCubeGrid;
+                return grid != null;
+            }
+            catch (Exception ex)
+            {
+                V2DebugLog.WriteEvent("source-census", "grid lookup failed id=" + gridId + " " + ex.Message);
+                return false;
+            }
+        }
+
+        private static bool HasReplacementSourcesReady()
+        {
+            return KnownThrusters.Count > 0 || V2Emitters.Count > 0;
+        }
+
+        private static void LogSuppressionBypass(string cueName, string reason)
+        {
+            DateTime now = DateTime.UtcNow;
+            if (now - _lastSuppressionBypassLogUtc < SuppressionBypassLogInterval)
+                return;
+
+            _lastSuppressionBypassLogUtc = now;
+            V2DebugLog.WriteEvent("vanilla-suppress-bypass", string.Format(
+                System.Globalization.CultureInfo.InvariantCulture,
+                "cue={0} reason={1} mode={2} grid={3} known={4} states={5} emit={6}",
+                cueName ?? "?",
+                reason ?? "?",
+                _listener.ModeName ?? "?",
+                _listener.GridEntityId,
+                KnownThrusters.Count,
+                GridStates.Count,
+                V2Emitters.Count));
         }
 
         private static void StopAllEmitters()

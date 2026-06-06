@@ -27,6 +27,7 @@ namespace RealisticSoundPlus.AudioEngineV2
         private const float DetailActiveCueOnThreshold = 0.12f;
         private const float CurrentOutputAudibleThreshold = 0.015f;
         private const float CurrentOutputNonSeatThreshold = 0.08f;
+        private const double DetailSilentReleaseMs = 1500.0;
 
         private readonly DirectionState[] _directions = new DirectionState[6];
         private DateTime _lastUpdateUtc = DateTime.MinValue;
@@ -372,8 +373,8 @@ namespace RealisticSoundPlus.AudioEngineV2
                 string idleRoute = string.Format(System.Globalization.CultureInfo.InvariantCulture, "v2-detail-{0}-idle/{1}/{2} raw={3:0.00} cmd={4:0.00}", _direction, idleVariant, snapshot.DetailLoadSource ?? "?", rawDetailCommand, detailCommand);
                 string activeRoute = string.Format(System.Globalization.CultureInfo.InvariantCulture, "v2-detail-{0}-active/{1}/{2} raw={3:0.00} cmd={4:0.00} out={5:0.00} pitch={6:0.00}", _direction, activeVariant, snapshot.DetailLoadSource ?? "?", rawDetailCommand, detailCommand, activeInput, activePitch);
                 V2FilterRoute detailFilterRoute = listener.InsideShip ? V2FilterRoute.Internal : V2FilterRoute.External;
-                UpdateLayer(ref _detailIdle, ref _detailIdleValue, ref _lastDetailIdleUpdateUtc, snapshot.Anchor, snapshot.Position, idleDetailPlayable ? snapshot.IdleDetailCue : null, idleDetailTarget, V2AudioLayer.Detail, idleDetail2DPositional, idleDetail2DPositional, detailFilterRoute, idleRoute);
-                UpdateLayer(ref _detailActive, ref _detailActiveValue, ref _lastDetailActiveUpdateUtc, snapshot.Anchor, snapshot.Position, activeDetailPlayable ? snapshot.ActiveDetailCue : null, activeDetailTarget, V2AudioLayer.Detail, activeDetail2DPositional, activeDetail2DPositional, detailFilterRoute, activeRoute, false, false, activePitch);
+                UpdateLayer(ref _detailIdle, ref _detailIdleValue, ref _lastDetailIdleUpdateUtc, snapshot.Anchor, snapshot.Position, idleDetailPlayable ? snapshot.IdleDetailCue : null, idleDetailTarget, V2AudioLayer.Detail, idleDetail2DPositional, idleDetail2DPositional, detailFilterRoute, idleRoute, holdSilent: true);
+                UpdateLayer(ref _detailActive, ref _detailActiveValue, ref _lastDetailActiveUpdateUtc, snapshot.Anchor, snapshot.Position, activeDetailPlayable ? snapshot.ActiveDetailCue : null, activeDetailTarget, V2AudioLayer.Detail, activeDetail2DPositional, activeDetail2DPositional, detailFilterRoute, activeRoute, pitch: activePitch, holdSilent: true);
                 bool state2D = listener.InsideShip;
                 bool state2DPositional = state2D && settings.V2State2DPositionalTest;
                 UpdateLayer(ref _state, ref _stateValue, ref _lastStateUpdateUtc, snapshot.Anchor, snapshot.Position, stateCue, stateTarget, V2AudioLayer.State, state2D, state2DPositional, state2D ? V2FilterRoute.Internal : V2FilterRoute.External);
@@ -541,14 +542,25 @@ namespace RealisticSoundPlus.AudioEngineV2
                 return _knownPosition;
             }
 
-            private void UpdateLayer(ref LayerEmitter emitter, ref float value, ref DateTime lastUpdateUtc, MyThrust anchor, Vector3D position, string cueName, float target, V2AudioLayer layer, bool force2D, bool force2DPositional, V2FilterRoute filterRoute, string diagnosticRoute = null, bool startMuted = false, bool keepAliveAtZero = false, float pitch = 1f)
+            private void UpdateLayer(ref LayerEmitter emitter, ref float value, ref DateTime lastUpdateUtc, MyThrust anchor, Vector3D position, string cueName, float target, V2AudioLayer layer, bool force2D, bool force2DPositional, V2FilterRoute filterRoute, string diagnosticRoute = null, bool startMuted = false, bool keepAliveAtZero = false, float pitch = 1f, bool holdSilent = false)
             {
                 value = Smooth(value, target, ref lastUpdateUtc, SettingsManager.Current.V2SmoothingMs);
                 bool canPlay = anchor != null && !string.IsNullOrWhiteSpace(cueName);
-                if (!canPlay || (value <= StartThreshold && !keepAliveAtZero))
+                if (!canPlay)
                 {
                     emitter?.SetVolume(0f);
                     emitter?.Stop();
+                    return;
+                }
+
+                if (value <= StartThreshold && !keepAliveAtZero)
+                {
+                    if (emitter == null)
+                        return;
+
+                    emitter.SetVolume(0f);
+                    if (!holdSilent || emitter.ShouldStopAfterSilence(DateTime.UtcNow, DetailSilentReleaseMs))
+                        emitter.Stop();
                     return;
                 }
 
@@ -724,6 +736,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             private string _filterEffectSubtype;
             private string _filterEffectSignature;
             private DateTime _rebindFadeStartUtc = DateTime.MinValue;
+            private DateTime _silentSinceUtc = DateTime.MinValue;
             private float _pitch = 1f;
 
             public LayerEmitter(MyThrust anchor, V2AudioLayer layer, V2ThrustDirectionGroup direction)
@@ -816,9 +829,21 @@ namespace RealisticSoundPlus.AudioEngineV2
 
             public void SetVolume(float volume)
             {
-                Emitter.VolumeMultiplier = Clamp(volume, 0f, MaxLayerVolume) * CalculateRebindGain();
+                float clampedVolume = Clamp(volume, 0f, MaxLayerVolume);
+                if (clampedVolume > StartThreshold)
+                    _silentSinceUtc = DateTime.MinValue;
+
+                Emitter.VolumeMultiplier = clampedVolume * CalculateRebindGain();
                 Emitter.Update();
                 Emitter.FastUpdate(false);
+            }
+
+            public bool ShouldStopAfterSilence(DateTime now, double graceMs)
+            {
+                if (_silentSinceUtc == DateTime.MinValue)
+                    _silentSinceUtc = now;
+
+                return (now - _silentSinceUtc).TotalMilliseconds >= graceMs;
             }
 
             private void MuteBeforeRebind()
@@ -891,6 +916,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                 {
                     IsPlaying = false;
                     _cueName = null;
+                    _silentSinceUtc = DateTime.MinValue;
                 }
             }
 
