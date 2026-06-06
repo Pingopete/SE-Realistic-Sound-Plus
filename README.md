@@ -230,9 +230,9 @@ Settings are saved to `%APPDATA%\SpaceEngineers\RealisticSoundPlus.xml` and hot-
 | `/rsp atmfloor 0.5` | `/rsp atmospherefloor`, `/rsp atmosphericfloor` | `0.50` | `0..1` | Amount of muffling retained at full planetary air density while inside. |
 | `/rsp filter deep` | `/rsp externalfilter`, `/rsp extfilter` | `deep` | options | Selects the exterior low-pass effect for outside/on-hull V2 detail emitters. Options: `off`, `helmet`, `cockpit`, `cockpitnooxy`, `realship`, `deep`, `filter1`, `filter2`. |
 | `/rsp internalfilter off` | `/rsp intfilter`, `/rsp insidefilter` | `off` | options | Selects the independent inside/local low-pass effect for inside D2/local detail and state emitters. Same options as `/rsp filter`. |
-| `/rsp filter1freq 300` | `/rsp filter1frequency`, `/rsp f1freq` | `300` | `20..20000` Hz | Sets custom low-pass filter 1 cutoff frequency. Emitters using `filter1` rebind live. |
+| `/rsp filter1freq 300` | `/rsp filter1frequency`, `/rsp f1freq` | `300` | `20..7350` Hz | Sets custom low-pass filter 1 cutoff frequency. Emitters using `filter1` rebind live. Values above the runtime-safe range are clamped. |
 | `/rsp filter1q 0.7` | `/rsp f1q` | `0.70` | `0.1..10` | Sets custom low-pass filter 1 Q value. |
-| `/rsp filter2freq 1200` | `/rsp filter2frequency`, `/rsp f2freq` | `1200` | `20..20000` Hz | Sets custom low-pass filter 2 cutoff frequency. Emitters using `filter2` rebind live. |
+| `/rsp filter2freq 1200` | `/rsp filter2frequency`, `/rsp f2freq` | `1200` | `20..7350` Hz | Sets custom low-pass filter 2 cutoff frequency. Emitters using `filter2` rebind live. Values above the runtime-safe range are clamped. |
 | `/rsp filter2q 0.7` | `/rsp f2q` | `0.70` | `0.1..10` | Sets custom low-pass filter 2 Q value. |
 
 ### Debug And Utility

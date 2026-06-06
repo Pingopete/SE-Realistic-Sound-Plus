@@ -390,7 +390,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                 string activeRoute = string.Format(System.Globalization.CultureInfo.InvariantCulture, "v2-detail-{0}-active/{1}/{2} raw={3:0.00} cmd={4:0.00} out={5:0.00} pitch={6:0.00}", _direction, activeVariant, snapshot.DetailLoadSource ?? "?", rawDetailCommand, detailCommand, activeInput, activePitch);
                 V2FilterRoute detailFilterRoute = listener.InsideShip ? V2FilterRoute.Internal : V2FilterRoute.External;
                 UpdateLayer(ref _detailIdle, ref _detailIdleValue, ref _lastDetailIdleUpdateUtc, snapshot.Anchor, snapshot.Position, idleDetailPlayable ? snapshot.IdleDetailCue : null, idleDetailTarget, V2AudioLayer.Detail, idleDetail2DPositional, idleDetail2DPositional, detailFilterRoute, idleRoute, holdSilent: true);
-                UpdateLayer(ref _detailActive, ref _detailActiveValue, ref _lastDetailActiveUpdateUtc, snapshot.Anchor, snapshot.Position, activeDetailPlayable ? snapshot.ActiveDetailCue : null, activeDetailTarget, V2AudioLayer.Detail, activeDetail2DPositional, activeDetail2DPositional, detailFilterRoute, activeRoute, pitch: activePitch, holdSilent: true);
+                UpdateLayer(ref _detailActive, ref _detailActiveValue, ref _lastDetailActiveUpdateUtc, snapshot.Anchor, snapshot.Position, activeDetailPlayable ? snapshot.ActiveDetailCue : null, activeDetailTarget, V2AudioLayer.Detail, activeDetail2DPositional, activeDetail2DPositional, detailFilterRoute, activeRoute, keepAliveAtZero: true, pitch: activePitch);
                 bool state2D = listener.InsideShip;
                 bool state2DPositional = state2D && settings.V2State2DPositionalTest;
                 UpdateLayer(ref _state, ref _stateValue, ref _lastStateUpdateUtc, snapshot.Anchor, snapshot.Position, stateCue, stateTarget, V2AudioLayer.State, state2D, state2DPositional, state2D ? V2FilterRoute.Internal : V2FilterRoute.External);
@@ -601,19 +601,19 @@ namespace RealisticSoundPlus.AudioEngineV2
                     return;
                 }
 
-                if (value <= StartThreshold && !keepAliveAtZero)
+                if (value <= StartThreshold)
                 {
                     if (emitter == null)
                         return;
 
                     emitter.SetVolume(0f);
+                    if (keepAliveAtZero)
+                        return;
+
                     if (!holdSilent || emitter.ShouldStopAfterSilence(DateTime.UtcNow, DetailSilentReleaseMs))
                         emitter.Stop();
                     return;
                 }
-
-                if (value <= StartThreshold)
-                    value = 0f;
 
                 bool firstStart = emitter == null;
                 if (firstStart)
@@ -909,13 +909,16 @@ namespace RealisticSoundPlus.AudioEngineV2
                     LastStage = "play";
                     bool started = Emitter.PlaySound(pair, true, false, force2D, false, false, force3D, false);
                     IsPlaying = started;
+                    if (started)
+                        MuteBeforeRebind();
                     V2DebugLog.WriteEvent("emitter-start", string.Format(
                         System.Globalization.CultureInfo.InvariantCulture,
-                        "{0} cue={1} started={2} vol={3:0.00} force2d={4} force3d={5} filter={6} effect={7} rebind={8} gen={9} pos={10:0.0},{11:0.0},{12:0.0}",
+                        "{0} cue={1} started={2} requested={3:0.000} actual={4:0.000} force2d={5} force3d={6} filter={7} effect={8} rebind={9} gen={10} pos={11:0.0},{12:0.0},{13:0.0}",
                         RouteName,
                         cueName,
                         started ? "Y" : "N",
                         volume,
+                        Emitter.VolumeMultiplier,
                         force2D ? "Y" : "N",
                         force3D ? "Y" : "N",
                         filterRoute,
