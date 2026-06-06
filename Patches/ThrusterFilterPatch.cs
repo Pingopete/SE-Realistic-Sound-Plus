@@ -40,7 +40,8 @@ namespace RealisticSoundPlus.Patches
                 if (!engineAudio)
                     return;
 
-                if (ExteriorSoundTransmission.CalculateEffectiveMufflingStrength(__instance.SourcePosition) <= 0f)
+                bool v2Emitter = AudioEngineV2Runtime.IsV2Emitter(__instance);
+                if (!v2Emitter && ExteriorSoundTransmission.CalculateEffectiveMufflingStrength(__instance.SourcePosition) <= 0f)
                 {
                     __result = MyStringHash.NullOrEmpty;
                     AudioDiagnostics.RecordEmitter(__instance, "filter-off", __instance.VolumeMultiplier, 1f, 1f, __instance.VolumeMultiplier, __instance.SourcePosition);
