@@ -12,9 +12,12 @@ namespace RealisticSoundPlus.AudioEngineV2
         public const string Filter1Subtype = "RSPFilter1";
         public const string Filter2Subtype = "RSPFilter2";
         public const float MinFilterFrequency = 20f;
-        public const float MaxFilterFrequency = 20000f;
+        public const float MaxFilterFrequency = 7350f;
         public const float MinFilterQ = 0.1f;
-        public const float MaxFilterQ = 1.5f;
+        public const float MaxFilterQ = 10f;
+        private const float XAudioFilterSampleRate = 44100f;
+        private const float MaxXAudioFilterFrequency = 1f;
+        private const float MaxXAudioOneOverQ = 1.5f;
 
         private const BindingFlags StaticMembers = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
         private const BindingFlags InstanceMembers = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
@@ -116,12 +119,14 @@ namespace RealisticSoundPlus.AudioEngineV2
             MyStringHash effectId = MyStringHash.GetOrCompute(subtype);
             float sanitizedFrequency = SanitizeFrequency(frequency);
             float sanitizedQ = SanitizeQ(q);
-            object effect = TryCreateFromTemplate(effects, effectId, sanitizedFrequency, sanitizedQ)
-                ?? CreateEffect(effectId, sanitizedFrequency, sanitizedQ);
+            float xAudioFrequency = ToXAudioFrequency(sanitizedFrequency);
+            float xAudioOneOverQ = ToXAudioOneOverQ(sanitizedQ);
+            object effect = TryCreateFromTemplate(effects, effectId, xAudioFrequency, xAudioOneOverQ)
+                ?? CreateEffect(effectId, xAudioFrequency, xAudioOneOverQ);
             effects[effectId] = effect;
         }
 
-        private static object TryCreateFromTemplate(IDictionary effects, MyStringHash effectId, float frequency, float q)
+        private static object TryCreateFromTemplate(IDictionary effects, MyStringHash effectId, float xAudioFrequency, float xAudioOneOverQ)
         {
             if (effects == null)
                 return null;
@@ -142,7 +147,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                 MyAudioEffect clone = new MyAudioEffect();
                 EffectIdField.SetValue(clone, effectId);
                 ResultEmitterIdxField.SetValue(clone, ResultEmitterIdxField.GetValue(template));
-                SoundsEffectsField.SetValue(clone, CloneSoundEffectsList(SoundsEffectsField.GetValue(template), frequency, q));
+                SoundsEffectsField.SetValue(clone, CloneSoundEffectsList(SoundsEffectsField.GetValue(template), xAudioFrequency, xAudioOneOverQ));
                 return clone;
             }
             catch (Exception ex)
@@ -152,22 +157,22 @@ namespace RealisticSoundPlus.AudioEngineV2
             }
         }
 
-        private static object CreateEffect(MyStringHash effectId, float frequency, float q)
+        private static object CreateEffect(MyStringHash effectId, float xAudioFrequency, float xAudioOneOverQ)
         {
             MyAudioEffect effect = new MyAudioEffect();
             EffectIdField.SetValue(effect, effectId);
             ResultEmitterIdxField.SetValue(effect, 0);
-            SoundsEffectsField.SetValue(effect, CreateSoundEffectsList(frequency, q));
+            SoundsEffectsField.SetValue(effect, CreateSoundEffectsList(xAudioFrequency, xAudioOneOverQ));
             return effect;
         }
 
-        private static object CreateSoundEffectsList(float frequency, float q)
+        private static object CreateSoundEffectsList(float xAudioFrequency, float xAudioOneOverQ)
         {
             object soundEffect = Activator.CreateInstance(SoundEffectType);
             DurationField.SetValue(soundEffect, 0f);
             FilterField.SetValue(soundEffect, Enum.Parse(FilterField.FieldType, "LowPass"));
-            FrequencyField.SetValue(soundEffect, frequency);
-            OneOverQField.SetValue(soundEffect, q);
+            FrequencyField.SetValue(soundEffect, xAudioFrequency);
+            OneOverQField.SetValue(soundEffect, xAudioOneOverQ);
             StopAfterField?.SetValue(soundEffect, false);
 
             Type innerListType = typeof(System.Collections.Generic.List<>).MakeGenericType(SoundEffectType);
@@ -180,7 +185,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             return outerList;
         }
 
-        private static object CloneSoundEffectsList(object sourceList, float frequency, float q)
+        private static object CloneSoundEffectsList(object sourceList, float xAudioFrequency, float xAudioOneOverQ)
         {
             Type innerListType = typeof(System.Collections.Generic.List<>).MakeGenericType(SoundEffectType);
             Type outerListType = typeof(System.Collections.Generic.List<>).MakeGenericType(innerListType);
@@ -201,7 +206,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                             object clonedEffect = CloneSoundEffect(sourceEffect);
                             if (!replacedFirst)
                             {
-                                ConfigureLowPass(clonedEffect, frequency, q);
+                                ConfigureLowPass(clonedEffect, xAudioFrequency, xAudioOneOverQ);
                                 replacedFirst = true;
                             }
 
@@ -215,10 +220,10 @@ namespace RealisticSoundPlus.AudioEngineV2
             }
 
             if (outerList.Count == 0)
-                return CreateSoundEffectsList(frequency, q);
+                return CreateSoundEffectsList(xAudioFrequency, xAudioOneOverQ);
 
             if (!replacedFirst)
-                ((IList)outerList[0]).Add(CreateLowPassSoundEffect(frequency, q));
+                ((IList)outerList[0]).Add(CreateLowPassSoundEffect(xAudioFrequency, xAudioOneOverQ));
 
             return outerList;
         }
@@ -235,19 +240,19 @@ namespace RealisticSoundPlus.AudioEngineV2
             return clonedEffect;
         }
 
-        private static object CreateLowPassSoundEffect(float frequency, float q)
+        private static object CreateLowPassSoundEffect(float xAudioFrequency, float xAudioOneOverQ)
         {
             object soundEffect = Activator.CreateInstance(SoundEffectType);
-            ConfigureLowPass(soundEffect, frequency, q);
+            ConfigureLowPass(soundEffect, xAudioFrequency, xAudioOneOverQ);
             return soundEffect;
         }
 
-        private static void ConfigureLowPass(object soundEffect, float frequency, float q)
+        private static void ConfigureLowPass(object soundEffect, float xAudioFrequency, float xAudioOneOverQ)
         {
             DurationField.SetValue(soundEffect, 0f);
             FilterField.SetValue(soundEffect, Enum.Parse(FilterField.FieldType, "LowPass"));
-            FrequencyField.SetValue(soundEffect, frequency);
-            OneOverQField.SetValue(soundEffect, q);
+            FrequencyField.SetValue(soundEffect, xAudioFrequency);
+            OneOverQField.SetValue(soundEffect, xAudioOneOverQ);
             StopAfterField?.SetValue(soundEffect, false);
         }
 
@@ -285,15 +290,17 @@ namespace RealisticSoundPlus.AudioEngineV2
             float filter2Q = SanitizeQ(settings.Filter2Q);
             return string.Format(
                 CultureInfo.InvariantCulture,
-                "{0} freq={1:0.###} q={2:0.###} oneOverQ={3:0.###}; {4} freq={5:0.###} q={6:0.###} oneOverQ={7:0.###}",
+                "{0} cutoffHz={1:0.###} xfreq={2:0.######} q={3:0.###} oneOverQ={4:0.###}; {5} cutoffHz={6:0.###} xfreq={7:0.######} q={8:0.###} oneOverQ={9:0.###}",
                 Filter1Subtype,
                 filter1Frequency,
+                ToXAudioFrequency(filter1Frequency),
                 filter1Q,
-                filter1Q,
+                ToXAudioOneOverQ(filter1Q),
                 Filter2Subtype,
                 filter2Frequency,
+                ToXAudioFrequency(filter2Frequency),
                 filter2Q,
-                filter2Q);
+                ToXAudioOneOverQ(filter2Q));
         }
 
         public static float SanitizeFrequency(float frequency)
@@ -304,6 +311,20 @@ namespace RealisticSoundPlus.AudioEngineV2
         public static float SanitizeQ(float q)
         {
             return Math.Max(MinFilterQ, Math.Min(MaxFilterQ, q));
+        }
+
+        private static float ToXAudioFrequency(float cutoffHz)
+        {
+            float sanitized = SanitizeFrequency(cutoffHz);
+            float value = (float)(2.0 * Math.Sin(Math.PI * sanitized / XAudioFilterSampleRate));
+            return Math.Max(0.0001f, Math.Min(MaxXAudioFilterFrequency, value));
+        }
+
+        private static float ToXAudioOneOverQ(float q)
+        {
+            float sanitized = SanitizeQ(q);
+            float value = 1f / Math.Max(0.0001f, sanitized);
+            return Math.Max(0.0001f, Math.Min(MaxXAudioOneOverQ, value));
         }
 
         private static string DescribeEffect(IDictionary effects, string subtype)
@@ -349,7 +370,7 @@ namespace RealisticSoundPlus.AudioEngineV2
 
                     builder.AppendFormat(
                         CultureInfo.InvariantCulture,
-                        "g{0}e{1} dur={2} filter={3} freq={4} q={5} stop={6} curve={7}",
+                        "g{0}e{1} dur={2} filter={3} xfreq={4} oneOverQ={5} stop={6} curve={7}",
                         groupIndex,
                         effectIndex,
                         DurationField.GetValue(effect),
