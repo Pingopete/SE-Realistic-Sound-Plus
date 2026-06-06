@@ -490,12 +490,15 @@ namespace RealisticSoundPlus.AudioEngineV2
                         _contributors.Remove(thruster);
                 }
 
-                MyThrust anchor = _knownAnchor ?? strongestGeometryThruster ?? strongestThruster;
+                MyThrust anchor = strongestGeometryThruster ?? strongestThruster ?? _knownAnchor;
+                Vector3D knownPosition = TryGetKnownLivePosition(out Vector3D liveKnownPosition)
+                    ? liveKnownPosition
+                    : _knownPosition;
                 Vector3D position = totalWeight > 0f
                     ? weightedPosition / totalWeight
                     : (totalGeometryWeight > 0f
                         ? geometryWeightedPosition / totalGeometryWeight
-                        : (_hasKnownSource ? _knownPosition : (grid?.WorldMatrix.Translation ?? _lastPosition)));
+                        : (_hasKnownSource ? knownPosition : (grid?.WorldMatrix.Translation ?? _lastPosition)));
                 string activeDetailCue = strongestActiveDetailCue ?? strongestGeometryActiveDetailCue ?? _knownActiveDetailCue ?? _knownIdleDetailCue;
                 string idleDetailCue = strongestGeometryIdleDetailCue ?? _knownIdleDetailCue ?? strongestGeometryActiveDetailCue ?? _knownActiveDetailCue;
                 string loadSource = strongestLoadSource ?? strongestGeometryLoadSource ?? "none";
@@ -520,9 +523,13 @@ namespace RealisticSoundPlus.AudioEngineV2
                     return;
 
                 bool firstKnownSource = !_hasKnownSource || _knownAnchor == null || _knownPosition == Vector3D.Zero;
+                bool sameKnownAnchor = _knownAnchor != null && ReferenceEquals(_knownAnchor, thruster);
                 _hasKnownSource = true;
                 _lastKnownUtc = now;
                 _lastPosition = position;
+
+                if (sameKnownAnchor)
+                    _knownPosition = position;
 
                 if (firstKnownSource || geometryWeight > _knownGeometryWeight + 0.0001f)
                 {
@@ -534,8 +541,33 @@ namespace RealisticSoundPlus.AudioEngineV2
                 }
             }
 
+            private bool TryGetKnownLivePosition(out Vector3D position)
+            {
+                position = Vector3D.Zero;
+                try
+                {
+                    if (_knownAnchor == null || _knownAnchor.CubeGrid == null)
+                        return false;
+
+                    position = _knownAnchor.WorldMatrix.Translation;
+                    if (position == Vector3D.Zero)
+                        return false;
+
+                    _knownPosition = position;
+                    _lastPosition = position;
+                    return true;
+                }
+                catch
+                {
+                    return false;
+                }
+            }
+
             private Vector3D GetBestDebugPosition()
             {
+                if (TryGetKnownLivePosition(out Vector3D liveKnownPosition))
+                    return liveKnownPosition;
+
                 if (_lastPosition != Vector3D.Zero)
                     return _lastPosition;
 
@@ -737,6 +769,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             private string _filterEffectSignature;
             private DateTime _rebindFadeStartUtc = DateTime.MinValue;
             private DateTime _silentSinceUtc = DateTime.MinValue;
+            private int _bindingGeneration = -1;
             private float _pitch = 1f;
 
             public LayerEmitter(MyThrust anchor, V2AudioLayer layer, V2ThrustDirectionGroup direction)
@@ -782,12 +815,15 @@ namespace RealisticSoundPlus.AudioEngineV2
                 AudioEngineV2Runtime.RegisterEmitter(Emitter, filterRoute);
                 string filterEffectSubtype = AudioEngineV2Runtime.GetEngineFilterEffectSubtype(Emitter) ?? string.Empty;
                 string filterEffectSignature = AudioEngineV2Runtime.GetEngineFilterEffectSignature(Emitter) ?? filterEffectSubtype;
+                int bindingGeneration = AudioEngineV2Runtime.EmitterBindingGeneration;
                 bool filterChanged = _filterRoute != filterRoute || !string.Equals(_filterEffectSignature, filterEffectSignature, StringComparison.OrdinalIgnoreCase);
+                bool bindingChanged = _bindingGeneration != bindingGeneration;
                 bool needsRebind = !IsPlaying
                     || !string.Equals(_cueName, cueName, StringComparison.OrdinalIgnoreCase)
                     || _force2D != force2D
                     || _force3D != force3D
-                    || filterChanged;
+                    || filterChanged
+                    || bindingChanged;
 
                 if (needsRebind)
                 {
@@ -801,6 +837,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                     _filterRoute = filterRoute;
                     _filterEffectSubtype = filterEffectSubtype;
                     _filterEffectSignature = filterEffectSignature;
+                    _bindingGeneration = bindingGeneration;
                     _rebindFadeStartUtc = DateTime.UtcNow;
                     MySoundPair pair = new MySoundPair(cueName, false);
                     MyEntity3DSoundEmitter.PreloadSound(pair);
@@ -808,7 +845,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                     IsPlaying = started;
                     V2DebugLog.WriteEvent("emitter-start", string.Format(
                         System.Globalization.CultureInfo.InvariantCulture,
-                        "{0} cue={1} started={2} vol={3:0.00} force2d={4} force3d={5} filter={6} effect={7} rebind={8} pos={9:0.0},{10:0.0},{11:0.0}",
+                        "{0} cue={1} started={2} vol={3:0.00} force2d={4} force3d={5} filter={6} effect={7} rebind={8} gen={9} pos={10:0.0},{11:0.0},{12:0.0}",
                         RouteName,
                         cueName,
                         started ? "Y" : "N",
@@ -817,7 +854,8 @@ namespace RealisticSoundPlus.AudioEngineV2
                         force3D ? "Y" : "N",
                         filterRoute,
                         string.IsNullOrEmpty(filterEffectSignature) ? "none" : filterEffectSignature,
-                        filterChanged ? "filter" : "cue",
+                        bindingChanged ? "binding" : (filterChanged ? "filter" : "cue"),
+                        bindingGeneration,
                         position.X,
                         position.Y,
                         position.Z));

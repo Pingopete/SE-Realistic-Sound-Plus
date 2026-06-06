@@ -13,6 +13,7 @@ namespace RealisticSoundPlus.AudioEngineV2
         private static readonly TimeSpan CensusInterval = TimeSpan.FromMilliseconds(50);
         private static readonly TimeSpan EmptySourceDiscoveryInterval = TimeSpan.FromMilliseconds(750);
         private static readonly TimeSpan SuppressionBypassLogInterval = TimeSpan.FromSeconds(3);
+        private const int MinimumKnownThrustersBeforeGridCensus = 6;
         private static readonly Dictionary<long, V2GridAudioState> GridStates = new Dictionary<long, V2GridAudioState>();
         private static readonly Dictionary<long, MyThrust> KnownThrusters = new Dictionary<long, MyThrust>();
         private static readonly HashSet<MyEntity3DSoundEmitter> V2Emitters = new HashSet<MyEntity3DSoundEmitter>();
@@ -33,6 +34,8 @@ namespace RealisticSoundPlus.AudioEngineV2
         private static DateTime _lastEmptySourceDiscoveryUtc = DateTime.MinValue;
         private static DateTime _lastSuppressionBypassLogUtc = DateTime.MinValue;
         private static long _lastEmptySourceDiscoveryGridId;
+        private static int _emitterBindingGeneration;
+        private static string _lastEmitterBindingSignature;
         private static string _lastLoggedListenerMode;
         private static string _lastLoggedContactSource;
         private static long _lastLoggedListenerGridId;
@@ -41,6 +44,8 @@ namespace RealisticSoundPlus.AudioEngineV2
         private static bool _lastLoggedVanillaFallback;
 
         public static V2AudioListenerState Listener => _listener;
+
+        public static int EmitterBindingGeneration => _emitterBindingGeneration;
 
         public static void ResetForSession(string reason)
         {
@@ -65,6 +70,8 @@ namespace RealisticSoundPlus.AudioEngineV2
             _lastEmptySourceDiscoveryUtc = DateTime.MinValue;
             _lastSuppressionBypassLogUtc = DateTime.MinValue;
             _lastEmptySourceDiscoveryGridId = 0L;
+            _emitterBindingGeneration = 0;
+            _lastEmitterBindingSignature = null;
             _lastLoggedListenerMode = null;
             _lastLoggedContactSource = null;
             _lastLoggedListenerGridId = 0L;
@@ -81,6 +88,7 @@ namespace RealisticSoundPlus.AudioEngineV2
         public static void Update()
         {
             RspDynamicAudioFilters.UpdateFromSettings(SettingsManager.Current);
+            TrackEmitterBindingSignature();
             _listener = V2AudioListenerState.Capture();
             _hasListener = true;
             LogListenerTransitionIfChanged(_listener);
@@ -487,7 +495,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             if (!_hasListener || _listener.VanillaFallback || _listener.GridEntityId == 0L)
                 return;
 
-            if (KnownThrusters.Count > 0)
+            if (KnownThrusters.Count >= MinimumKnownThrustersBeforeGridCensus)
                 return;
 
             DateTime now = DateTime.UtcNow;
@@ -556,6 +564,29 @@ namespace RealisticSoundPlus.AudioEngineV2
         private static bool HasReplacementSourcesReady()
         {
             return KnownThrusters.Count > 0 || V2Emitters.Count > 0;
+        }
+
+        private static void TrackEmitterBindingSignature()
+        {
+            string signature = (SettingsManager.GetEngineFilterEffectSignature() ?? string.Empty)
+                + "|"
+                + (SettingsManager.GetInternalEngineFilterEffectSignature() ?? string.Empty);
+
+            if (string.Equals(_lastEmitterBindingSignature, signature, StringComparison.Ordinal))
+                return;
+
+            string previous = _lastEmitterBindingSignature;
+            _lastEmitterBindingSignature = signature;
+            if (previous == null)
+                return;
+
+            _emitterBindingGeneration++;
+            V2DebugLog.WriteEvent("emitter-bindings", string.Format(
+                System.Globalization.CultureInfo.InvariantCulture,
+                "generation={0} old={1} new={2}",
+                _emitterBindingGeneration,
+                string.IsNullOrEmpty(previous) ? "none" : previous,
+                string.IsNullOrEmpty(signature) ? "none" : signature));
         }
 
         private static void LogSuppressionBypass(string cueName, string reason)
