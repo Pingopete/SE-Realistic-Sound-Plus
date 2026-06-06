@@ -11,6 +11,8 @@ namespace RealisticSoundPlus.Patches
     internal static class ThrusterFilterPatch
     {
         private static readonly HashSet<MyEntity3DSoundEmitter> KnownEngineCueEmitters = new HashSet<MyEntity3DSoundEmitter>();
+        private static readonly Dictionary<string, DateTime> LastFilterLogs = new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
+        private static readonly TimeSpan FilterLogInterval = TimeSpan.FromSeconds(2);
 
         private static bool _disabled;
         private static int _patchHits;
@@ -30,6 +32,7 @@ namespace RealisticSoundPlus.Patches
                 {
                     __result = MyStringHash.NullOrEmpty;
                     AudioDiagnostics.RecordEmitter(__instance, "v2-filter-skip", __instance.VolumeMultiplier, 1f, 1f, __instance.VolumeMultiplier, __instance.SourcePosition);
+                    LogFilterSelection(__instance, "skip", "none", "skip");
                     return;
                 }
 
@@ -41,6 +44,7 @@ namespace RealisticSoundPlus.Patches
                 {
                     __result = MyStringHash.NullOrEmpty;
                     AudioDiagnostics.RecordEmitter(__instance, "filter-off", __instance.VolumeMultiplier, 1f, 1f, __instance.VolumeMultiplier, __instance.SourcePosition);
+                    LogFilterSelection(__instance, AudioEngineV2Runtime.GetEmitterFilterRouteName(__instance), "none", "muffling-off");
                     return;
                 }
 
@@ -49,11 +53,14 @@ namespace RealisticSoundPlus.Patches
                 {
                     __result = MyStringHash.NullOrEmpty;
                     AudioDiagnostics.RecordEmitter(__instance, "filter-none", __instance.VolumeMultiplier, 1f, 1f, __instance.VolumeMultiplier, __instance.SourcePosition);
+                    LogFilterSelection(__instance, AudioEngineV2Runtime.GetEmitterFilterRouteName(__instance), "none", "setting-off");
                     return;
                 }
 
                 __result = MyStringHash.GetOrCompute(effectSubtype);
-                AudioDiagnostics.RecordEmitter(__instance, "filter", __instance.VolumeMultiplier, 1f, 1f, __instance.VolumeMultiplier, __instance.SourcePosition);
+                string filterRoute = AudioEngineV2Runtime.GetEmitterFilterRouteName(__instance);
+                AudioDiagnostics.RecordEmitter(__instance, "filter-" + filterRoute + "-" + effectSubtype, __instance.VolumeMultiplier, 1f, 1f, __instance.VolumeMultiplier, __instance.SourcePosition);
+                LogFilterSelection(__instance, filterRoute, effectSubtype, "selected");
 
                 if (++_patchHits == 1)
                     MyLog.Default.WriteLineAndConsole("[RealisticSoundPlus] Exterior audio low-pass filter override is active: " + effectSubtype);
@@ -68,6 +75,7 @@ namespace RealisticSoundPlus.Patches
         public static void ResetRuntimeState()
         {
             KnownEngineCueEmitters.Clear();
+            LastFilterLogs.Clear();
             _disabled = false;
             _patchHits = 0;
         }
@@ -95,6 +103,56 @@ namespace RealisticSoundPlus.Patches
         public static bool IsThrusterAudioEmitter(MyEntity3DSoundEmitter emitter)
         {
             return AudioEngineV2Runtime.IsV2Emitter(emitter);
+        }
+
+        private static void LogFilterSelection(MyEntity3DSoundEmitter emitter, string route, string effectSubtype, string reason)
+        {
+            if (emitter == null || !SettingsManager.Current.V2DebugLogEnabled)
+                return;
+
+            string cueName = DescribeCue(emitter);
+            string key = (route ?? "?") + "|" + (effectSubtype ?? "none") + "|" + cueName + "|" + reason;
+            DateTime now = DateTime.UtcNow;
+            if (LastFilterLogs.TryGetValue(key, out DateTime last) && now - last < FilterLogInterval)
+                return;
+
+            LastFilterLogs[key] = now;
+            V2DebugLog.WriteEvent("filter-select", string.Format(
+                System.Globalization.CultureInfo.InvariantCulture,
+                "route={0} effect={1} reason={2} cue={3} v={4:0.00} pos={5:0.0},{6:0.0},{7:0.0}",
+                route ?? "?",
+                string.IsNullOrEmpty(effectSubtype) ? "none" : effectSubtype,
+                reason ?? "?",
+                cueName,
+                emitter.VolumeMultiplier,
+                emitter.SourcePosition.X,
+                emitter.SourcePosition.Y,
+                emitter.SourcePosition.Z));
+        }
+
+        private static string DescribeCue(MyEntity3DSoundEmitter emitter)
+        {
+            try
+            {
+                string sound = emitter.Sound?.CueEnum.ToString();
+                if (!string.IsNullOrWhiteSpace(sound) && sound != "NullOrEmpty")
+                    return sound;
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                string soundId = emitter.SoundId.ToString();
+                if (!string.IsNullOrWhiteSpace(soundId) && soundId != "NullOrEmpty")
+                    return soundId;
+            }
+            catch
+            {
+            }
+
+            return "?";
         }
 
     }

@@ -193,19 +193,17 @@ namespace RealisticSoundPlus.AudioEngineV2
             if (emitter == null || string.IsNullOrWhiteSpace(cueName))
                 return false;
 
-            if (!_hasListener)
-            {
-                _listener = V2AudioListenerState.Capture();
-                _hasListener = true;
-            }
-
-            if (_listener.VanillaFallback)
-                return false;
-
             if (IsV2Emitter(emitter))
                 return false;
 
             if (!EngineAudioClassifier.IsKnownVanillaShipStateCue(cueName))
+                return false;
+
+            _listener = V2AudioListenerState.Capture();
+            _hasListener = true;
+            LogListenerTransitionIfChanged(_listener);
+
+            if (_listener.VanillaFallback)
                 return false;
 
             AudioDiagnostics.RecordCueName(cueName, "v2-vanilla-muted", emitter.VolumeMultiplier, 0f, 0f, 0f, emitter.SourcePosition);
@@ -295,6 +293,17 @@ namespace RealisticSoundPlus.AudioEngineV2
             }
 
             return SettingsManager.GetEngineFilterEffectSubtype();
+        }
+
+        public static string GetEmitterFilterRouteName(MyEntity3DSoundEmitter emitter)
+        {
+            if (emitter != null && V2EmitterFilterRoutes.TryGetValue(emitter, out V2FilterRoute route))
+                return route.ToString();
+
+            if (IsV2Emitter(emitter))
+                return "V2Unknown";
+
+            return "Vanilla";
         }
 
         private static bool TryGetSuppressibleVanillaCue(MyEntity3DSoundEmitter emitter, out string cueName)

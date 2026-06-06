@@ -790,7 +790,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                     _rebindFadeStartUtc = DateTime.UtcNow;
                     MySoundPair pair = new MySoundPair(cueName, false);
                     MyEntity3DSoundEmitter.PreloadSound(pair);
-                    bool started = Emitter.PlaySound(pair, true, false, force2D, true, false, force3D, true);
+                    bool started = Emitter.PlaySound(pair, true, false, force2D, false, false, force3D, true);
                     IsPlaying = started;
                     V2DebugLog.WriteEvent("emitter-start", string.Format(
                         System.Globalization.CultureInfo.InvariantCulture,

@@ -23,8 +23,22 @@ namespace RealisticSoundPlus.AudioEngineV2
         }
 
         [HarmonyPatch(typeof(MyEntity3DSoundEmitter), "Update", new Type[0])]
+        [HarmonyPrefix]
+        private static void BeforeEmitterUpdate(MyEntity3DSoundEmitter __instance)
+        {
+            AudioEngineV2Runtime.MuteVanillaShipCueIfNeeded(__instance);
+        }
+
+        [HarmonyPatch(typeof(MyEntity3DSoundEmitter), "Update", new Type[0])]
         [HarmonyPostfix]
         private static void AfterEmitterUpdate(MyEntity3DSoundEmitter __instance)
+        {
+            AudioEngineV2Runtime.MuteVanillaShipCueIfNeeded(__instance);
+        }
+
+        [HarmonyPatch(typeof(MyEntity3DSoundEmitter), "FastUpdate", new[] { typeof(bool) })]
+        [HarmonyPrefix]
+        private static void BeforeEmitterFastUpdate(MyEntity3DSoundEmitter __instance)
         {
             AudioEngineV2Runtime.MuteVanillaShipCueIfNeeded(__instance);
         }
