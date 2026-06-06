@@ -649,7 +649,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                             "{0} cue={1} route={2} filter={3} force2d={4} force3d={5} vol={6:0.000} pos={7:0.0},{8:0.0},{9:0.0} {10}",
                             layer,
                             cueName ?? "?",
-                            diagnosticRoute ?? "?",
+                            (diagnosticRoute ?? "?") + " stage=" + (emitter.LastStage ?? "?"),
                             filterRoute,
                             force2D ? "Y" : "N",
                             force3D ? "Y" : "N",
@@ -848,6 +848,8 @@ namespace RealisticSoundPlus.AudioEngineV2
 
             public float VolumeMultiplier => Emitter.VolumeMultiplier;
 
+            public string LastStage { get; private set; }
+
             public string RouteName
             {
                 get
@@ -860,12 +862,17 @@ namespace RealisticSoundPlus.AudioEngineV2
 
             public void Update(Vector3D position, string cueName, float volume, bool force2D, bool force3D, V2FilterRoute filterRoute, float pitch = 1f)
             {
+                LastStage = "set-position";
                 Position = position;
                 Emitter.SetPosition(position);
+                LastStage = "force-flags";
                 Emitter.Force2D = force2D;
                 Emitter.Force3D = force3D;
+                LastStage = "register";
                 AudioEngineV2Runtime.RegisterEmitter(Emitter, filterRoute);
+                LastStage = "effect-subtype";
                 string filterEffectSubtype = AudioEngineV2Runtime.GetEngineFilterEffectSubtype(Emitter) ?? string.Empty;
+                LastStage = "effect-signature";
                 string filterEffectSignature = AudioEngineV2Runtime.GetEngineFilterEffectSignature(Emitter) ?? filterEffectSubtype;
                 int bindingGeneration = AudioEngineV2Runtime.EmitterBindingGeneration;
                 bool filterChanged = _filterRoute != filterRoute || !string.Equals(_filterEffectSignature, filterEffectSignature, StringComparison.OrdinalIgnoreCase);
@@ -879,9 +886,13 @@ namespace RealisticSoundPlus.AudioEngineV2
 
                 if (needsRebind)
                 {
+                    LastStage = "mute-before-rebind";
                     MuteBeforeRebind();
                     if (IsPlaying)
+                    {
+                        LastStage = "stop-before-rebind";
                         Emitter.StopSound(false, false, false);
+                    }
 
                     _cueName = cueName;
                     _force2D = force2D;
@@ -891,8 +902,11 @@ namespace RealisticSoundPlus.AudioEngineV2
                     _filterEffectSignature = filterEffectSignature;
                     _bindingGeneration = bindingGeneration;
                     _rebindFadeStartUtc = DateTime.UtcNow;
+                    LastStage = "sound-pair";
                     MySoundPair pair = new MySoundPair(cueName, false);
+                    LastStage = "preload";
                     MyEntity3DSoundEmitter.PreloadSound(pair);
+                    LastStage = "play";
                     bool started = Emitter.PlaySound(pair, true, false, force2D, false, false, force3D, false);
                     IsPlaying = started;
                     V2DebugLog.WriteEvent("emitter-start", string.Format(
@@ -913,8 +927,11 @@ namespace RealisticSoundPlus.AudioEngineV2
                         position.Z));
                 }
 
+                LastStage = "set-volume";
                 SetVolume(volume);
+                LastStage = "set-pitch";
                 SetPitch(pitch);
+                LastStage = "done";
             }
 
             public void SetVolume(float volume)
@@ -923,8 +940,11 @@ namespace RealisticSoundPlus.AudioEngineV2
                 if (clampedVolume > StartThreshold)
                     _silentSinceUtc = DateTime.MinValue;
 
+                LastStage = "volume-multiplier";
                 Emitter.VolumeMultiplier = clampedVolume * CalculateRebindGain();
+                LastStage = "emitter-update";
                 Emitter.Update();
+                LastStage = "fast-update";
                 Emitter.FastUpdate(false);
             }
 
@@ -967,6 +987,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                 _filterEffectSubtype = null;
                 _filterEffectSignature = null;
                 _bindingGeneration = -1;
+                LastStage = "retry-blocked";
                 _silentSinceUtc = DateTime.UtcNow;
                 _retryBlockedUntilUtc = DateTime.UtcNow + retryDelay;
             }
