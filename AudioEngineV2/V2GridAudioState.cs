@@ -41,7 +41,7 @@ namespace RealisticSoundPlus.AudioEngineV2
 
         public long GridEntityId { get; }
 
-        public void ReportThruster(MyThrust thruster, V2AudioListenerState listener)
+        public void ReportThruster(MyThrust thruster, V2AudioListenerState listener, bool updateAudio)
         {
             if (thruster == null || thruster.CubeGrid == null)
                 return;
@@ -55,14 +55,16 @@ namespace RealisticSoundPlus.AudioEngineV2
             if (load.Value <= 0f)
             {
                 _directions[(int)direction].Report(thruster, thruster.WorldMatrix.Translation, 0f, 0f, presence, activeDetailCue, idleDetailCue, load.Source);
-                Update(thruster.CubeGrid, listener);
+                if (updateAudio)
+                    Update(thruster.CubeGrid, listener);
                 return;
             }
 
             float command = Clamp01(load.Value);
             float target = Clamp01(command * presence);
             _directions[(int)direction].Report(thruster, thruster.WorldMatrix.Translation, command, target, presence, activeDetailCue, idleDetailCue, load.Source);
-            Update(thruster.CubeGrid, listener);
+            if (updateAudio)
+                Update(thruster.CubeGrid, listener);
         }
 
         public void Update(MyCubeGrid grid, V2AudioListenerState listener)
@@ -74,7 +76,21 @@ namespace RealisticSoundPlus.AudioEngineV2
             _lastUpdateUtc = now;
             string stateCue = V2CueCatalog.SelectStateLoopCue(grid);
             for (int i = 0; i < _directions.Length; i++)
-                _directions[i].Update(grid, listener, stateCue, now);
+            {
+                try
+                {
+                    _directions[i].Update(grid, listener, stateCue, now);
+                }
+                catch (Exception ex)
+                {
+                    V2DebugLog.WriteEvent("direction-update-failed", string.Format(
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        "grid={0} dir={1} {2}",
+                        grid != null ? grid.EntityId : 0L,
+                        (V2ThrustDirectionGroup)i,
+                        ex.Message));
+                }
+            }
         }
 
         public void Stop()
@@ -613,7 +629,37 @@ namespace RealisticSoundPlus.AudioEngineV2
                 }
 
                 float emitterVolume = value;
-                emitter.Update(position, cueName, emitterVolume, force2D, force3D, filterRoute, pitch);
+                try
+                {
+                    emitter.Update(position, cueName, emitterVolume, force2D, force3D, filterRoute, pitch);
+                }
+                catch (Exception ex)
+                {
+                    V2DebugLog.WriteEvent("emitter-update-failed", string.Format(
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        "{0} cue={1} route={2} filter={3} force2d={4} force3d={5} vol={6:0.000} pos={7:0.0},{8:0.0},{9:0.0} {10}",
+                        layer,
+                        cueName ?? "?",
+                        diagnosticRoute ?? "?",
+                        filterRoute,
+                        force2D ? "Y" : "N",
+                        force3D ? "Y" : "N",
+                        emitterVolume,
+                        position.X,
+                        position.Y,
+                        position.Z,
+                        ex.Message));
+                    try
+                    {
+                        emitter.SetVolume(0f);
+                    }
+                    catch
+                    {
+                    }
+
+                    return;
+                }
+
                 float finalEmitterVolume = emitter.VolumeMultiplier;
                 string route = diagnosticRoute ?? emitter.RouteName;
                 AudioDiagnostics.RecordEmitter(emitter.Emitter, route, value, ExteriorSoundTransmission.Calculate(position), target, finalEmitterVolume, position);

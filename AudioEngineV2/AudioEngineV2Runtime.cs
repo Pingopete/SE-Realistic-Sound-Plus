@@ -33,6 +33,8 @@ namespace RealisticSoundPlus.AudioEngineV2
         private static DateTime _lastCensusUtc = DateTime.MinValue;
         private static DateTime _lastEmptySourceDiscoveryUtc = DateTime.MinValue;
         private static DateTime _lastSuppressionBypassLogUtc = DateTime.MinValue;
+        private static DateTime _lastThrusterReportFailureLogUtc = DateTime.MinValue;
+        private static DateTime _lastGridAudioFailureLogUtc = DateTime.MinValue;
         private static long _lastEmptySourceDiscoveryGridId;
         private static int _emitterBindingGeneration;
         private static string _lastEmitterBindingSignature;
@@ -69,6 +71,8 @@ namespace RealisticSoundPlus.AudioEngineV2
             _lastCensusUtc = DateTime.MinValue;
             _lastEmptySourceDiscoveryUtc = DateTime.MinValue;
             _lastSuppressionBypassLogUtc = DateTime.MinValue;
+            _lastThrusterReportFailureLogUtc = DateTime.MinValue;
+            _lastGridAudioFailureLogUtc = DateTime.MinValue;
             _lastEmptySourceDiscoveryGridId = 0L;
             _emitterBindingGeneration = 0;
             _lastEmitterBindingSignature = null;
@@ -153,10 +157,10 @@ namespace RealisticSoundPlus.AudioEngineV2
                 return;
 
             RememberThruster(thruster);
-            ProcessThruster(thruster, false);
+            ProcessThruster(thruster, false, true);
         }
 
-        private static void ProcessThruster(MyThrust thruster, bool fromCensus)
+        private static void ProcessThruster(MyThrust thruster, bool fromCensus, bool updateAudio)
         {
             if (thruster == null || thruster.CubeGrid == null)
                 return;
@@ -187,7 +191,14 @@ namespace RealisticSoundPlus.AudioEngineV2
                 _acceptedThrusterReports = SaturatingIncrement(_acceptedThrusterReports);
 
             V2GridAudioState state = GetOrCreateGridState(thruster.CubeGrid);
-            state.ReportThruster(thruster, _listener);
+            try
+            {
+                state.ReportThruster(thruster, _listener, updateAudio);
+            }
+            catch (Exception ex)
+            {
+                LogThrusterReportFailure(thruster, fromCensus, updateAudio, ex);
+            }
         }
 
         private static V2AudioDebugState.ThrusterReportSnapshot CreateThrusterReportSnapshot()
@@ -468,7 +479,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                         continue;
                     }
 
-                    ProcessThruster(thruster, true);
+                    ProcessThruster(thruster, true, false);
                     processed++;
                 }
                 catch (Exception ex)
@@ -482,6 +493,7 @@ namespace RealisticSoundPlus.AudioEngineV2
 
             _lastCensusProcessed = processed;
             _lastCensusRemoved = stale == null ? 0 : stale.Count;
+            UpdateListenerGridAudioOnce("known-refresh");
 
             if (stale == null)
                 return;
@@ -512,31 +524,64 @@ namespace RealisticSoundPlus.AudioEngineV2
             }
 
             int found = 0;
+            int failed = 0;
             int acceptedBefore = _censusThrusterReports;
-            try
+            foreach (MyThrust thruster in grid.GetFatBlocks<MyThrust>())
             {
-                foreach (MyThrust thruster in grid.GetFatBlocks<MyThrust>())
+                try
                 {
                     found++;
                     RememberThruster(thruster);
-                    ProcessThruster(thruster, true);
+                    ProcessThruster(thruster, true, false);
+                }
+                catch (Exception ex)
+                {
+                    failed++;
+                    V2DebugLog.WriteEvent("source-census-thruster-failed", "reason=" + reason + " grid=" + grid.EntityId + " " + ex.Message);
                 }
             }
-            catch (Exception ex)
-            {
-                V2DebugLog.WriteEvent("source-census", "reason=" + reason + " grid=" + grid.EntityId + " result=failed " + ex.Message);
-                return;
-            }
 
+            bool audioUpdated = UpdateGridStateAudioFor(grid, reason);
             V2DebugLog.WriteEvent("source-census", string.Format(
                 System.Globalization.CultureInfo.InvariantCulture,
-                "reason={0} grid={1} found={2} accepted={3} known={4} states={5}",
+                "reason={0} grid={1} found={2} accepted={3} failed={4} known={5} states={6} audio={7}",
                 reason,
                 grid.EntityId,
                 found,
                 _censusThrusterReports - acceptedBefore,
+                failed,
                 KnownThrusters.Count,
-                GridStates.Count));
+                GridStates.Count,
+                audioUpdated ? "ok" : "failed"));
+        }
+
+        private static void UpdateListenerGridAudioOnce(string reason)
+        {
+            if (!_hasListener || _listener.VanillaFallback || _listener.GridEntityId == 0L)
+                return;
+
+            if (!TryGetGridById(_listener.GridEntityId, out MyCubeGrid grid))
+                return;
+
+            UpdateGridStateAudioFor(grid, reason);
+        }
+
+        private static bool UpdateGridStateAudioFor(MyCubeGrid grid, string reason)
+        {
+            if (grid == null)
+                return false;
+
+            try
+            {
+                V2GridAudioState state = GetOrCreateGridState(grid);
+                state.Update(grid, _listener);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                LogGridAudioUpdateFailure(reason, grid.EntityId, ex);
+                return false;
+            }
         }
 
         private static bool TryGetGridById(long gridId, out MyCubeGrid grid)
@@ -559,6 +604,38 @@ namespace RealisticSoundPlus.AudioEngineV2
                 V2DebugLog.WriteEvent("source-census", "grid lookup failed id=" + gridId + " " + ex.Message);
                 return false;
             }
+        }
+
+        private static void LogThrusterReportFailure(MyThrust thruster, bool fromCensus, bool updateAudio, Exception ex)
+        {
+            DateTime now = DateTime.UtcNow;
+            if (now - _lastThrusterReportFailureLogUtc < TimeSpan.FromSeconds(1))
+                return;
+
+            _lastThrusterReportFailureLogUtc = now;
+            V2DebugLog.WriteEvent("thruster-report-failed", string.Format(
+                System.Globalization.CultureInfo.InvariantCulture,
+                "grid={0} thruster={1} census={2} audio={3} {4}",
+                thruster != null && thruster.CubeGrid != null ? thruster.CubeGrid.EntityId : 0L,
+                thruster != null ? thruster.EntityId : 0L,
+                fromCensus ? "Y" : "N",
+                updateAudio ? "Y" : "N",
+                ex.Message));
+        }
+
+        private static void LogGridAudioUpdateFailure(string reason, long gridId, Exception ex)
+        {
+            DateTime now = DateTime.UtcNow;
+            if (now - _lastGridAudioFailureLogUtc < TimeSpan.FromSeconds(1))
+                return;
+
+            _lastGridAudioFailureLogUtc = now;
+            V2DebugLog.WriteEvent("grid-audio-update-failed", string.Format(
+                System.Globalization.CultureInfo.InvariantCulture,
+                "reason={0} grid={1} {2}",
+                reason ?? "?",
+                gridId,
+                ex.Message));
         }
 
         private static bool HasReplacementSourcesReady()
