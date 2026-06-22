@@ -1,5 +1,6 @@
 # Realistic Sound Plus
 
+git pull test
 Client-side Pulsar plugin for Space Engineers realistic audio mode.
 
 ## Branch Status
