@@ -51,10 +51,15 @@ namespace RealisticSoundPlus
                 {
                     case "help":
                     case "?":
-                        Notify("/rsp show | /rsp detail on | /rsp idle off | /rsp state on | /rsp detailgain 2 | /rsp idlegain 1 | /rsp stategain 2 | /rsp dist 200 | /rsp distcurve 1 | /rsp cmdsmooth 2000 | /rsp emitterfade 120 | /rsp statecurve 1 | /rsp detail2dpos on | /rsp state2dpos on | /rsp filter filter1 | /rsp internalfilter filter2 | /rsp filter1freq 300 | /rsp filter1q 0.7 | /rsp sounds | /rsp logpath | /rsp save");
+                        Notify("/rsp menu | /rsp show | /rsp sounds | /rsp filters | /rsp catalog | /rsp reverbvoices | /rsp detail on | /rsp idle off | /rsp state on | /rsp detailgain 2 | /rsp dist 200 | /rsp cmdsmooth 2000 | /rsp auxsmooth 1000 | /rsp externalfilter enginefilter | /rsp reverb on | /rsp playerenvray 120 | /rsp save");
                         break;
                     case "show":
                         Notify(SettingsManager.Summary());
+                        break;
+                    case "menu":
+                    case "ui":
+                        RspSettingsMenu.Toggle();
+                        Notify("Settings menu " + (RspSettingsMenu.IsOpen ? "open" : "closed") + ".");
                         break;
                     case "save":
                         SettingsManager.Save();
@@ -73,6 +78,68 @@ namespace RealisticSoundPlus
                     case "intfilter":
                     case "insidefilter":
                         SetInternalFilter(parts);
+                        break;
+                    case "filter1type":
+                    case "filter1mode":
+                    case "f1type":
+                    case "f1mode":
+                    case "enginefiltertype":
+                    case "enginefiltermode":
+                    case "engfiltertype":
+                    case "efiltertype":
+                        SetCustomFilterType(parts, true);
+                        break;
+                    case "filter2type":
+                    case "filter2mode":
+                    case "f2type":
+                    case "f2mode":
+                    case "auxfiltertype":
+                    case "auxfiltermode":
+                    case "afiltertype":
+                        SetCustomFilterType(parts, false);
+                        break;
+                    case "enginefilterdynamic":
+                    case "enginedynamic":
+                    case "dynamicfilter":
+                        SetEngineFilterDynamic(parts);
+                        break;
+                    case "atmoverride":
+                    case "atmosphereoverride":
+                    case "externalatmoverride":
+                        SetAtmosphereOverride(parts);
+                        break;
+                    case "playerfilter":
+                    case "auxfilterroute":
+                        SetPlayerFilter(parts);
+                        break;
+                    case "envfilter":
+                    case "environmentfilter":
+                    case "windfilter":
+                        SetPlayerFilterEnvironment(parts);
+                        break;
+                    case "blockfilter":
+                    case "auxblockfilter":
+                    case "machinefilter":
+                        SetPlayerFilterBlock(parts);
+                        break;
+                    case "localfilter":
+                    case "playerlocalfilter":
+                    case "playersoundfilter":
+                        SetPlayerFilterLocal(parts);
+                        break;
+                    case "auxpathdebug":
+                    case "pathdebug":
+                    case "occlusiondebug":
+                    case "blockpathdebug":
+                        SetPlayerFilterPathDebug(parts);
+                        break;
+                    case "auxatmoverride":
+                    case "auxpressureoverride":
+                    case "playerfilteratmoverride":
+                    case "auxatm":
+                    case "auxpressure":
+                    case "auxvacuum":
+                        SetPlayerFilterAtmosphereOverride(parts);
                         break;
                     case "detail":
                     case "enginedetail":
@@ -101,12 +168,32 @@ namespace RealisticSoundPlus
                     case "audio":
                         ToggleAudioOverlay(parts);
                         break;
+                    case "filters":
+                    case "filteroverlay":
+                    case "controllers":
+                        ToggleFilterOverlay(parts);
+                        break;
+                    case "catalog":
+                    case "soundcatalog":
+                    case "voicecatalog":
+                        PrintVoiceCatalog();
+                        break;
                     case "log":
                     case "debuglog":
                         ToggleDebugLog(parts);
                         break;
                     case "logpath":
                         Notify(V2DebugLog.Path);
+                        break;
+                    case "reverb":
+                    case "globalreverb":
+                    case "reverbtest":
+                        SetGlobalReverb(parts);
+                        break;
+                    case "reverbvoices":
+                    case "reverbsounds":
+                    case "reverbaffected":
+                        PrintReverbVoices();
                         break;
                     default:
                         SetValue(command, parts);
@@ -143,6 +230,38 @@ namespace RealisticSoundPlus
             Notify("Audio debug overlay " + (AudioDebugOverlay.Enabled ? "on" : "off") + ".");
         }
 
+        private static void ToggleFilterOverlay(string[] parts)
+        {
+            if (parts.Length >= 2)
+            {
+                string value = parts[1].ToLowerInvariant();
+                if (value == "on" || value == "1" || value == "true")
+                    FilterDebugOverlay.SetEnabled(true);
+                else if (value == "off" || value == "0" || value == "false")
+                    FilterDebugOverlay.SetEnabled(false);
+                else
+                {
+                    Notify("Usage: /rsp filters [on|off]");
+                    return;
+                }
+            }
+            else
+            {
+                FilterDebugOverlay.Toggle();
+            }
+
+            Notify("Filter controller overlay " + (FilterDebugOverlay.Enabled ? "on" : "off") + ".");
+        }
+
+        private static void PrintVoiceCatalog()
+        {
+            string summary = AudioVoiceCatalog.FormatSummary();
+            string candidates = AudioVoiceCatalog.FormatCandidates(12).Replace(Environment.NewLine, " | ");
+            string top = AudioVoiceCatalog.FormatTop(12).Replace(Environment.NewLine, " | ");
+            V2DebugLog.WriteEvent("voice-catalog-command", summary + " | candidates: " + candidates + " | top: " + top);
+            Notify(summary + " | " + candidates);
+        }
+
         private static void ToggleDebugLog(string[] parts)
         {
             if (parts.Length >= 2)
@@ -160,6 +279,32 @@ namespace RealisticSoundPlus
 
             V2DebugLog.WriteEvent("command", "debug log " + (SettingsManager.Current.V2DebugLogEnabled ? "on" : "off"));
             Notify("V2 debug log " + (SettingsManager.Current.V2DebugLogEnabled ? "on" : "off") + ": " + V2DebugLog.Path);
+        }
+
+        private static void SetGlobalReverb(string[] parts)
+        {
+            if (parts.Length < 2)
+            {
+                Notify("Usage: /rsp reverb <on|off>");
+                return;
+            }
+
+            if (!SettingsManager.TrySetGlobalReverb(parts[1]))
+            {
+                Notify("Usage: /rsp reverb <on|off>");
+                return;
+            }
+
+            V2DebugLog.WriteEvent("command", "global reverb " + (SettingsManager.Current.GlobalReverbEnabled ? "on" : "off"));
+            Notify(SettingsManager.Summary());
+        }
+
+        private static void PrintReverbVoices()
+        {
+            string status = V2GlobalReverbRuntime.FormatStatus();
+            string voices = V2GlobalReverbRuntime.FormatAffectedVoices(8).Replace(Environment.NewLine, " | ");
+            V2DebugLog.WriteEvent("global-reverb-voices", status + " | " + voices);
+            Notify(status + " | " + voices);
         }
 
         private static void SetV2Detail(string[] parts)
@@ -276,6 +421,144 @@ namespace RealisticSoundPlus
             {
                 Notify("Unknown internal filter. Options: " + SettingsManager.FilterOptions);
                 return;
+            }
+
+            Notify(SettingsManager.Summary());
+        }
+
+        private static void SetCustomFilterType(string[] parts, bool filter1)
+        {
+            if (parts.Length < 2)
+            {
+                Notify("Usage: /rsp " + (filter1 ? "enginefiltertype" : "auxfiltertype") + " <" + SettingsManager.CustomFilterTypeOptions + ">");
+                return;
+            }
+
+            bool ok = filter1
+                ? SettingsManager.TrySetFilter1Type(parts[1])
+                : SettingsManager.TrySetFilter2Type(parts[1]);
+            if (!ok)
+            {
+                Notify("Unknown custom filter type. Options: " + SettingsManager.CustomFilterTypeOptions);
+                return;
+            }
+
+            Notify(SettingsManager.Summary());
+        }
+
+        private static void SetEngineFilterDynamic(string[] parts)
+        {
+            if (parts.Length < 2)
+            {
+                Notify("Usage: /rsp enginefilterdynamic <on|off>");
+                return;
+            }
+
+            if (!SettingsManager.TrySetEngineFilterDynamic(parts[1]))
+            {
+                Notify("Usage: /rsp enginefilterdynamic <on|off>");
+                return;
+            }
+
+            Notify(SettingsManager.Summary());
+        }
+
+        private static void SetAtmosphereOverride(string[] parts)
+        {
+            if (parts.Length < 2)
+            {
+                Notify("Usage: /rsp atmoverride <on|off> or /rsp externalatm <0..1>");
+                return;
+            }
+
+            if (!SettingsManager.TrySetAtmosphereOverrideEnabled(parts[1]))
+            {
+                if (!float.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out float value))
+                {
+                    Notify("Usage: /rsp atmoverride <on|off> or /rsp atmoverride <0..1>");
+                    return;
+                }
+
+                SettingsManager.Current.V2AtmosphereOverrideEnabled = true;
+                SettingsManager.TrySet("externalatm", value);
+            }
+
+            Notify(SettingsManager.Summary());
+        }
+
+        private static void SetPlayerFilter(string[] parts)
+        {
+            if (parts.Length < 2 || !SettingsManager.TrySetPlayerFilter(parts[1]))
+            {
+                Notify("Usage: /rsp playerfilter <on|off>");
+                return;
+            }
+
+            Notify(SettingsManager.Summary());
+        }
+
+        private static void SetPlayerFilterEnvironment(string[] parts)
+        {
+            if (parts.Length < 2 || !SettingsManager.TrySetPlayerFilterEnvironment(parts[1]))
+            {
+                Notify("Usage: /rsp envfilter <on|off>");
+                return;
+            }
+
+            Notify(SettingsManager.Summary());
+        }
+
+        private static void SetPlayerFilterBlock(string[] parts)
+        {
+            if (parts.Length < 2 || !SettingsManager.TrySetPlayerFilterBlock(parts[1]))
+            {
+                Notify("Usage: /rsp blockfilter <on|off>");
+                return;
+            }
+
+            Notify(SettingsManager.Summary());
+        }
+
+        private static void SetPlayerFilterLocal(string[] parts)
+        {
+            if (parts.Length < 2 || !SettingsManager.TrySetPlayerFilterLocal(parts[1]))
+            {
+                Notify("Usage: /rsp localfilter <on|off>");
+                return;
+            }
+
+            Notify(SettingsManager.Summary());
+        }
+
+        private static void SetPlayerFilterPathDebug(string[] parts)
+        {
+            if (parts.Length < 2 || !SettingsManager.TrySetPlayerFilterPathDebug(parts[1]))
+            {
+                Notify("Usage: /rsp auxpathdebug <on|off>");
+                return;
+            }
+
+            Notify(SettingsManager.Summary());
+        }
+
+        private static void SetPlayerFilterAtmosphereOverride(string[] parts)
+        {
+            if (parts.Length < 2)
+            {
+                Notify("Usage: /rsp auxatmoverride <on|off> or /rsp auxatm <0..1>");
+                return;
+            }
+
+            if (!SettingsManager.TrySetPlayerFilterAtmosphereOverride(parts[1]))
+            {
+                if (!float.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out float value))
+                {
+                    Notify("Usage: /rsp auxatmoverride <on|off> or /rsp auxatmoverride <0..1>");
+                    return;
+                }
+
+                SettingsManager.Current.PlayerFilterAtmosphereOverrideEnabled = true;
+                SettingsManager.TrySet("auxatm", value);
             }
 
             Notify(SettingsManager.Summary());

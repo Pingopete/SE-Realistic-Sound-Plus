@@ -34,10 +34,14 @@ namespace RealisticSoundPlus.AudioEngineV2
             _lastWriteUtc = now;
             WriteLine(string.Format(
                 CultureInfo.InvariantCulture,
-                "{0:o} | {1} | {2} | {3}",
+                "{0:o} | {1} | {2} | engineFilter={3} | playerEnv={4} | playerFilter={5} | envAmbience={6} | {7}",
                 now,
                 AudioDiagnostics.FormatGlobal(),
                 AudioEngineV2Runtime.FormatDebugLine(),
+                V2EngineFilterTelemetry.FormatSummary(),
+                V2PlayerEnvironmentTelemetry.FormatSummary(),
+                V2PlayerFilterRuntime.FormatSummary(),
+                EnvironmentAmbiencePatch.FormatSummary(),
                 SettingsManager.Summary()));
         }
 

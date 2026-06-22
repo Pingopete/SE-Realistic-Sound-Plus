@@ -33,7 +33,9 @@ namespace RealisticSoundPlus.Patches
                 ControlledSpeed = TryGetControlledSpeed(),
                 InsideShip = insideShip,
                 EngineFilter = SettingsManager.Current.EngineFilter,
-                InternalEngineFilter = SettingsManager.Current.InternalEngineFilter
+                InternalEngineFilter = SettingsManager.Current.InternalEngineFilter,
+                AtmosphereOverrideEnabled = SettingsManager.Current.V2AtmosphereOverrideEnabled,
+                AtmosphereOverride = SettingsManager.Current.V2AtmosphereOverride
             };
         }
 
@@ -72,13 +74,39 @@ namespace RealisticSoundPlus.Patches
 
             return string.Format(
                 CultureInfo.InvariantCulture,
-                "atm={0:0.00} {1} speed={2:0.0} inside={3} filter={4} intfilter={5} route=v2",
+                "atm={0:0.00} {1} speed={2:0.0} inside={3} filter={4} intfilter={5} atmOverride={6} route=v2",
                 snapshot.ListenerPressure,
                 altitude,
                 snapshot.ControlledSpeed,
                 snapshot.InsideShip ? "Y" : "N",
                 snapshot.EngineFilter,
-                snapshot.InternalEngineFilter);
+                snapshot.InternalEngineFilter,
+                snapshot.AtmosphereOverrideEnabled ? snapshot.AtmosphereOverride.ToString("0.00", CultureInfo.InvariantCulture) : "off");
+        }
+
+        public static string[] FormatGlobalLines()
+        {
+            GlobalSnapshot snapshot = _global;
+            string altitude = float.IsNaN(snapshot.ListenerAltitude)
+                ? "alt=?"
+                : string.Format(CultureInfo.InvariantCulture, "alt={0:0}m", snapshot.ListenerAltitude);
+
+            return new[]
+            {
+                string.Format(
+                    CultureInfo.InvariantCulture,
+                    "Listener: atm={0:0.00} {1} speed={2:0.0} inside={3}",
+                    snapshot.ListenerPressure,
+                    altitude,
+                    snapshot.ControlledSpeed,
+                    snapshot.InsideShip ? "Y" : "N"),
+                string.Format(
+                    CultureInfo.InvariantCulture,
+                    "Engine filters: external={0} internal={1} engineAtm={2}",
+                    snapshot.EngineFilter,
+                    snapshot.InternalEngineFilter,
+                    snapshot.AtmosphereOverrideEnabled ? snapshot.AtmosphereOverride.ToString("0.00", CultureInfo.InvariantCulture) : "real")
+            };
         }
 
         public static string FormatCue(CueSnapshot snapshot)
@@ -180,6 +208,8 @@ namespace RealisticSoundPlus.Patches
             public bool InsideShip;
             public string EngineFilter;
             public string InternalEngineFilter;
+            public bool AtmosphereOverrideEnabled;
+            public float AtmosphereOverride;
         }
 
         public struct CueSnapshot

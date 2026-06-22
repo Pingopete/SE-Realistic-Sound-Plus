@@ -1,21 +1,26 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Globalization;
 using System.Reflection;
+using VRage.Audio;
 using VRage.Data.Audio;
 using VRage.Utils;
+using Sandbox.Game.Entities;
 
 namespace RealisticSoundPlus.AudioEngineV2
 {
     internal static class RspDynamicAudioFilters
     {
-        public const string Filter1Subtype = "RSPFilter1";
-        public const string Filter2Subtype = "RSPFilter2";
-        public const float MinFilterFrequency = 20f;
-        public const float MaxFilterFrequency = 7350f;
+        public const string EngineFilterSubtype = "RSPEngineFilter";
+        public const string AuxFilterSubtype = "RSPAuxFilter";
+        public const string Filter1Subtype = EngineFilterSubtype;
+        public const string Filter2Subtype = AuxFilterSubtype;
+        public const float MinFilterFrequency = 5f;
+        public const float MaxFilterFrequency = 8000f;
         public const float MinFilterQ = 0.1f;
         public const float MaxFilterQ = 10f;
-        private const float XAudioFilterSampleRate = 44100f;
+        private const float DefaultXAudioFilterSampleRate = 44100f;
         private const float MaxXAudioFilterFrequency = 1f;
         private const float MaxXAudioOneOverQ = 1.5f;
 
@@ -35,10 +40,35 @@ namespace RealisticSoundPlus.AudioEngineV2
         private static readonly FieldInfo FrequencyField = SoundEffectType?.GetField("Frequency", InstanceMembers);
         private static readonly FieldInfo OneOverQField = SoundEffectType?.GetField("OneOverQ", InstanceMembers);
         private static readonly FieldInfo StopAfterField = SoundEffectType?.GetField("StopAfter", InstanceMembers);
+        private static readonly Type SharpFilterParametersType = ResolveType("SharpDX.XAudio2.FilterParameters");
+        private static readonly Type SharpFilterType = ResolveType("SharpDX.XAudio2.FilterType");
+        private static readonly FieldInfo SharpFilterTypeField = SharpFilterParametersType?.GetField("Type", InstanceMembers);
+        private static readonly FieldInfo SharpFilterFrequencyField = SharpFilterParametersType?.GetField("Frequency", InstanceMembers);
+        private static readonly FieldInfo SharpFilterOneOverQField = SharpFilterParametersType?.GetField("OneOverQ", InstanceMembers);
+
+        private static readonly Dictionary<Type, PropertyInfo> SourceVoiceProperties = new Dictionary<Type, PropertyInfo>();
+        private static readonly Dictionary<Type, MethodInfo> SetFilterMethods = new Dictionary<Type, MethodInfo>();
+        private static readonly Dictionary<Type, MethodInfo> GetFilterMethods = new Dictionary<Type, MethodInfo>();
+        private static readonly Dictionary<Type, PropertyInfo> VoiceDetailsProperties = new Dictionary<Type, PropertyInfo>();
+        private static readonly Dictionary<Type, FieldInfo> VoiceDetailsSampleRateFields = new Dictionary<Type, FieldInfo>();
+        private static readonly Dictionary<Type, FieldInfo> SoundDataSoundFields = new Dictionary<Type, FieldInfo>();
+        private static readonly Dictionary<Type, FieldInfo> SourceVoiceEmitterFields = new Dictionary<Type, FieldInfo>();
+        private static readonly HashSet<Type> SourceVoicePropertyMisses = new HashSet<Type>();
+        private static readonly HashSet<Type> SetFilterMethodMisses = new HashSet<Type>();
+        private static readonly HashSet<Type> GetFilterMethodMisses = new HashSet<Type>();
+        private static readonly HashSet<Type> VoiceDetailsPropertyMisses = new HashSet<Type>();
+        private static readonly HashSet<Type> VoiceDetailsSampleRateMisses = new HashSet<Type>();
+        private static readonly HashSet<Type> SoundDataSoundFieldMisses = new HashSet<Type>();
+        private static readonly HashSet<Type> SourceVoiceEmitterFieldMisses = new HashSet<Type>();
 
         private static string _lastRegisteredSignature;
+        private static string _lastLiveEffectSignature;
+        private static string _lastLiveVoiceSignature;
+        private static DateTime _lastLiveEffectLogUtc = DateTime.MinValue;
+        private static DateTime _lastLiveVoiceLogUtc = DateTime.MinValue;
         private static bool _loggedNotReady;
         private static bool _loggedReflectionFailure;
+        private static bool _loggedLiveFilterReflectionFailure;
         private static bool _disabled;
 
         public static bool UpdateFromSettings(RealisticSoundPlusSettings settings)
@@ -69,8 +99,8 @@ namespace RealisticSoundPlus.AudioEngineV2
 
             try
             {
-                RegisterOrReplace(effects, Filter1Subtype, settings.Filter1Frequency, settings.Filter1Q);
-                RegisterOrReplace(effects, Filter2Subtype, settings.Filter2Frequency, settings.Filter2Q);
+                RegisterOrReplace(effects, Filter1Subtype, settings.Filter1Type, settings.Filter1Frequency, settings.Filter1Q);
+                RegisterOrReplace(effects, Filter2Subtype, settings.Filter2Type, settings.Filter2Frequency, settings.Filter2Q);
                 _lastRegisteredSignature = signature;
                 _loggedNotReady = false;
                 V2DebugLog.WriteEvent("filter-register", DescribeSettings(settings));
@@ -96,6 +126,117 @@ namespace RealisticSoundPlus.AudioEngineV2
                 || string.Equals(subtype, Filter2Subtype, StringComparison.OrdinalIgnoreCase);
         }
 
+        public static bool TryApplyLiveCustomFilter(IMySourceVoice voice, string subtype, RealisticSoundPlusSettings settings)
+        {
+            return TryApplyLiveCustomFilter(voice, subtype, settings, null);
+        }
+
+        public static bool TryApplyLiveFilterParameters(IMySourceVoice voice, string filterType, float frequency, float q)
+        {
+            if (voice == null)
+                return false;
+
+            if (!HasLiveFilterReflection())
+            {
+                LogLiveFilterReflectionFailure("missing SharpDX filter reflection");
+                return false;
+            }
+
+            object sourceVoice = ResolveSourceVoice(voice);
+            if (sourceVoice == null)
+                return false;
+
+            MethodInfo setFilter = ResolveSetFilterMethod(sourceVoice.GetType());
+            if (setFilter == null)
+                return false;
+
+            try
+            {
+                object parameters = CreateSharpFilterParameters(filterType, frequency, q, sourceVoice);
+                setFilter.Invoke(sourceVoice, new[] { parameters, 0 });
+                return true;
+            }
+            catch (Exception ex)
+            {
+                LogLiveFilterReflectionFailure(ex.Message);
+                return false;
+            }
+        }
+
+        public static bool TryApplyLiveCustomFilter(IMySourceVoice voice, string subtype, RealisticSoundPlusSettings settings, MyEntity3DSoundEmitter emitter)
+        {
+            if (voice == null || settings == null || !IsCustomFilterSubtype(subtype))
+                return false;
+
+            GetFilterParametersForEmitter(subtype, settings, emitter, out string filterType, out float frequency, out float q);
+            return TryApplyLiveFilterParameters(voice, filterType, frequency, q);
+        }
+
+        public static bool TryPrepareLiveCustomFilterEffect(object soundData, object soundEffect, RealisticSoundPlusSettings settings)
+        {
+            if (soundData == null || soundEffect == null || settings == null)
+                return false;
+
+            MyEntity3DSoundEmitter emitter = ResolveEmitterFromSoundData(soundData);
+            if (emitter == null || !AudioEngineV2Runtime.IsV2Emitter(emitter))
+                return false;
+
+            string subtype = AudioEngineV2Runtime.GetEngineFilterEffectSubtype(emitter);
+            if (!IsCustomFilterSubtype(subtype))
+                return false;
+
+            GetFilterParametersForEmitter(subtype, settings, emitter, out string filterType, out float frequency, out float q);
+
+            ConfigureFilter(soundEffect, filterType, ToXAudioFrequency(frequency), ToXAudioOneOverQ(q));
+            LogLiveEffectApplied(subtype, filterType, frequency, q);
+            return true;
+        }
+
+        public static bool TryApplyLiveCustomFilterFromSoundData(object soundData, RealisticSoundPlusSettings settings)
+        {
+            if (soundData == null || settings == null)
+                return false;
+
+            object sourceVoiceObject = ResolveSourceVoiceObjectFromSoundData(soundData);
+            if (sourceVoiceObject == null)
+                return false;
+
+            MyEntity3DSoundEmitter emitter = ResolveEmitterFromSourceVoiceObject(sourceVoiceObject);
+            if (emitter == null || !AudioEngineV2Runtime.IsV2Emitter(emitter))
+                return false;
+
+            string subtype = AudioEngineV2Runtime.GetEngineFilterEffectSubtype(emitter);
+            if (!IsCustomFilterSubtype(subtype))
+                return false;
+
+            IMySourceVoice voice = sourceVoiceObject as IMySourceVoice;
+            if (voice == null)
+                return false;
+
+            bool applied = TryApplyLiveCustomFilter(voice, subtype, settings, emitter);
+            if (applied)
+            {
+                GetFilterParametersForEmitter(subtype, settings, emitter, out string filterType, out float frequency, out float q);
+                LogLiveVoiceApplied(voice, subtype, filterType, frequency, q);
+            }
+
+            return applied;
+        }
+
+        public static bool TryResolveEmitter(IMySourceVoice voice, out MyEntity3DSoundEmitter emitter)
+        {
+            emitter = null;
+            if (voice == null)
+                return false;
+
+            object sourceVoice = ResolveSourceVoice(voice);
+            if (sourceVoice == null)
+                return false;
+
+            emitter = ResolveEmitterFromSourceVoiceObject(sourceVoice);
+            return emitter != null;
+        }
+
         private static bool TryGetEffectDictionary(out IDictionary effects)
         {
             effects = null;
@@ -114,19 +255,56 @@ namespace RealisticSoundPlus.AudioEngineV2
             return effects != null;
         }
 
-        private static void RegisterOrReplace(IDictionary effects, string subtype, float frequency, float q)
+        private static void RegisterOrReplace(IDictionary effects, string subtype, string filterType, float frequency, float q)
         {
             MyStringHash effectId = MyStringHash.GetOrCompute(subtype);
+            string normalizedFilterType = NormalizeCustomFilterType(filterType);
             float sanitizedFrequency = SanitizeFrequency(frequency);
             float sanitizedQ = SanitizeQ(q);
             float xAudioFrequency = ToXAudioFrequency(sanitizedFrequency);
             float xAudioOneOverQ = ToXAudioOneOverQ(sanitizedQ);
-            object effect = TryCreateFromTemplate(effects, effectId, xAudioFrequency, xAudioOneOverQ)
-                ?? CreateEffect(effectId, xAudioFrequency, xAudioOneOverQ);
+            if (effects.Contains(effectId))
+            {
+                object existingEffect = effects[effectId];
+                if (TryUpdateExistingEffect(existingEffect, normalizedFilterType, xAudioFrequency, xAudioOneOverQ))
+                    return;
+            }
+
+            object effect = TryCreateFromTemplate(effects, effectId, normalizedFilterType, xAudioFrequency, xAudioOneOverQ)
+                ?? CreateEffect(effectId, normalizedFilterType, xAudioFrequency, xAudioOneOverQ);
             effects[effectId] = effect;
         }
 
-        private static object TryCreateFromTemplate(IDictionary effects, MyStringHash effectId, float xAudioFrequency, float xAudioOneOverQ)
+        private static bool TryUpdateExistingEffect(object effect, string filterType, float xAudioFrequency, float xAudioOneOverQ)
+        {
+            if (effect == null)
+                return false;
+
+            object sounds = SoundsEffectsField.GetValue(effect);
+            IEnumerable groups = sounds as IEnumerable;
+            if (groups == null)
+                return false;
+
+            foreach (object group in groups)
+            {
+                IEnumerable effects = group as IEnumerable;
+                if (effects == null)
+                    continue;
+
+                foreach (object soundEffect in effects)
+                {
+                    if (soundEffect == null)
+                        continue;
+
+                    ConfigureFilter(soundEffect, filterType, xAudioFrequency, xAudioOneOverQ);
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static object TryCreateFromTemplate(IDictionary effects, MyStringHash effectId, string filterType, float xAudioFrequency, float xAudioOneOverQ)
         {
             if (effects == null)
                 return null;
@@ -147,7 +325,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                 MyAudioEffect clone = new MyAudioEffect();
                 EffectIdField.SetValue(clone, effectId);
                 ResultEmitterIdxField.SetValue(clone, ResultEmitterIdxField.GetValue(template));
-                SoundsEffectsField.SetValue(clone, CloneSoundEffectsList(SoundsEffectsField.GetValue(template), xAudioFrequency, xAudioOneOverQ));
+                SoundsEffectsField.SetValue(clone, CloneSoundEffectsList(SoundsEffectsField.GetValue(template), filterType, xAudioFrequency, xAudioOneOverQ));
                 return clone;
             }
             catch (Exception ex)
@@ -157,20 +335,20 @@ namespace RealisticSoundPlus.AudioEngineV2
             }
         }
 
-        private static object CreateEffect(MyStringHash effectId, float xAudioFrequency, float xAudioOneOverQ)
+        private static object CreateEffect(MyStringHash effectId, string filterType, float xAudioFrequency, float xAudioOneOverQ)
         {
             MyAudioEffect effect = new MyAudioEffect();
             EffectIdField.SetValue(effect, effectId);
             ResultEmitterIdxField.SetValue(effect, 0);
-            SoundsEffectsField.SetValue(effect, CreateSoundEffectsList(xAudioFrequency, xAudioOneOverQ));
+            SoundsEffectsField.SetValue(effect, CreateSoundEffectsList(filterType, xAudioFrequency, xAudioOneOverQ));
             return effect;
         }
 
-        private static object CreateSoundEffectsList(float xAudioFrequency, float xAudioOneOverQ)
+        private static object CreateSoundEffectsList(string filterType, float xAudioFrequency, float xAudioOneOverQ)
         {
             object soundEffect = Activator.CreateInstance(SoundEffectType);
             DurationField.SetValue(soundEffect, 0f);
-            FilterField.SetValue(soundEffect, Enum.Parse(FilterField.FieldType, "LowPass"));
+            FilterField.SetValue(soundEffect, Enum.Parse(FilterField.FieldType, NormalizeCustomFilterType(filterType)));
             FrequencyField.SetValue(soundEffect, xAudioFrequency);
             OneOverQField.SetValue(soundEffect, xAudioOneOverQ);
             StopAfterField?.SetValue(soundEffect, false);
@@ -185,7 +363,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             return outerList;
         }
 
-        private static object CloneSoundEffectsList(object sourceList, float xAudioFrequency, float xAudioOneOverQ)
+        private static object CloneSoundEffectsList(object sourceList, string filterType, float xAudioFrequency, float xAudioOneOverQ)
         {
             Type innerListType = typeof(System.Collections.Generic.List<>).MakeGenericType(SoundEffectType);
             Type outerListType = typeof(System.Collections.Generic.List<>).MakeGenericType(innerListType);
@@ -206,7 +384,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                             object clonedEffect = CloneSoundEffect(sourceEffect);
                             if (!replacedFirst)
                             {
-                                ConfigureLowPass(clonedEffect, xAudioFrequency, xAudioOneOverQ);
+                                ConfigureFilter(clonedEffect, filterType, xAudioFrequency, xAudioOneOverQ);
                                 replacedFirst = true;
                             }
 
@@ -220,10 +398,10 @@ namespace RealisticSoundPlus.AudioEngineV2
             }
 
             if (outerList.Count == 0)
-                return CreateSoundEffectsList(xAudioFrequency, xAudioOneOverQ);
+                return CreateSoundEffectsList(filterType, xAudioFrequency, xAudioOneOverQ);
 
             if (!replacedFirst)
-                ((IList)outerList[0]).Add(CreateLowPassSoundEffect(xAudioFrequency, xAudioOneOverQ));
+                ((IList)outerList[0]).Add(CreateFilterSoundEffect(filterType, xAudioFrequency, xAudioOneOverQ));
 
             return outerList;
         }
@@ -240,17 +418,17 @@ namespace RealisticSoundPlus.AudioEngineV2
             return clonedEffect;
         }
 
-        private static object CreateLowPassSoundEffect(float xAudioFrequency, float xAudioOneOverQ)
+        private static object CreateFilterSoundEffect(string filterType, float xAudioFrequency, float xAudioOneOverQ)
         {
             object soundEffect = Activator.CreateInstance(SoundEffectType);
-            ConfigureLowPass(soundEffect, xAudioFrequency, xAudioOneOverQ);
+            ConfigureFilter(soundEffect, filterType, xAudioFrequency, xAudioOneOverQ);
             return soundEffect;
         }
 
-        private static void ConfigureLowPass(object soundEffect, float xAudioFrequency, float xAudioOneOverQ)
+        private static void ConfigureFilter(object soundEffect, string filterType, float xAudioFrequency, float xAudioOneOverQ)
         {
             DurationField.SetValue(soundEffect, 0f);
-            FilterField.SetValue(soundEffect, Enum.Parse(FilterField.FieldType, "LowPass"));
+            FilterField.SetValue(soundEffect, Enum.Parse(FilterField.FieldType, NormalizeCustomFilterType(filterType)));
             FrequencyField.SetValue(soundEffect, xAudioFrequency);
             OneOverQField.SetValue(soundEffect, xAudioOneOverQ);
             StopAfterField?.SetValue(soundEffect, false);
@@ -269,15 +447,180 @@ namespace RealisticSoundPlus.AudioEngineV2
                 && OneOverQField != null;
         }
 
+        private static bool HasLiveFilterReflection()
+        {
+            return SharpFilterParametersType != null
+                && SharpFilterTypeField != null
+                && SharpFilterFrequencyField != null
+                && SharpFilterOneOverQField != null
+                && SharpFilterType != null;
+        }
+
+        private static object CreateSharpFilterParameters(string filterType, float frequency, float q, object sourceVoice)
+        {
+            object parameters = Activator.CreateInstance(SharpFilterParametersType);
+            SharpFilterTypeField.SetValue(parameters, ToSharpFilterType(filterType));
+            SharpFilterFrequencyField.SetValue(parameters, ToXAudioFrequency(frequency, ResolveSourceVoiceInputSampleRate(sourceVoice)));
+            SharpFilterOneOverQField.SetValue(parameters, ToXAudioOneOverQ(q));
+            return parameters;
+        }
+
+        private static object ResolveSourceVoice(IMySourceVoice voice)
+        {
+            Type voiceType = voice.GetType();
+            if (SourceVoicePropertyMisses.Contains(voiceType))
+                return null;
+
+            if (!SourceVoiceProperties.TryGetValue(voiceType, out PropertyInfo property))
+            {
+                property = voiceType.GetProperty("Voice", InstanceMembers);
+                if (property == null)
+                {
+                    SourceVoicePropertyMisses.Add(voiceType);
+                    LogLiveFilterReflectionFailure("voice property missing on " + voiceType.FullName);
+                    return null;
+                }
+
+                SourceVoiceProperties[voiceType] = property;
+            }
+
+            return property.GetValue(voice, null);
+        }
+
+        private static MyEntity3DSoundEmitter ResolveEmitterFromSoundData(object soundData)
+        {
+            object sourceVoice = ResolveSourceVoiceObjectFromSoundData(soundData);
+            if (sourceVoice == null)
+                return null;
+
+            return ResolveEmitterFromSourceVoiceObject(sourceVoice);
+        }
+
+        private static object ResolveSourceVoiceObjectFromSoundData(object soundData)
+        {
+            FieldInfo soundField = ResolveSoundDataSoundField(soundData?.GetType());
+            return soundField?.GetValue(soundData);
+        }
+
+        private static MyEntity3DSoundEmitter ResolveEmitterFromSourceVoiceObject(object sourceVoice)
+        {
+            FieldInfo emitterField = ResolveSourceVoiceEmitterField(sourceVoice.GetType());
+            object emitter = emitterField?.GetValue(sourceVoice);
+            return emitter as MyEntity3DSoundEmitter;
+        }
+
+        private static FieldInfo ResolveSoundDataSoundField(Type soundDataType)
+        {
+            if (soundDataType == null || SoundDataSoundFieldMisses.Contains(soundDataType))
+                return null;
+
+            if (SoundDataSoundFields.TryGetValue(soundDataType, out FieldInfo field))
+                return field;
+
+            field = soundDataType.GetField("Sound", InstanceMembers);
+            if (field == null)
+            {
+                SoundDataSoundFieldMisses.Add(soundDataType);
+                LogLiveFilterReflectionFailure("SoundData.Sound missing on " + soundDataType.FullName);
+                return null;
+            }
+
+            SoundDataSoundFields[soundDataType] = field;
+            return field;
+        }
+
+        private static FieldInfo ResolveSourceVoiceEmitterField(Type sourceVoiceType)
+        {
+            if (sourceVoiceType == null || SourceVoiceEmitterFieldMisses.Contains(sourceVoiceType))
+                return null;
+
+            if (SourceVoiceEmitterFields.TryGetValue(sourceVoiceType, out FieldInfo field))
+                return field;
+
+            field = sourceVoiceType.GetField("Emitter", InstanceMembers);
+            if (field == null)
+            {
+                SourceVoiceEmitterFieldMisses.Add(sourceVoiceType);
+                LogLiveFilterReflectionFailure("MySourceVoice.Emitter missing on " + sourceVoiceType.FullName);
+                return null;
+            }
+
+            SourceVoiceEmitterFields[sourceVoiceType] = field;
+            return field;
+        }
+
+        private static MethodInfo ResolveSetFilterMethod(Type sourceVoiceType)
+        {
+            if (sourceVoiceType == null || SetFilterMethodMisses.Contains(sourceVoiceType))
+                return null;
+
+            if (SetFilterMethods.TryGetValue(sourceVoiceType, out MethodInfo method))
+                return method;
+
+            MethodInfo[] methods = sourceVoiceType.GetMethods(InstanceMembers);
+            for (int i = 0; i < methods.Length; i++)
+            {
+                MethodInfo candidate = methods[i];
+                if (!string.Equals(candidate.Name, "SetFilterParameters", StringComparison.Ordinal))
+                    continue;
+
+                ParameterInfo[] parameters = candidate.GetParameters();
+                if (parameters.Length != 2)
+                    continue;
+
+                if (parameters[0].ParameterType == SharpFilterParametersType && parameters[1].ParameterType == typeof(int))
+                {
+                    SetFilterMethods[sourceVoiceType] = candidate;
+                    return candidate;
+                }
+            }
+
+            SetFilterMethodMisses.Add(sourceVoiceType);
+            LogLiveFilterReflectionFailure("SetFilterParameters missing on " + sourceVoiceType.FullName);
+            return null;
+        }
+
+        private static MethodInfo ResolveGetFilterMethod(Type sourceVoiceType)
+        {
+            if (sourceVoiceType == null || GetFilterMethodMisses.Contains(sourceVoiceType))
+                return null;
+
+            if (GetFilterMethods.TryGetValue(sourceVoiceType, out MethodInfo method))
+                return method;
+
+            MethodInfo[] methods = sourceVoiceType.GetMethods(InstanceMembers);
+            for (int i = 0; i < methods.Length; i++)
+            {
+                MethodInfo candidate = methods[i];
+                if (!string.Equals(candidate.Name, "GetFilterParameters", StringComparison.Ordinal))
+                    continue;
+
+                ParameterInfo[] parameters = candidate.GetParameters();
+                if (parameters.Length != 1)
+                    continue;
+
+                if (parameters[0].ParameterType.IsByRef && parameters[0].ParameterType.GetElementType() == SharpFilterParametersType)
+                {
+                    GetFilterMethods[sourceVoiceType] = candidate;
+                    return candidate;
+                }
+            }
+
+            GetFilterMethodMisses.Add(sourceVoiceType);
+            return null;
+        }
+
         private static string BuildSettingsSignature(RealisticSoundPlusSettings settings)
         {
             return string.Format(
                 CultureInfo.InvariantCulture,
-                "{0}:{1:0.###}:{2:0.###}|{3}:{4:0.###}:{5:0.###}",
+                "{0}:{1}:{2:0.###}:{3:0.###}|{4}:{5}:{6:0.###}:{7:0.###}",
                 Filter1Subtype,
+                NormalizeCustomFilterType(settings.Filter1Type),
                 SanitizeFrequency(settings.Filter1Frequency),
                 SanitizeQ(settings.Filter1Q),
                 Filter2Subtype,
+                NormalizeCustomFilterType(settings.Filter2Type),
                 SanitizeFrequency(settings.Filter2Frequency),
                 SanitizeQ(settings.Filter2Q));
         }
@@ -288,15 +631,19 @@ namespace RealisticSoundPlus.AudioEngineV2
             float filter1Q = SanitizeQ(settings.Filter1Q);
             float filter2Frequency = SanitizeFrequency(settings.Filter2Frequency);
             float filter2Q = SanitizeQ(settings.Filter2Q);
+            string filter1Type = NormalizeCustomFilterType(settings.Filter1Type);
+            string filter2Type = NormalizeCustomFilterType(settings.Filter2Type);
             return string.Format(
                 CultureInfo.InvariantCulture,
-                "{0} cutoffHz={1:0.###} xfreq={2:0.######} q={3:0.###} oneOverQ={4:0.###}; {5} cutoffHz={6:0.###} xfreq={7:0.######} q={8:0.###} oneOverQ={9:0.###}",
+                "{0} type={1} freqHz={2:0.###} xfreq={3:0.######} q={4:0.###} oneOverQ={5:0.###}; {6} type={7} freqHz={8:0.###} xfreq={9:0.######} q={10:0.###} oneOverQ={11:0.###}",
                 Filter1Subtype,
+                filter1Type,
                 filter1Frequency,
                 ToXAudioFrequency(filter1Frequency),
                 filter1Q,
                 ToXAudioOneOverQ(filter1Q),
                 Filter2Subtype,
+                filter2Type,
                 filter2Frequency,
                 ToXAudioFrequency(filter2Frequency),
                 filter2Q,
@@ -315,9 +662,83 @@ namespace RealisticSoundPlus.AudioEngineV2
 
         private static float ToXAudioFrequency(float cutoffHz)
         {
+            return ToXAudioFrequency(cutoffHz, DefaultXAudioFilterSampleRate);
+        }
+
+        private static float ToXAudioFrequency(float cutoffHz, float sampleRate)
+        {
             float sanitized = SanitizeFrequency(cutoffHz);
-            float value = (float)(2.0 * Math.Sin(Math.PI * sanitized / XAudioFilterSampleRate));
+            float safeSampleRate = sampleRate >= 6000f ? sampleRate : DefaultXAudioFilterSampleRate;
+            sanitized = Math.Min(sanitized, GetMaxCutoffForSampleRate(safeSampleRate));
+            float value = (float)(2.0 * Math.Sin(Math.PI * sanitized / safeSampleRate));
             return Math.Max(0.0001f, Math.Min(MaxXAudioFilterFrequency, value));
+        }
+
+        private static float GetMaxCutoffForSampleRate(float sampleRate)
+        {
+            float safeSampleRate = sampleRate >= 6000f ? sampleRate : DefaultXAudioFilterSampleRate;
+            return Math.Max(MinFilterFrequency, safeSampleRate / 6f);
+        }
+
+        private static float ResolveSourceVoiceInputSampleRate(object sourceVoice)
+        {
+            if (sourceVoice == null)
+                return DefaultXAudioFilterSampleRate;
+
+            Type voiceType = sourceVoice.GetType();
+            if (VoiceDetailsPropertyMisses.Contains(voiceType))
+                return DefaultXAudioFilterSampleRate;
+
+            if (!VoiceDetailsProperties.TryGetValue(voiceType, out PropertyInfo property))
+            {
+                property = voiceType.GetProperty("VoiceDetails", InstanceMembers);
+                if (property == null)
+                {
+                    VoiceDetailsPropertyMisses.Add(voiceType);
+                    return DefaultXAudioFilterSampleRate;
+                }
+
+                VoiceDetailsProperties[voiceType] = property;
+            }
+
+            object details = null;
+            try
+            {
+                details = property.GetValue(sourceVoice, null);
+            }
+            catch
+            {
+                VoiceDetailsPropertyMisses.Add(voiceType);
+                return DefaultXAudioFilterSampleRate;
+            }
+
+            Type detailsType = details?.GetType();
+            if (detailsType == null || VoiceDetailsSampleRateMisses.Contains(detailsType))
+                return DefaultXAudioFilterSampleRate;
+
+            if (!VoiceDetailsSampleRateFields.TryGetValue(detailsType, out FieldInfo sampleRateField))
+            {
+                sampleRateField = detailsType.GetField("InputSampleRate", InstanceMembers);
+                if (sampleRateField == null)
+                {
+                    VoiceDetailsSampleRateMisses.Add(detailsType);
+                    return DefaultXAudioFilterSampleRate;
+                }
+
+                VoiceDetailsSampleRateFields[detailsType] = sampleRateField;
+            }
+
+            try
+            {
+                object raw = sampleRateField.GetValue(details);
+                float sampleRate = Convert.ToSingle(raw, CultureInfo.InvariantCulture);
+                return sampleRate >= 6000f ? sampleRate : DefaultXAudioFilterSampleRate;
+            }
+            catch
+            {
+                VoiceDetailsSampleRateMisses.Add(detailsType);
+                return DefaultXAudioFilterSampleRate;
+            }
         }
 
         private static float ToXAudioOneOverQ(float q)
@@ -325,6 +746,78 @@ namespace RealisticSoundPlus.AudioEngineV2
             float sanitized = SanitizeQ(q);
             float value = 1f / Math.Max(0.0001f, sanitized);
             return Math.Max(0.0001f, Math.Min(MaxXAudioOneOverQ, value));
+        }
+
+        private static string GetCustomFilterType(string subtype, RealisticSoundPlusSettings settings)
+        {
+            string value = string.Equals(subtype, Filter1Subtype, StringComparison.OrdinalIgnoreCase)
+                ? settings?.Filter1Type
+                : settings?.Filter2Type;
+            return NormalizeCustomFilterType(value);
+        }
+
+        private static void GetFilterParametersForEmitter(string subtype, RealisticSoundPlusSettings settings, MyEntity3DSoundEmitter emitter, out string filterType, out float frequency, out float q)
+        {
+            if (string.Equals(subtype, EngineFilterSubtype, StringComparison.OrdinalIgnoreCase)
+                && settings != null
+                && settings.EngineFilterDynamic
+                && emitter != null
+                && AudioEngineV2Runtime.IsHullOnlyFilterRoute(emitter)
+                && V2EngineFilterModel.TryCalculateHullOnly(emitter, settings, out V2EngineFilterSample hullOnlySample))
+            {
+                V2EngineFilterTelemetry.Record(hullOnlySample);
+                filterType = "LowPass";
+                frequency = hullOnlySample.FinalCutoff;
+                q = hullOnlySample.FinalQ;
+                return;
+            }
+
+            if (string.Equals(subtype, EngineFilterSubtype, StringComparison.OrdinalIgnoreCase)
+                && settings != null
+                && settings.EngineFilterDynamic
+                && emitter != null
+                && V2EngineFilterModel.TryCalculate(emitter, settings, out V2EngineFilterSample sample))
+            {
+                V2EngineFilterTelemetry.Record(sample);
+                filterType = "LowPass";
+                frequency = sample.FinalCutoff;
+                q = sample.FinalQ;
+                return;
+            }
+
+            frequency = string.Equals(subtype, EngineFilterSubtype, StringComparison.OrdinalIgnoreCase)
+                ? settings.Filter1Frequency
+                : settings.Filter2Frequency;
+            q = string.Equals(subtype, EngineFilterSubtype, StringComparison.OrdinalIgnoreCase)
+                ? settings.Filter1Q
+                : settings.Filter2Q;
+            filterType = GetCustomFilterType(subtype, settings);
+        }
+
+        private static string NormalizeCustomFilterType(string value)
+        {
+            switch ((value ?? string.Empty).Trim().ToLowerInvariant())
+            {
+                case "lowpass":
+                case "low":
+                case "lp": return "LowPass";
+                case "highpass":
+                case "high":
+                case "hp": return "HighPass";
+                case "bandpass":
+                case "band":
+                case "bp": return "BandPass";
+                case "notch":
+                case "reject":
+                case "bandreject": return "Notch";
+                default: return "LowPass";
+            }
+        }
+
+        private static object ToSharpFilterType(string filterType)
+        {
+            string normalized = NormalizeCustomFilterType(filterType);
+            return Enum.Parse(SharpFilterType, normalized + "Filter");
         }
 
         private static string DescribeEffect(IDictionary effects, string subtype)
@@ -400,9 +893,111 @@ namespace RealisticSoundPlus.AudioEngineV2
             _disabled = true;
         }
 
+        private static void LogLiveFilterReflectionFailure(string message)
+        {
+            if (_loggedLiveFilterReflectionFailure)
+                return;
+
+            _loggedLiveFilterReflectionFailure = true;
+            V2DebugLog.WriteEvent("live-filter-failed", message ?? "unknown");
+            MyLog.Default.WriteLine("[RealisticSoundPlus] Live custom audio filter update unavailable: " + (message ?? "unknown"));
+        }
+
+        private static void LogLiveEffectApplied(string subtype, string filterType, float frequency, float q)
+        {
+            if (!SettingsManager.Current.V2DebugLogEnabled)
+                return;
+
+            string normalizedFilterType = NormalizeCustomFilterType(filterType);
+            string signature = string.Format(CultureInfo.InvariantCulture, "{0}:{1}:{2:0.###}:{3:0.###}", subtype, normalizedFilterType, SanitizeFrequency(frequency), SanitizeQ(q));
+            DateTime now = DateTime.UtcNow;
+            if (string.Equals(_lastLiveEffectSignature, signature, StringComparison.Ordinal) && now - _lastLiveEffectLogUtc < TimeSpan.FromSeconds(2))
+                return;
+
+            _lastLiveEffectSignature = signature;
+            _lastLiveEffectLogUtc = now;
+            V2DebugLog.WriteEvent("live-filter-effect", string.Format(
+                CultureInfo.InvariantCulture,
+                "{0} type={1} freqHz={2:0.###} xfreq={3:0.######} q={4:0.###} oneOverQ={5:0.###}",
+                subtype,
+                normalizedFilterType,
+                SanitizeFrequency(frequency),
+                ToXAudioFrequency(frequency),
+                SanitizeQ(q),
+                ToXAudioOneOverQ(q)));
+        }
+
+        private static void LogLiveVoiceApplied(IMySourceVoice voice, string subtype, string filterType, float frequency, float q)
+        {
+            if (!SettingsManager.Current.V2DebugLogEnabled)
+                return;
+
+            string normalizedFilterType = NormalizeCustomFilterType(filterType);
+            object sourceVoice = ResolveSourceVoice(voice);
+            float sampleRate = ResolveSourceVoiceInputSampleRate(sourceVoice);
+            string readback = DescribeCurrentFilter(voice);
+            string signature = string.Format(CultureInfo.InvariantCulture, "{0}:{1}:{2:0.###}:{3:0.###}:{4}", subtype, normalizedFilterType, SanitizeFrequency(frequency), SanitizeQ(q), readback);
+            DateTime now = DateTime.UtcNow;
+            if (string.Equals(_lastLiveVoiceSignature, signature, StringComparison.Ordinal) && now - _lastLiveVoiceLogUtc < TimeSpan.FromSeconds(2))
+                return;
+
+            _lastLiveVoiceSignature = signature;
+            _lastLiveVoiceLogUtc = now;
+            V2DebugLog.WriteEvent("live-filter-voice", string.Format(
+                CultureInfo.InvariantCulture,
+                "{0} type={1} freqHz={2:0.###} xfreq={3:0.######} q={4:0.###} oneOverQ={5:0.###} sampleRate={6:0} maxHz={7:0.###} {8}",
+                subtype,
+                normalizedFilterType,
+                SanitizeFrequency(frequency),
+                ToXAudioFrequency(frequency, sampleRate),
+                SanitizeQ(q),
+                ToXAudioOneOverQ(q),
+                sampleRate,
+                GetMaxCutoffForSampleRate(sampleRate),
+                readback));
+        }
+
+        private static string DescribeCurrentFilter(IMySourceVoice voice)
+        {
+            if (voice == null || !HasLiveFilterReflection())
+                return "actual=unavailable";
+
+            object sourceVoice = ResolveSourceVoice(voice);
+            if (sourceVoice == null)
+                return "actual=source-missing";
+
+            MethodInfo getFilter = ResolveGetFilterMethod(sourceVoice.GetType());
+            if (getFilter == null)
+                return "actual=readback-missing";
+
+            try
+            {
+                object parameters = Activator.CreateInstance(SharpFilterParametersType);
+                object[] args = new[] { parameters };
+                getFilter.Invoke(sourceVoice, args);
+                object current = args[0];
+                return string.Format(
+                    CultureInfo.InvariantCulture,
+                    "actual={0} xfreq={1:0.######} oneOverQ={2:0.###} sampleRate={3:0} maxHz={4:0.###}",
+                    SharpFilterTypeField.GetValue(current),
+                    SharpFilterFrequencyField.GetValue(current),
+                    SharpFilterOneOverQField.GetValue(current),
+                    ResolveSourceVoiceInputSampleRate(sourceVoice),
+                    GetMaxCutoffForSampleRate(ResolveSourceVoiceInputSampleRate(sourceVoice)));
+            }
+            catch (Exception ex)
+            {
+                return "actual=readback-failed:" + ex.Message;
+            }
+        }
+
         private static Type ResolveType(string fullName)
         {
             Type type = Type.GetType(fullName + ", VRage.Audio", false);
+            if (type != null)
+                return type;
+
+            type = Type.GetType(fullName + ", SharpDX.XAudio2", false);
             if (type != null)
                 return type;
 

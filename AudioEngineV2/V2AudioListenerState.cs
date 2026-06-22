@@ -48,6 +48,9 @@ namespace RealisticSoundPlus.AudioEngineV2
             else if (contactGridId != 0L)
                 gridEntityId = contactGridId;
 
+            if (characterGridContact && !controlledShip && vanillaInside && !HasUsableVanillaRoom(roomName))
+                vanillaInside = false;
+
             bool insideShip = vanillaInside || seatedInteriorCamera;
             bool routeActive = insideShip || controlledShip || characterGridContact;
             string modeName = insideShip
@@ -70,6 +73,15 @@ namespace RealisticSoundPlus.AudioEngineV2
                 ContactSource = contactSource,
                 CharacterMovementState = characterMovementState
             };
+        }
+
+        private static bool HasUsableVanillaRoom(string roomName)
+        {
+            if (string.IsNullOrWhiteSpace(roomName))
+                return false;
+
+            return roomName.IndexOf("unavailable", StringComparison.OrdinalIgnoreCase) < 0
+                && roomName.IndexOf("room=?", StringComparison.OrdinalIgnoreCase) < 0;
         }
 
         private static bool TryGetCharacterGridContact(out long gridEntityId, out string source, out string movementState)

@@ -180,6 +180,98 @@ RSP should have one coherent filter/transmission decision for external/spatial e
 
 This keeps the interior ambience adjustable as one system while preserving the authored interior tone of the 2D state-machine files.
 
+### Planned Filter Path Model
+
+The filter model should be organized by audio path, not by an arbitrary number of filter slots. The current best design is a layered conceptual model that can still collapse to one or two actual runtime filters if the game API requires it.
+
+`EngineRouteModel` is engine-specific. It answers what reaches the listener location from the ship's engines before considering the air around the player's ears. It should ignore the player's local room atmosphere so a depressurized bridge does not erase the fact that engine vibration can still travel through the ship structure.
+
+The engine route should be modeled as two parallel subpaths:
+
+| Subpath | Depends on | Intended sound character |
+| --- | --- | --- |
+| Airborne exterior path | outside atmosphere around the hull, source/listener distance, exterior-to-interior hull/room occlusion | bright in atmosphere, darker with distance, weak or absent in vacuum |
+| Structure-borne hull path | physical connection to the grid, ship/hull structure, rough source-to-listener structural distance | low, dull, tactile, mildly metallic, still present in vacuum when the listener is attached to the ship |
+
+In full vacuum inside a ship, the airborne exterior path should be absent or nearly absent, while the structure-borne path can remain. In full atmosphere inside a sealed bridge, both paths can exist: exterior air can carry engine energy to the hull, the hull/bridge attenuates it heavily, and structure-borne rumble stacks underneath.
+
+`PlayerMediumModel` is listener-specific and should apply after the engine route. It answers what the player's current surroundings can transmit to the ear:
+
+- full-pressure room: mostly open listener medium
+- partial-pressure room or airlock: additional player-local muffling
+- full vacuum while touching or seated in a ship: structure/body/contact route only
+- full vacuum while not touching a ship: silence for physical-world audio routes
+
+This player-local medium filter should eventually apply to more than engines, including sound-emitting blocks and ship machinery, because a depressurized room should affect the whole audible world.
+
+Practical runtime order:
+
+```text
+engine detail/state source
+  -> engine route mix
+       airborne exterior contribution
+       + structure-borne hull contribution
+  -> player medium filter
+  -> final gain
+```
+
+If only one actual filter can be applied, combine the conceptual layers by using the lower cutoff frequency, multiplying gain reductions, and selecting the more structure-like Q only when the structure/contact path is dominant. If two actual filters are stable, use one engine route filter and one player medium filter. Avoid adding a third actual filter until a distinct source group needs independent control.
+
+Initial Q guidance:
+
+| Route | Q range | Notes |
+| --- | ---: | --- |
+| open airborne route | `0.67..0.85` | broad, non-resonant atmospheric dulling |
+| exterior distance through air | `0.70..0.85` | mostly high-frequency absorption, not a metallic peak |
+| sealed bridge/hull occlusion | `0.75..1.00` | broad hull attenuation with slight color |
+| structure-borne hull/contact route | `0.95..1.30` | low, tactile, mildly resonant ship-body sound |
+| stylized metal/contact emphasis | `1.30..1.50` | use sparingly; can become obviously ringy |
+
+Pressure should primarily drive cutoff and gain. Q should primarily follow the route type: air path lower, sealed/hull path moderate, structure/contact path higher.
+
+### Filter API Capability Notes
+
+The current custom filters are runtime `MyAudioEffect` definitions. Reflection against the game assemblies confirms:
+
+- runtime type: `VRage.Data.Audio.MyAudioEffect`
+- nested runtime effect type: `VRage.Data.Audio.MyAudioEffect.SoundEffect`
+- available fields: `VolumeCurve`, `Duration`, `Filter`, `Frequency`, `StopAfter`, `OneOverQ`
+- filter enum: `LowPass`, `BandPass`, `HighPass`, `Notch`, `None`
+- object-builder XML type also exposes `Filter`, `Frequency`, and `Q`
+
+Vanilla `AudioEffects.sbc` only uses `LowPass` for its stock filter definitions, so `BandPass`, `HighPass`, and `Notch` need in-game validation before becoming part of the normal route model. Still, the enum support strongly suggests RSP can extend the custom filter controls beyond low-pass without inventing a new audio effect system.
+
+Near-term filter-control plan:
+
+- `filter1` has become the user-facing `enginefilter`; old `filter1` commands remain compatibility aliases
+- `filter2` has become the user-facing `auxfilter`; old `filter2` commands remain compatibility aliases
+- `enginefilter` is now the main V2 detail-engine filter route and should run as one low-pass source-voice filter per emitter
+- dynamic `enginefilter` calculates unique per-emitter cutoff/Q from listener distance, listener/source atmosphere, inside/contact state, and air/hull path controls
+- `auxfilter` is reserved for later non-engine/block ambience filtering
+- expose an atmosphere test override so all V2 atmosphere pressure reads can be forced to `0..1` without flying between vacuum and atmosphere
+- keep broad legacy `muffling`, `interior`, and `atmfloor` controls out of the main menu while the new engine-route model replaces them
+
+### Non-Engine Block Sound Filtering
+
+Other ship block sounds, such as medical rooms, vents, generators, doors, production blocks, and machinery ambience, should not automatically be recreated by RSP. The least invasive route is to let vanilla keep owning the emitter and cue, then use the existing `MyEntity3DSoundEmitter.SelectEffect` hook to return an RSP filter effect when the emitter is confidently classified as a physical ship block source.
+
+This gives three possible levels of control:
+
+| Strategy | What RSP controls | Best use |
+| --- | --- | --- |
+| Filter existing vanilla emitter | filter/effect selection, possibly route classification | first pass for pressure/room muffling on block ambience |
+| Tag and gently manage vanilla emitter | filter/effect plus optional volume diagnostics or narrow suppression | sounds that need player-medium filtering but still use vanilla source behavior |
+| Block and recreate emitter | source cue, position, volume, distance, filter, state machine | only for sounds whose vanilla behavior conflicts with the RSP model |
+
+The first pass should prefer filtering existing emitters. Blocking and recreating every block sound would be expensive, fragile, and likely to fight vanilla gameplay audio. Recreating should be reserved for confirmed problem sounds where vanilla cannot expose the control needed.
+
+Open implementation questions:
+
+- Can existing non-engine vanilla emitters pick up a changed custom filter in real time, or only when their sound/effect is rebound?
+- Which emitter fields reliably identify the owning block/entity for physical ship sources?
+- Can UI, character, music, radio, and warning sounds be excluded cleanly from the block ambience route?
+- Does the stock audio engine already choose `Real...` variants for some block sounds in vacuum, and if so should RSP preserve that source-file choice or replace it with filter modeling?
+
 ## Vanilla Ship Sound System
 
 `ShipSoundGroups.sbc` defines the grid-level variable-driven ship sound system.
@@ -427,6 +519,92 @@ Centralizes all gain/filter decisions:
 - cockpit/helmet low-pass selection
 - hull muffling
 - per-layer gain curves
+
+### Player/Aux Environment Probe
+
+The wind/environment path should not use the same math as block emitters. Block sounds use source-to-listener occlusion rays, because each block has a physical source position. Wind and weather use a listener exposure model instead: a stable full-sphere ray probe from the player/listener into open air.
+
+Current live design:
+
+- 26 sphere probes from the listener: top, bottom, and three 8-ray rings.
+- Natural gravity defines the stable vertical basis when available; camera-up is only a zero-gravity fallback.
+- Upward, side, and downward openings all contribute, so gantries, floor hatches, caves, hangar pits, and underside-open structures can expose the listener to wind correctly.
+- `OpenFraction` is the weighted open-air fraction, not just raw open ray count.
+- Vanilla room/seal state can add sealed-room deadening on top of the continuous ray result.
+- Wind/environment voices use this listener exposure, local atmosphere, and the environment bed floor. Block emitters continue to use source-to-player path occlusion.
+
+### `PlayerEnvironmentProbe`
+
+Readout-only first pass for future non-engine/wind filtering:
+
+- samples camera/player openness with short reflection-driven physics rays
+- reports open-ray fraction, structural occlusion, continuous wind muffling, and final wind audibility
+- uses vanilla inside-room/ship state only as an additional sealed-room estimate, not as the whole model
+- applies a configurable sealed-room extra muffling amount when the listener is inside and ray openness is very low
+- logs the values once per second with the V2 debug log
+
+This does not filter wind or block sounds yet. It exists so cave, base entrance, deep interior, sealed room, and open exterior readings can be tested before attaching it to `auxfilter`.
+
+### `PlayerAuxFilter`
+
+First direct-filter pass for non-engine player soundscape categories:
+
+- `environment`: wind, rain, thunder, lightning, and weather-style voices
+- `block`: physical non-engine block/world emitters such as vents, medical rooms, generators, refineries, assemblers, doors, and machinery ambience
+- `local`: player-local cues such as footsteps, breathing, body impacts, landing/jumping, and similar character sounds
+
+The implementation deliberately uses a compact shared control surface:
+
+- one master `playerfilter` toggle
+- category toggles for `envfilter`, `blockfilter`, and `localfilter`
+- `auxfilterfreq` as the clear/bright cutoff
+- `auxmufflefreq` as the fully muffled cutoff
+- `auxfilterq` as shared Q
+- `auxatmoverride` and `auxatm` as a player/aux-only pressure simulation path
+- `blockrange` and `blockcurve` for physical source distance contribution
+
+Current math:
+
+- Environment/weather: `muffle = local structural occlusion + remaining * vacuum amount`.
+- Block/world source: `muffle = source-to-listener occlusion + remaining * source distance + remaining * sealed-room extra + remaining * vacuum amount`.
+- Player-local: `muffle = 1 - local atmosphere`; no wall occlusion is applied to sounds attached to the player.
+- Final cutoff uses logarithmic interpolation between `auxfilterfreq` and `auxmufflefreq`.
+- Aux pressure override replaces the atmosphere value only inside this player/aux filter model, leaving engine `EngineFilter` atmosphere simulation independent.
+
+Important limitation:
+
+Filtering only changes voices that still exist. If vanilla fully stops wind in a sealed room, RSP cannot make that stopped wind audible by filtering it. Persistent muffled wind in partial occlusion will require an RSP-owned wind/environment bed once the correct vanilla weather cues are mapped.
+
+### `AuxSourceOcclusionModel`
+
+Readout and filter driver for non-engine 3D block/machinery sounds:
+
+- keep engine sounds on `EngineFilter`
+- classify confirmed non-engine physical emitters into an `auxfilter` route
+- leave UI, music, suit voice, HUD alerts, and other non-world sounds unfiltered
+- treat player-local sounds such as footsteps/breathing/tools as local-atmosphere filtered only, not wall-occlusion filtered
+- calculate per-source occlusion from each emitter position to the listener, not just from the listener's global environment
+- use several short-offset rays from listener to source so a single rail/edge hit does not over-muffle a nearby source
+- combine source-to-listener ray blockage, distance, vanilla inside-room/sealed signal, and local atmosphere
+- apply sealed-room extra muffling only when the listener is inside/sealed and the source path is blocked or outside the listener's room-like volume
+- expose a live table showing cue, class, distance, open rays, occlusion, cutoff, Q, and gain for the strongest aux candidates
+- log the strongest candidates once per second while V2 debug logging is enabled
+- feed the first-pass direct `PlayerAuxFilter` for currently playing physical non-engine source voices
+
+Design examples:
+
+- Wind and exterior weather have no useful local source position, so they use the listener-facing `PlayerEnvironmentProbe` exposure value.
+- A medical room or generator inside the same control room should remain relatively bright even if the player is deep inside a base.
+- An identical generator outside the sealed control room should receive stronger low-pass and gain reduction because its source-to-listener rays are blocked by walls/doors.
+- A machine several rooms away should become progressively darker/quieter with source path occlusion and distance, even if it is on the same static grid.
+
+Future pressure-driven filtering target:
+
+- If the custom runtime filters prove stable, use room/airlock pressure as a continuous filter driver rather than a binary vacuum/pressurized switch.
+- As an airlock vents, interpolate cutoff frequency, Q, and gain/transmission between pressurized interior values and vacuum/hull-conduction values in real time.
+- As an airlock repressurizes, reverse that interpolation smoothly so engine sound blooms back through the room with pressure.
+- This should apply first to RSP-controlled engine-detail and state-machine routes, then later to other ship ambience if the behavior is reliable.
+- The debug overlay/log should expose current pressure, selected filter route, cutoff frequency, Q, and final transmission value when this work begins.
 
 ## Interior Audio Direction
 

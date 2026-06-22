@@ -1,0 +1,1015 @@
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Reflection;
+using System.Text;
+using RealisticSoundPlus.Patches;
+using Sandbox.Game.Entities;
+using Sandbox.ModAPI;
+using VRage.Audio;
+using VRageMath;
+
+namespace RealisticSoundPlus.AudioEngineV2
+{
+    internal static class V2PlayerFilterRuntime
+    {
+        private static readonly TimeSpan UpdateInterval = TimeSpan.Zero;
+        private static readonly TimeSpan SampleLifetime = TimeSpan.FromSeconds(2);
+        private const float FilterBypassMuffle = 0.10f;
+        private const BindingFlags InstanceMembers = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+        private static readonly Dictionary<IMySourceVoice, string> LastVoiceSignatures = new Dictionary<IMySourceVoice, string>();
+        private static readonly Dictionary<IMySourceVoice, AuxFilterSmoothingState> FilterSmoothingStates = new Dictionary<IMySourceVoice, AuxFilterSmoothingState>();
+        private static readonly Dictionary<IMySourceVoice, AuxVolumeSmoothingState> VolumeSmoothingStates = new Dictionary<IMySourceVoice, AuxVolumeSmoothingState>();
+        private static readonly Dictionary<IMySourceVoice, float> BaseVoiceMultipliers = new Dictionary<IMySourceVoice, float>();
+        private static readonly Dictionary<IMySourceVoice, float> BaseVoiceRawVolumes = new Dictionary<IMySourceVoice, float>();
+        private static readonly Dictionary<IMySourceVoice, string> LastVoiceVolumeSignatures = new Dictionary<IMySourceVoice, string>();
+        private static readonly Dictionary<Type, MemberInfo> RawVoiceVolumeMembers = new Dictionary<Type, MemberInfo>();
+        private static readonly Dictionary<Type, HashSet<string>> RejectedRawVoiceVolumeMembers = new Dictionary<Type, HashSet<string>>();
+        private static readonly HashSet<Type> RawVoiceVolumeMemberMisses = new HashSet<Type>();
+        private static readonly HashSet<Type> RawVoiceVolumeMemberLogs = new HashSet<Type>();
+        private static readonly HashSet<Type> RawVoiceVolumeWriteFailureLogs = new HashSet<Type>();
+        private static readonly HashSet<Type> RawVoiceVolumeVerifyFailureLogs = new HashSet<Type>();
+        private static readonly Dictionary<string, V2PlayerFilterSample> Samples = new Dictionary<string, V2PlayerFilterSample>(StringComparer.OrdinalIgnoreCase);
+        private static DateTime _lastUpdateUtc = DateTime.MinValue;
+        private static DateTime _lastLogUtc = DateTime.MinValue;
+        private static bool _wasEnabled;
+
+        public static void Reset()
+        {
+            LastVoiceSignatures.Clear();
+            FilterSmoothingStates.Clear();
+            VolumeSmoothingStates.Clear();
+            BaseVoiceMultipliers.Clear();
+            BaseVoiceRawVolumes.Clear();
+            LastVoiceVolumeSignatures.Clear();
+            RawVoiceVolumeMembers.Clear();
+            RejectedRawVoiceVolumeMembers.Clear();
+            RawVoiceVolumeMemberMisses.Clear();
+            RawVoiceVolumeMemberLogs.Clear();
+            RawVoiceVolumeWriteFailureLogs.Clear();
+            RawVoiceVolumeVerifyFailureLogs.Clear();
+            Samples.Clear();
+            _lastUpdateUtc = DateTime.MinValue;
+            _lastLogUtc = DateTime.MinValue;
+            _wasEnabled = false;
+        }
+
+        public static void Update()
+        {
+            DateTime now = DateTime.UtcNow;
+            if (UpdateInterval > TimeSpan.Zero && now - _lastUpdateUtc < UpdateInterval)
+                return;
+
+            _lastUpdateUtc = now;
+            RealisticSoundPlusSettings settings = SettingsManager.Current;
+            if (MyAudio.Static == null)
+                return;
+
+            MyPlayedSounds played = MyAudio.Static.GetCurrentlyPlayedSounds();
+            if (!settings.PlayerFilterEnabled)
+            {
+                if (_wasEnabled)
+                    ClearTrackedVoices();
+                _wasEnabled = false;
+                PurgeSamples();
+                return;
+            }
+
+            _wasEnabled = true;
+            ProcessVoices(played.Sound, settings, now);
+            PurgeSamples();
+            LogIfDue();
+        }
+
+        public static string FormatSummary()
+        {
+            PurgeSamples();
+            int env = 0;
+            int block = 0;
+            int local = 0;
+            float strongest = 0f;
+            V2PlayerFilterSample strongestSample = default(V2PlayerFilterSample);
+
+            foreach (V2PlayerFilterSample sample in Samples.Values)
+            {
+                switch (sample.Category)
+                {
+                    case "env": env++; break;
+                    case "block": block++; break;
+                    case "local": local++; break;
+                }
+
+                if (sample.Score >= strongest)
+                {
+                    strongest = sample.Score;
+                    strongestSample = sample;
+                }
+            }
+
+            if (env + block + local == 0)
+                return "No player-filtered voices observed yet.";
+
+            RealisticSoundPlusSettings settings = SettingsManager.Current;
+            return string.Format(
+                CultureInfo.InvariantCulture,
+                "env={0} block={1} local={2} auxAtm={3} envFloor={4:0.00} envCut={14:0}Hz smooth={15:0}ms volW={11:0.00}/{12:0.00}/{13:0.00} strongest={5}/{6} muff={7:0.00} freq={8:0}Hz q={9:0.00} gain={10:0.00}",
+                env,
+                block,
+                local,
+                settings.PlayerFilterAtmosphereOverrideEnabled ? settings.PlayerFilterAtmosphereOverride.ToString("0.00", CultureInfo.InvariantCulture) : "real",
+                settings.PlayerFilterEnvironmentMinGain,
+                strongestSample.Category ?? "?",
+                Trim(strongestSample.CueName, 24),
+                strongestSample.Muffle,
+                strongestSample.Frequency,
+                strongestSample.Q,
+                strongestSample.VolumeGain,
+                settings.PlayerFilterEnvironmentVolumeMuffleWeight,
+                settings.PlayerFilterBlockVolumeMuffleWeight,
+                settings.PlayerFilterLocalVolumeMuffleWeight,
+                settings.PlayerFilterEnvironmentMuffledFrequency,
+                settings.PlayerFilterSmoothingMs);
+        }
+
+        public static string FormatSources(int maxLines)
+        {
+            PurgeSamples();
+            if (Samples.Count == 0)
+                return "cat  cue  muff  freq  q  atm  dist range gain raw base target out/req car";
+
+            List<V2PlayerFilterSample> sorted = new List<V2PlayerFilterSample>(Samples.Values);
+            sorted.Sort((left, right) => right.Score.CompareTo(left.Score));
+
+            StringBuilder builder = new StringBuilder();
+            builder.Append("cat cue                 muff  freq   q   atm  dist range        gain raw base target out/req car");
+            int count = Math.Min(maxLines, sorted.Count);
+            for (int i = 0; i < count; i++)
+            {
+                V2PlayerFilterSample sample = sorted[i];
+                builder.AppendLine();
+                builder.AppendFormat(
+                    CultureInfo.InvariantCulture,
+                    "{0,-5}{1,-20} {2:0.00} {3,5:0} {4:0.00} {5:0.00} {6,4:0} {15,-11} {7:0.00} {8:0.00}/{9:0.00} {10:0.00} {11:0.00} {12:0.00}/{13:0.00} {14}",
+                    sample.Category ?? "?",
+                    Trim(sample.CueName, 19),
+                    sample.Muffle,
+                    sample.Frequency,
+                    sample.Q,
+                    sample.LocalAtmosphere,
+                    sample.Distance,
+                    sample.VolumeGain,
+                    sample.VoiceVolume,
+                    sample.VoiceMultiplier,
+                    sample.BaseVoiceMultiplier,
+                    sample.TargetMultiplier,
+                    sample.EffectiveOutput,
+                    sample.RequestedOutput,
+                    sample.EnvironmentCarrierForced ? "F" : sample.EnvironmentCarrierUnavailable ? "!" : "-",
+                    FormatRange(sample));
+            }
+
+            return builder.ToString();
+        }
+
+        public static string FormatEnvironmentLiveReadout()
+        {
+            if (!V2PlayerEnvironmentTelemetry.TryGetLatest(out V2PlayerEnvironmentSample env))
+                return "Coverage: --  Muffled: --  Volume: --";
+
+            RealisticSoundPlusSettings settings = SettingsManager.Current;
+            float localAtmosphere = GetEffectiveAtmosphere(env.LocalAtmosphere, settings);
+            float pressureMuffle = 1f - Clamp01(localAtmosphere);
+            float muffle = Combine(env.FinalMuffling, pressureMuffle);
+            float volume = CalculateEnvironmentGain(env, localAtmosphere, muffle, settings, false);
+            float coverage = Clamp01(1f - env.OpenFraction);
+
+            return string.Format(
+                CultureInfo.InvariantCulture,
+                "Coverage: {0:0}%    Muffled: {1:0}%    Volume: {2:0}%",
+                coverage * 100f,
+                muffle * 100f,
+                volume * 100f);
+        }
+
+        private static string FormatRange(V2PlayerFilterSample sample)
+        {
+            if (!string.Equals(sample.Category, "block", StringComparison.OrdinalIgnoreCase) || sample.EffectiveRange <= 0.5f)
+                return "-";
+
+            return string.Format(
+                CultureInfo.InvariantCulture,
+                "{0:0}/{1:0}{2}",
+                sample.VanillaMaxDistance,
+                sample.EffectiveRange,
+                sample.CustomRangeApplied ? "*" : "");
+        }
+
+        private static void ProcessVoices(List<IMySourceVoice> voices, RealisticSoundPlusSettings settings, DateTime now)
+        {
+            if (voices == null || voices.Count == 0)
+                return;
+
+            Dictionary<string, int> cueOrdinals = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < voices.Count; i++)
+            {
+                IMySourceVoice voice = voices[i];
+                if (voice == null || !voice.IsValid || !voice.IsPlaying)
+                    continue;
+
+                string cueName = voice.CueEnum.ToString();
+                float baseMultiplier = BaseVoiceMultipliers.TryGetValue(voice, out float trackedBase)
+                    ? trackedBase
+                    : voice.VolumeMultiplier;
+                float score = Math.Max(0f, voice.Volume * baseMultiplier);
+                bool possibleEnvironment = settings.PlayerFilterEnvironmentEnabled && V2AuxCueClassifier.IsEnvironmentCue(cueName);
+                if (string.IsNullOrWhiteSpace(cueName) || cueName == "NullOrEmpty" || (score <= 0.001f && !possibleEnvironment))
+                    continue;
+
+                int cueOrdinal = 0;
+                cueOrdinals.TryGetValue(cueName, out cueOrdinal);
+                cueOrdinals[cueName] = cueOrdinal + 1;
+
+                if (!TryClassifyAndCalculate(voice, cueName, cueOrdinal, score, settings, out V2PlayerFilterSample sample))
+                {
+                    ClearVoiceControlsIfTracked(voice, settings);
+                    continue;
+                }
+
+                sample.VoiceVolume = voice.Volume;
+                sample.VoiceMultiplier = voice.VolumeMultiplier;
+                sample.UpdatedUtc = now;
+                if (sample.Muffle > FilterBypassMuffle)
+                    sample.Applied = ApplyFilterIfChanged(voice, settings.Filter2Type, sample.Frequency, sample.Q, sample.Category);
+                else
+                    ClearVoiceFilterIfTracked(voice, settings);
+
+                if (ApplyVolumeIfNeeded(voice, ref sample))
+                    sample.Applied = true;
+
+                Samples[BuildKey(sample)] = sample;
+            }
+        }
+
+        private static bool TryClassifyAndCalculate(IMySourceVoice voice, string cueName, int cueOrdinal, float score, RealisticSoundPlusSettings settings, out V2PlayerFilterSample sample)
+        {
+            sample = default(V2PlayerFilterSample);
+            if (V2AuxCueClassifier.IsNonWorldCue(cueName))
+                return false;
+
+            if (V2AuxCueClassifier.IsEngineCue(cueName))
+                return false;
+
+            if (settings.PlayerFilterLocalEnabled && V2AuxCueClassifier.IsPlayerLocalCue(cueName))
+                return TryCalculatePlayerLocal(cueName, score, settings, out sample);
+
+            bool knownBlockCue = V2AuxCueClassifier.IsKnownBlockCue(cueName);
+            bool blockCueNeedsResolvedSource = V2AuxCueClassifier.IsKnownBlockCueButNeedsPhysicalSource(cueName);
+            if (settings.PlayerFilterBlockEnabled && (knownBlockCue || blockCueNeedsResolvedSource) && TryCalculateResolvedBlock(cueName, cueOrdinal, score, settings, out sample))
+                return true;
+
+            if (settings.PlayerFilterBlockEnabled && RspDynamicAudioFilters.TryResolveEmitter(voice, out MyEntity3DSoundEmitter emitter) && emitter != null)
+                return TryCalculateBlock(cueName, score, settings, emitter, out sample);
+
+            if (blockCueNeedsResolvedSource)
+                return false;
+
+            if (settings.PlayerFilterEnvironmentEnabled && V2AuxCueClassifier.IsEnvironmentCue(cueName))
+                return TryCalculateEnvironment(cueName, score, settings, out sample);
+
+            return false;
+        }
+
+        private static bool TryCalculateEnvironment(string cueName, float score, RealisticSoundPlusSettings settings, out V2PlayerFilterSample sample)
+        {
+            sample = default(V2PlayerFilterSample);
+            if (!V2PlayerEnvironmentTelemetry.TryGetLatest(out V2PlayerEnvironmentSample env))
+                return false;
+
+            float localAtmosphere = GetEffectiveAtmosphere(env.LocalAtmosphere, settings);
+            float pressureMuffle = 1f - Clamp01(localAtmosphere);
+            float muffle = Combine(env.FinalMuffling, pressureMuffle);
+            bool vanillaSuppressed = score <= 0.001f;
+            if (muffle <= FilterBypassMuffle)
+            {
+                if (!vanillaSuppressed || settings.PlayerFilterEnvironmentMinGain <= 0f)
+                    return false;
+
+                muffle = 1f;
+            }
+
+            sample = new V2PlayerFilterSample
+            {
+                Category = "env",
+                CueName = cueName,
+                Score = score,
+                Distance = 0f,
+                Muffle = muffle,
+                Frequency = BlendCutoff(settings.Filter2Frequency, settings.PlayerFilterEnvironmentMuffledFrequency, muffle),
+                Q = settings.Filter2Q,
+                LocalAtmosphere = localAtmosphere,
+                OpenFraction = env.OpenFraction,
+                VolumeGain = CalculateEnvironmentGain(env, localAtmosphere, muffle, settings, vanillaSuppressed)
+            };
+            return true;
+        }
+
+        private static bool TryCalculateBlock(string cueName, float score, RealisticSoundPlusSettings settings, MyEntity3DSoundEmitter emitter, out V2PlayerFilterSample sample)
+        {
+            sample = default(V2PlayerFilterSample);
+            if (!V2AuxSourceOcclusionTelemetry.TryCalculate("S", cueName, score, emitter, out V2AuxSourceOcclusionSample aux))
+                return false;
+
+            float localAtmosphere = GetEffectiveAtmosphere(aux.LocalAtmosphere, settings);
+            float pressureMuffle = 1f - Clamp01(localAtmosphere);
+            float muffle = Combine(aux.FinalMuffling, pressureMuffle);
+            sample = new V2PlayerFilterSample
+            {
+                Category = "block",
+                CueName = cueName,
+                Score = score,
+                Distance = aux.Distance,
+                Muffle = muffle,
+                Frequency = BlendCutoff(settings.Filter2Frequency, settings.PlayerFilterBlockMuffledFrequency, muffle),
+                Q = settings.Filter2Q,
+                LocalAtmosphere = localAtmosphere,
+                OpenFraction = aux.OpenFraction,
+                VanillaMaxDistance = aux.VanillaMaxDistance,
+                EffectiveRange = aux.EffectiveRange,
+                RangeScale = aux.RangeScale,
+                CustomRangeApplied = aux.CustomRangeApplied,
+                VolumeGain = aux.EstimatedGain * CalculateMuffleVolumeGain(muffle, settings.PlayerFilterBlockVolumeMuffleWeight)
+            };
+            return true;
+        }
+
+        private static bool TryCalculateResolvedBlock(string cueName, int cueOrdinal, float score, RealisticSoundPlusSettings settings, out V2PlayerFilterSample sample)
+        {
+            sample = default(V2PlayerFilterSample);
+            Vector3D listener = AudioEngineV2Runtime.Listener.Position;
+            if (listener == Vector3D.Zero)
+                listener = MyAPIGateway.Session?.Camera?.Position ?? Vector3D.Zero;
+
+            if (!V2BlockSoundSourceResolver.TryResolve(cueName, listener, cueOrdinal, out Vector3D source, out string sourceLabel))
+                return false;
+
+            if (!V2AuxSourceOcclusionTelemetry.TryCalculate("S", cueName, score, source, out V2AuxSourceOcclusionSample aux))
+                return false;
+
+            float localAtmosphere = GetEffectiveAtmosphere(aux.LocalAtmosphere, settings);
+            float pressureMuffle = 1f - Clamp01(localAtmosphere);
+            float muffle = Combine(aux.FinalMuffling, pressureMuffle);
+
+            sample = new V2PlayerFilterSample
+            {
+                Category = "block",
+                CueName = string.IsNullOrWhiteSpace(sourceLabel)
+                    ? cueName + "#" + cueOrdinal.ToString(CultureInfo.InvariantCulture)
+                    : cueName + "#" + cueOrdinal.ToString(CultureInfo.InvariantCulture) + "@" + Trim(sourceLabel, 18),
+                Score = score,
+                Distance = aux.Distance,
+                Muffle = muffle,
+                Frequency = BlendCutoff(settings.Filter2Frequency, settings.PlayerFilterBlockMuffledFrequency, muffle),
+                Q = settings.Filter2Q,
+                LocalAtmosphere = localAtmosphere,
+                OpenFraction = aux.OpenFraction,
+                VanillaMaxDistance = aux.VanillaMaxDistance,
+                EffectiveRange = aux.EffectiveRange,
+                RangeScale = aux.RangeScale,
+                CustomRangeApplied = aux.CustomRangeApplied,
+                VolumeGain = aux.EstimatedGain * CalculateMuffleVolumeGain(muffle, settings.PlayerFilterBlockVolumeMuffleWeight)
+            };
+            return true;
+        }
+
+        private static bool TryCalculatePlayerLocal(string cueName, float score, RealisticSoundPlusSettings settings, out V2PlayerFilterSample sample)
+        {
+            sample = default(V2PlayerFilterSample);
+            float localAtmosphere = 1f;
+            if (V2PlayerEnvironmentTelemetry.TryGetLatest(out V2PlayerEnvironmentSample env))
+                localAtmosphere = env.LocalAtmosphere;
+
+            localAtmosphere = GetEffectiveAtmosphere(localAtmosphere, settings);
+            float muffle = Clamp01(1f - localAtmosphere);
+            if (muffle <= FilterBypassMuffle)
+                return false;
+
+            sample = new V2PlayerFilterSample
+            {
+                Category = "local",
+                CueName = cueName,
+                Score = score,
+                Distance = 0f,
+                Muffle = muffle,
+                Frequency = BlendCutoff(settings.Filter2Frequency, settings.PlayerFilterMuffledFrequency, muffle),
+                Q = settings.Filter2Q,
+                LocalAtmosphere = localAtmosphere,
+                OpenFraction = 1f,
+                VolumeGain = CalculateMuffleVolumeGain(muffle, settings.PlayerFilterLocalVolumeMuffleWeight)
+            };
+            return true;
+        }
+
+        private static bool ApplyVolumeIfNeeded(IMySourceVoice voice, ref V2PlayerFilterSample sample)
+        {
+            if (voice == null || !voice.IsValid)
+                return false;
+
+            bool controlsVolume = string.Equals(sample.Category, "block", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(sample.Category, "env", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(sample.Category, "local", StringComparison.OrdinalIgnoreCase);
+            if (!controlsVolume)
+            {
+                RestoreVoiceVolumeIfTracked(voice);
+                return false;
+            }
+
+            bool environment = string.Equals(sample.Category, "env", StringComparison.OrdinalIgnoreCase);
+            float gainLimit = string.Equals(sample.Category, "block", StringComparison.OrdinalIgnoreCase) ? 6f : 1f;
+            float gain = Clamp(sample.VolumeGain <= 0f ? 0f : sample.VolumeGain, 0f, gainLimit);
+            if (!BaseVoiceMultipliers.TryGetValue(voice, out float baseMultiplier))
+            {
+                baseMultiplier = voice.VolumeMultiplier;
+                BaseVoiceMultipliers[voice] = baseMultiplier;
+            }
+
+            float controlBase = baseMultiplier;
+            if (environment && controlBase <= 0.001f)
+                controlBase = 1f;
+
+            float target = controlBase * gain;
+            float observedVolume = voice.Volume;
+            if (environment && observedVolume <= 0.001f && target > 0.001f)
+            {
+                if (TryForceEnvironmentCarrierVolume(voice, 1f, out observedVolume))
+                    sample.EnvironmentCarrierForced = true;
+                else
+                    sample.EnvironmentCarrierUnavailable = true;
+            }
+
+            sample.BaseVoiceMultiplier = baseMultiplier;
+            sample.TargetMultiplier = target;
+            sample.VoiceVolume = observedVolume;
+            sample.RequestedOutput = observedVolume * target;
+            sample.EffectiveOutput = observedVolume * voice.VolumeMultiplier;
+            float smoothedTarget = SmoothVolumeMultiplier(voice, target, sample.Category);
+            string signature = string.Format(CultureInfo.InvariantCulture, "{0}:{1:0.000}:{2:0.000}", sample.Category ?? "?", smoothedTarget, controlBase);
+            if (LastVoiceVolumeSignatures.TryGetValue(voice, out string previous)
+                && string.Equals(previous, signature, StringComparison.Ordinal)
+                && Math.Abs(voice.VolumeMultiplier - smoothedTarget) <= 0.002f)
+            {
+                sample.EffectiveOutput = observedVolume * voice.VolumeMultiplier;
+                return true;
+            }
+
+            voice.VolumeMultiplier = smoothedTarget;
+            sample.VoiceMultiplier = voice.VolumeMultiplier;
+            sample.EffectiveOutput = observedVolume * voice.VolumeMultiplier;
+            LastVoiceVolumeSignatures[voice] = signature;
+            return true;
+        }
+
+        private static void RestoreVoiceVolumeIfTracked(IMySourceVoice voice)
+        {
+            if (voice == null)
+                return;
+
+            FilterSmoothingStates.Remove(voice);
+            VolumeSmoothingStates.Remove(voice);
+
+            if (BaseVoiceMultipliers.TryGetValue(voice, out float baseMultiplier) && voice.IsValid)
+                voice.VolumeMultiplier = baseMultiplier;
+
+            if (BaseVoiceRawVolumes.TryGetValue(voice, out float rawVolume) && voice.IsValid && rawVolume > 0.001f)
+                TrySetRawVoiceVolume(voice, rawVolume, false);
+
+            BaseVoiceMultipliers.Remove(voice);
+            BaseVoiceRawVolumes.Remove(voice);
+            LastVoiceVolumeSignatures.Remove(voice);
+        }
+
+        private static bool TryForceEnvironmentCarrierVolume(IMySourceVoice voice, float targetVolume, out float observedVolume)
+        {
+            observedVolume = voice?.Volume ?? 0f;
+            if (voice == null || !voice.IsValid)
+                return false;
+
+            if (observedVolume > 0.001f)
+                return true;
+
+            if (!BaseVoiceRawVolumes.ContainsKey(voice))
+                BaseVoiceRawVolumes[voice] = observedVolume;
+
+            if (!TrySetRawVoiceVolume(voice, targetVolume, true))
+            {
+                BaseVoiceRawVolumes.Remove(voice);
+                return false;
+            }
+
+            observedVolume = voice.Volume;
+            if (observedVolume > 0.001f)
+                return true;
+
+            Type type = voice.GetType();
+            RawVoiceVolumeMembers.TryGetValue(type, out MemberInfo member);
+            RejectRawVoiceVolumeMember(type, member, "readback-zero");
+            if (RawVoiceVolumeVerifyFailureLogs.Add(type))
+            {
+                V2DebugLog.WriteEvent(
+                    "env-carrier-verify-failed",
+                    type.FullName + " target=" + targetVolume.ToString("0.000", CultureInfo.InvariantCulture)
+                    + " readback=" + observedVolume.ToString("0.000", CultureInfo.InvariantCulture)
+                    + " candidates=" + DescribeVolumeCandidates(type));
+            }
+
+            BaseVoiceRawVolumes.Remove(voice);
+            return false;
+        }
+
+        private static bool TrySetRawVoiceVolume(IMySourceVoice voice, float value, bool logDiagnostics)
+        {
+            if (voice == null)
+                return false;
+
+            Type type = voice.GetType();
+            MemberInfo member = ResolveRawVoiceVolumeMember(type, logDiagnostics);
+            if (member == null)
+                return false;
+
+            try
+            {
+                if (member is PropertyInfo property)
+                    property.SetValue(voice, ConvertRawVolumeValue(value, property.PropertyType), null);
+                else if (member is FieldInfo field)
+                    field.SetValue(voice, ConvertRawVolumeValue(value, field.FieldType));
+                else
+                    return false;
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                RejectRawVoiceVolumeMember(type, member, "write-failed");
+                if (logDiagnostics && RawVoiceVolumeWriteFailureLogs.Add(type))
+                    V2DebugLog.WriteEvent("env-carrier-write-failed", type.FullName + "." + member.Name + " " + ex.GetType().Name + ": " + ex.Message);
+
+                return false;
+            }
+        }
+
+        private static object ConvertRawVolumeValue(float value, Type targetType)
+        {
+            if (targetType == typeof(double))
+                return (double)value;
+
+            return value;
+        }
+
+        private static MemberInfo ResolveRawVoiceVolumeMember(Type type, bool logDiagnostics)
+        {
+            if (type == null)
+                return null;
+
+            if (RawVoiceVolumeMembers.TryGetValue(type, out MemberInfo cached))
+                return cached;
+
+            if (RawVoiceVolumeMemberMisses.Contains(type))
+                return null;
+
+            List<MemberInfo> candidates = new List<MemberInfo>();
+            AddCandidate(candidates, FindWritableVolumeProperty(type));
+            AddCandidate(candidates, FindVolumeField(type, "Volume"));
+            AddCandidate(candidates, FindVolumeField(type, "m_volume"));
+            AddCandidate(candidates, FindVolumeField(type, "volume"));
+            AddCandidate(candidates, FindVolumeField(type, "<Volume>k__BackingField"));
+            AddCandidate(candidates, FindFallbackVolumeField(type));
+
+            MemberInfo member = null;
+            for (int i = 0; i < candidates.Count; i++)
+            {
+                if (IsRejectedRawVoiceVolumeMember(type, candidates[i]))
+                    continue;
+
+                member = candidates[i];
+                break;
+            }
+
+            if (member == null)
+            {
+                RawVoiceVolumeMemberMisses.Add(type);
+                if (logDiagnostics)
+                    V2DebugLog.WriteEvent("env-carrier-unavailable", "No writable raw Volume member on " + type.FullName + " candidates=" + DescribeVolumeCandidates(type));
+                return null;
+            }
+
+            RawVoiceVolumeMembers[type] = member;
+            if (logDiagnostics && RawVoiceVolumeMemberLogs.Add(type))
+                V2DebugLog.WriteEvent("env-carrier-member", type.FullName + "." + member.Name);
+
+            return member;
+        }
+
+        private static void AddCandidate(List<MemberInfo> candidates, MemberInfo member)
+        {
+            if (member == null)
+                return;
+
+            string key = BuildMemberKey(member);
+            for (int i = 0; i < candidates.Count; i++)
+            {
+                if (string.Equals(BuildMemberKey(candidates[i]), key, StringComparison.Ordinal))
+                    return;
+            }
+
+            candidates.Add(member);
+        }
+
+        private static bool IsRejectedRawVoiceVolumeMember(Type type, MemberInfo member)
+        {
+            if (type == null || member == null)
+                return false;
+
+            return RejectedRawVoiceVolumeMembers.TryGetValue(type, out HashSet<string> rejected)
+                && rejected.Contains(BuildMemberKey(member));
+        }
+
+        private static void RejectRawVoiceVolumeMember(Type type, MemberInfo member, string reason)
+        {
+            if (type == null || member == null)
+                return;
+
+            if (!RejectedRawVoiceVolumeMembers.TryGetValue(type, out HashSet<string> rejected))
+            {
+                rejected = new HashSet<string>(StringComparer.Ordinal);
+                RejectedRawVoiceVolumeMembers[type] = rejected;
+            }
+
+            string key = BuildMemberKey(member);
+            if (rejected.Add(key))
+                V2DebugLog.WriteEvent("env-carrier-member-rejected", type.FullName + "." + member.Name + " reason=" + reason);
+
+            RawVoiceVolumeMembers.Remove(type);
+            RawVoiceVolumeMemberMisses.Remove(type);
+        }
+
+        private static string BuildMemberKey(MemberInfo member)
+        {
+            return member == null ? "?" : member.MemberType + ":" + member.Name;
+        }
+
+        private static PropertyInfo FindWritableVolumeProperty(Type type)
+        {
+            PropertyInfo property = type.GetProperty("Volume", InstanceMembers);
+            if (property == null || property.GetSetMethod(true) == null || !IsSupportedRawVolumeType(property.PropertyType))
+                return null;
+
+            return property;
+        }
+
+        private static FieldInfo FindVolumeField(Type type, string name)
+        {
+            FieldInfo field = type.GetField(name, InstanceMembers);
+            if (field == null || !IsSupportedRawVolumeType(field.FieldType))
+                return null;
+
+            return field;
+        }
+
+        private static FieldInfo FindFallbackVolumeField(Type type)
+        {
+            FieldInfo[] fields = type.GetFields(InstanceMembers);
+            for (int i = 0; i < fields.Length; i++)
+            {
+                FieldInfo field = fields[i];
+                string name = field.Name ?? string.Empty;
+                if (!IsSupportedRawVolumeType(field.FieldType))
+                    continue;
+
+                if (name.IndexOf("volume", StringComparison.OrdinalIgnoreCase) < 0)
+                    continue;
+
+                if (name.IndexOf("multiplier", StringComparison.OrdinalIgnoreCase) >= 0
+                    || name.IndexOf("curve", StringComparison.OrdinalIgnoreCase) >= 0
+                    || name.IndexOf("fade", StringComparison.OrdinalIgnoreCase) >= 0)
+                    continue;
+
+                return field;
+            }
+
+            return null;
+        }
+
+        private static bool IsSupportedRawVolumeType(Type type)
+        {
+            return type == typeof(float) || type == typeof(double);
+        }
+
+        private static string DescribeVolumeCandidates(Type type)
+        {
+            StringBuilder builder = new StringBuilder();
+            FieldInfo[] fields = type.GetFields(InstanceMembers);
+            for (int i = 0; i < fields.Length; i++)
+            {
+                FieldInfo field = fields[i];
+                if (field.Name.IndexOf("volume", StringComparison.OrdinalIgnoreCase) < 0)
+                    continue;
+
+                if (builder.Length > 0)
+                    builder.Append(',');
+
+                builder.Append("field:");
+                builder.Append(field.Name);
+                builder.Append('/');
+                builder.Append(field.FieldType.Name);
+            }
+
+            PropertyInfo[] properties = type.GetProperties(InstanceMembers);
+            for (int i = 0; i < properties.Length; i++)
+            {
+                PropertyInfo property = properties[i];
+                if (property.Name.IndexOf("volume", StringComparison.OrdinalIgnoreCase) < 0)
+                    continue;
+
+                if (builder.Length > 0)
+                    builder.Append(',');
+
+                builder.Append("prop:");
+                builder.Append(property.Name);
+                builder.Append('/');
+                builder.Append(property.PropertyType.Name);
+                builder.Append(property.GetSetMethod(true) != null ? "/set" : "/get");
+            }
+
+            return builder.Length == 0 ? "none" : builder.ToString();
+        }
+
+        private static bool ApplyFilterIfChanged(IMySourceVoice voice, string filterType, float frequency, float q, string category)
+        {
+            if (voice == null || !voice.IsValid)
+                return false;
+
+            SmoothFilterParameters(voice, filterType, frequency, q, category, out float smoothedFrequency, out float smoothedQ);
+
+            string signature = string.Format(
+                CultureInfo.InvariantCulture,
+                "{0}:{1}:{2:0}:{3:0.00}",
+                category ?? "?",
+                filterType ?? "LowPass",
+                RspDynamicAudioFilters.SanitizeFrequency(smoothedFrequency),
+                RspDynamicAudioFilters.SanitizeQ(smoothedQ));
+
+            if (LastVoiceSignatures.TryGetValue(voice, out string previous) && string.Equals(previous, signature, StringComparison.Ordinal))
+                return true;
+
+            bool applied = RspDynamicAudioFilters.TryApplyLiveFilterParameters(voice, filterType, smoothedFrequency, smoothedQ);
+            if (applied)
+                LastVoiceSignatures[voice] = signature;
+
+            return applied;
+        }
+
+        private static void SmoothFilterParameters(IMySourceVoice voice, string filterType, float targetFrequency, float targetQ, string category, out float smoothedFrequency, out float smoothedQ)
+        {
+            DateTime now = DateTime.UtcNow;
+            targetFrequency = RspDynamicAudioFilters.SanitizeFrequency(targetFrequency);
+            targetQ = RspDynamicAudioFilters.SanitizeQ(targetQ);
+            string normalizedType = filterType ?? "LowPass";
+            string normalizedCategory = category ?? "?";
+
+            if (!FilterSmoothingStates.TryGetValue(voice, out AuxFilterSmoothingState state)
+                || !string.Equals(state.FilterType, normalizedType, StringComparison.OrdinalIgnoreCase)
+                || !string.Equals(state.Category, normalizedCategory, StringComparison.OrdinalIgnoreCase)
+                || now - state.UpdatedUtc > SampleLifetime)
+            {
+                state = new AuxFilterSmoothingState
+                {
+                    FilterType = normalizedType,
+                    Category = normalizedCategory,
+                    Frequency = targetFrequency,
+                    Q = targetQ,
+                    UpdatedUtc = now
+                };
+                FilterSmoothingStates[voice] = state;
+                smoothedFrequency = targetFrequency;
+                smoothedQ = targetQ;
+                return;
+            }
+
+            double elapsedSeconds = Math.Max(0.0, (now - state.UpdatedUtc).TotalSeconds);
+            float smoothingMs = SettingsManager.Current?.PlayerFilterSmoothingMs ?? 1000f;
+            float alpha = smoothingMs <= 0.001f
+                ? 1f
+                : (float)Math.Max(0.0, Math.Min(1.0, elapsedSeconds / (smoothingMs / 1000.0)));
+
+            float currentLog = (float)Math.Log(Math.Max(1f, state.Frequency));
+            float targetLog = (float)Math.Log(Math.Max(1f, targetFrequency));
+            smoothedFrequency = RspDynamicAudioFilters.SanitizeFrequency((float)Math.Exp(currentLog + (targetLog - currentLog) * alpha));
+            smoothedQ = RspDynamicAudioFilters.SanitizeQ(state.Q + (targetQ - state.Q) * alpha);
+
+            state.Frequency = smoothedFrequency;
+            state.Q = smoothedQ;
+            state.UpdatedUtc = now;
+            FilterSmoothingStates[voice] = state;
+        }
+
+        private static void ClearVoiceFilterIfTracked(IMySourceVoice voice, RealisticSoundPlusSettings settings)
+        {
+            if (voice == null)
+                return;
+
+            FilterSmoothingStates.Remove(voice);
+            if (!LastVoiceSignatures.ContainsKey(voice))
+                return;
+
+            if (voice.IsValid)
+                RspDynamicAudioFilters.TryApplyLiveFilterParameters(voice, "LowPass", RspDynamicAudioFilters.MaxFilterFrequency, settings.Filter2Q);
+
+            LastVoiceSignatures.Remove(voice);
+        }
+
+        private static void ClearVoiceControlsIfTracked(IMySourceVoice voice, RealisticSoundPlusSettings settings)
+        {
+            ClearVoiceFilterIfTracked(voice, settings);
+            RestoreVoiceVolumeIfTracked(voice);
+        }
+
+        private static void ClearTrackedVoices()
+        {
+            HashSet<IMySourceVoice> voices = new HashSet<IMySourceVoice>(LastVoiceSignatures.Keys);
+            foreach (IMySourceVoice voice in BaseVoiceMultipliers.Keys)
+                voices.Add(voice);
+            foreach (IMySourceVoice voice in FilterSmoothingStates.Keys)
+                voices.Add(voice);
+            foreach (IMySourceVoice voice in VolumeSmoothingStates.Keys)
+                voices.Add(voice);
+
+            List<IMySourceVoice> snapshot = new List<IMySourceVoice>(voices);
+            for (int i = 0; i < snapshot.Count; i++)
+            {
+                IMySourceVoice voice = snapshot[i];
+                if (voice != null && voice.IsValid)
+                {
+                    RspDynamicAudioFilters.TryApplyLiveFilterParameters(voice, "LowPass", RspDynamicAudioFilters.MaxFilterFrequency, SettingsManager.Current.Filter2Q);
+                    RestoreVoiceVolumeIfTracked(voice);
+                }
+            }
+
+            LastVoiceSignatures.Clear();
+            BaseVoiceMultipliers.Clear();
+            BaseVoiceRawVolumes.Clear();
+            LastVoiceVolumeSignatures.Clear();
+            FilterSmoothingStates.Clear();
+            VolumeSmoothingStates.Clear();
+            Samples.Clear();
+        }
+
+        private static float SmoothVolumeMultiplier(IMySourceVoice voice, float target, string category)
+        {
+            DateTime now = DateTime.UtcNow;
+            target = Clamp(target, 0f, 6f);
+            string normalizedCategory = category ?? "?";
+
+            if (!VolumeSmoothingStates.TryGetValue(voice, out AuxVolumeSmoothingState state)
+                || !string.Equals(state.Category, normalizedCategory, StringComparison.OrdinalIgnoreCase)
+                || now - state.UpdatedUtc > SampleLifetime)
+            {
+                state = new AuxVolumeSmoothingState
+                {
+                    Category = normalizedCategory,
+                    Multiplier = voice != null && voice.IsValid ? Clamp(voice.VolumeMultiplier, 0f, 6f) : target,
+                    UpdatedUtc = now
+                };
+                VolumeSmoothingStates[voice] = state;
+            }
+
+            double elapsedSeconds = Math.Max(0.0, (now - state.UpdatedUtc).TotalSeconds);
+            float smoothingMs = SettingsManager.Current?.PlayerFilterSmoothingMs ?? 1000f;
+            float alpha = smoothingMs <= 0.001f
+                ? 1f
+                : (float)Math.Max(0.0, Math.Min(1.0, elapsedSeconds / (smoothingMs / 1000.0)));
+            float smoothed = state.Multiplier + (target - state.Multiplier) * alpha;
+
+            state.Multiplier = smoothed;
+            state.UpdatedUtc = now;
+            VolumeSmoothingStates[voice] = state;
+            return smoothed;
+        }
+
+        private static void PurgeSamples()
+        {
+            DateTime now = DateTime.UtcNow;
+            List<string> remove = null;
+            foreach (KeyValuePair<string, V2PlayerFilterSample> pair in Samples)
+            {
+                if (now - pair.Value.UpdatedUtc <= SampleLifetime)
+                    continue;
+
+                if (remove == null)
+                    remove = new List<string>();
+                remove.Add(pair.Key);
+            }
+
+            if (remove == null)
+                return;
+
+            for (int i = 0; i < remove.Count; i++)
+                Samples.Remove(remove[i]);
+        }
+
+        private static void LogIfDue()
+        {
+            if (!SettingsManager.Current.V2DebugLogEnabled)
+                return;
+
+            DateTime now = DateTime.UtcNow;
+            if (now - _lastLogUtc < TimeSpan.FromSeconds(1))
+                return;
+
+            _lastLogUtc = now;
+            V2DebugLog.WriteEvent("player-filter", FormatSummary() + " | " + FormatSources(5).Replace(Environment.NewLine, "; "));
+        }
+
+        private static string BuildKey(V2PlayerFilterSample sample)
+        {
+            return (sample.Category ?? "?") + ":" + (sample.CueName ?? "?");
+        }
+
+        private static float GetEffectiveAtmosphere(float realAtmosphere, RealisticSoundPlusSettings settings)
+        {
+            if (settings != null && settings.PlayerFilterAtmosphereOverrideEnabled)
+                return Clamp01(settings.PlayerFilterAtmosphereOverride);
+
+            return Clamp01(realAtmosphere);
+        }
+
+        private static float CalculateEnvironmentGain(V2PlayerEnvironmentSample env, float localAtmosphere, float muffle, RealisticSoundPlusSettings settings, bool vanillaSuppressed)
+        {
+            float pressure = Clamp01(localAtmosphere);
+            float naturalAudibility = Clamp01(pressure * CalculateMuffleVolumeGain(muffle, settings?.PlayerFilterEnvironmentVolumeMuffleWeight ?? 1f));
+            float floor = Clamp01((settings?.PlayerFilterEnvironmentMinGain ?? 0f) * pressure);
+            return Math.Max(naturalAudibility, floor);
+        }
+
+        private static float CalculateMuffleVolumeGain(float muffle, float weight)
+        {
+            if (weight <= 0f)
+                return 1f;
+
+            float clear = 1f - Clamp01(muffle);
+            return Clamp01((float)Math.Pow(clear, Math.Max(0.01f, weight)));
+        }
+
+        private static float Combine(float first, float second)
+        {
+            first = Clamp01(first);
+            second = Clamp01(second);
+            return Clamp01(first + (1f - first) * second);
+        }
+
+        private static float BlendCutoff(float clearCutoff, float muffledCutoff, float amount)
+        {
+            double logClear = Math.Log(Math.Max(1f, clearCutoff));
+            double logMuffled = Math.Log(Math.Max(1f, muffledCutoff));
+            return (float)Math.Exp(logClear + (logMuffled - logClear) * Clamp01(amount));
+        }
+
+        private static string Trim(string value, int max)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return "?";
+
+            return value.Length <= max ? value : value.Substring(0, max - 3) + "...";
+        }
+
+        private static float Clamp01(float value)
+        {
+            if (value <= 0f)
+                return 0f;
+
+            return value >= 1f ? 1f : value;
+        }
+
+        private static float Clamp(float value, float min, float max)
+        {
+            if (value < min)
+                return min;
+
+            return value > max ? max : value;
+        }
+
+        private struct AuxFilterSmoothingState
+        {
+            public string FilterType;
+            public string Category;
+            public float Frequency;
+            public float Q;
+            public DateTime UpdatedUtc;
+        }
+
+        private struct AuxVolumeSmoothingState
+        {
+            public string Category;
+            public float Multiplier;
+            public DateTime UpdatedUtc;
+        }
+    }
+}

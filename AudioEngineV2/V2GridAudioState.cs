@@ -99,6 +99,12 @@ namespace RealisticSoundPlus.AudioEngineV2
                 _directions[i].Stop();
         }
 
+        public void Silence()
+        {
+            for (int i = 0; i < _directions.Length; i++)
+                _directions[i].Silence();
+        }
+
         public bool IsEmpty(DateTime now)
         {
             for (int i = 0; i < _directions.Length; i++)
@@ -157,6 +163,9 @@ namespace RealisticSoundPlus.AudioEngineV2
             if (thruster == null)
                 return new DetailLoadSample(0f, "off");
 
+            if (!IsThrusterEnabledForAudio(thruster))
+                return new DetailLoadSample(0f, "off");
+
             if (TryReadThrustOverridePercentage(thruster, out float overridePercentage))
             {
                 float overrideValue = Clamp01(overridePercentage);
@@ -166,6 +175,8 @@ namespace RealisticSoundPlus.AudioEngineV2
 
             bool hasCurrentOutput = TryReadCurrentThrustPercentage(thruster, out float currentPercentage);
             float currentOutput = hasCurrentOutput ? Clamp01(currentPercentage) : 0f;
+            bool hasForceOutput = TryReadPhysicalThrustPercentage(thruster, out float forcePercentage);
+            float forceOutput = hasForceOutput ? Clamp01(forcePercentage) : 0f;
 
             if (listener.HasMoveInput)
             {
@@ -177,10 +188,47 @@ namespace RealisticSoundPlus.AudioEngineV2
             }
 
             float outputThreshold = listener.SeatedInShip ? CurrentOutputAudibleThreshold : CurrentOutputNonSeatThreshold;
-            if (currentOutput > outputThreshold)
-                return new DetailLoadSample(currentOutput, listener.SeatedInShip ? "dmp" : "out");
+            float actualOutput = Math.Max(currentOutput, forceOutput);
+            if (actualOutput > outputThreshold)
+            {
+                string source = forceOutput > currentOutput + 0.01f ? "force" : (listener.SeatedInShip ? "dmp" : "out");
+                return new DetailLoadSample(actualOutput, source);
+            }
 
             return new DetailLoadSample(0f, thruster.IsWorking ? "idle" : "off");
+        }
+
+        private static bool IsThrusterEnabledForAudio(MyThrust thruster)
+        {
+            if (thruster == null)
+                return false;
+
+            try
+            {
+                if (!thruster.Enabled)
+                    return false;
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                if (!thruster.IsFunctional)
+                    return false;
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                return thruster.IsWorking;
+            }
+            catch
+            {
+                return true;
+            }
         }
 
         private static float CalculateDirectionalMoveLoad(Vector3I direction, Vector3 input)
@@ -228,6 +276,27 @@ namespace RealisticSoundPlus.AudioEngineV2
             }
 
             return false;
+        }
+
+        private static bool TryReadPhysicalThrustPercentage(MyThrust thruster, out float percentage)
+        {
+            percentage = 0f;
+            try
+            {
+                if (thruster == null)
+                    return false;
+
+                float maxForce = GetMaxForce(thruster);
+                if (maxForce <= 0f)
+                    return false;
+
+                percentage = thruster.ThrustForceLength / maxForce;
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private static float GetMaxForce(MyThrust thruster)
@@ -391,9 +460,16 @@ namespace RealisticSoundPlus.AudioEngineV2
                 V2FilterRoute detailFilterRoute = listener.InsideShip ? V2FilterRoute.Internal : V2FilterRoute.External;
                 UpdateLayer(ref _detailIdle, ref _detailIdleValue, ref _lastDetailIdleUpdateUtc, snapshot.Anchor, snapshot.Position, idleDetailPlayable ? snapshot.IdleDetailCue : null, idleDetailTarget, V2AudioLayer.Detail, idleDetail2DPositional, idleDetail2DPositional, detailFilterRoute, idleRoute, holdSilent: true);
                 UpdateLayer(ref _detailActive, ref _detailActiveValue, ref _lastDetailActiveUpdateUtc, snapshot.Anchor, snapshot.Position, activeDetailPlayable ? snapshot.ActiveDetailCue : null, activeDetailTarget, V2AudioLayer.Detail, activeDetail2DPositional, activeDetail2DPositional, detailFilterRoute, activeRoute, keepAliveAtZero: true, pitch: activePitch);
-                bool state2D = listener.InsideShip;
-                bool state2DPositional = state2D && settings.V2State2DPositionalTest;
-                UpdateLayer(ref _state, ref _stateValue, ref _lastStateUpdateUtc, snapshot.Anchor, snapshot.Position, stateCue, stateTarget, V2AudioLayer.State, state2D, state2DPositional, state2D ? V2FilterRoute.Internal : V2FilterRoute.External);
+                if (settings.V2StateEnabled)
+                {
+                    bool state2D = listener.InsideShip;
+                    bool state2DPositional = state2D && settings.V2State2DPositionalTest;
+                    UpdateLayer(ref _state, ref _stateValue, ref _lastStateUpdateUtc, snapshot.Anchor, snapshot.Position, stateCue, stateTarget, V2AudioLayer.State, state2D, state2DPositional, state2D ? V2FilterRoute.Internal : V2FilterRoute.External);
+                }
+                else
+                {
+                    StopLayer(ref _state, ref _stateValue, ref _lastStateUpdateUtc);
+                }
             }
 
             public void Stop()
@@ -404,6 +480,27 @@ namespace RealisticSoundPlus.AudioEngineV2
                 _detailIdle?.Stop();
                 _detailActive?.Stop();
                 _state?.Stop();
+            }
+
+            public void Silence()
+            {
+                _detailIdleValue = 0f;
+                _detailActiveValue = 0f;
+                _stateValue = 0f;
+                _detailIdle?.SetVolume(0f);
+                _detailActive?.SetVolume(0f);
+                _state?.SetVolume(0f);
+            }
+
+            private static void StopLayer(ref LayerEmitter emitter, ref float value, ref DateTime lastUpdateUtc)
+            {
+                value = 0f;
+                lastUpdateUtc = DateTime.MinValue;
+                if (emitter == null)
+                    return;
+
+                emitter.Stop();
+                emitter = null;
             }
 
             public bool IsStale(DateTime now)
@@ -601,16 +698,56 @@ namespace RealisticSoundPlus.AudioEngineV2
                     return;
                 }
 
+                bool force3D = !force2D || force2DPositional;
                 if (value <= StartThreshold)
                 {
                     if (emitter == null)
+                    {
+                        if (!keepAliveAtZero)
+                            return;
+
+                        emitter = new LayerEmitter(anchor, layer, _direction);
+                    }
+
+                    DateTime quietNow = DateTime.UtcNow;
+                    if (emitter.IsRetryBlocked(quietNow))
+                    {
+                        value = 0f;
+                        return;
+                    }
+
+                    try
+                    {
+                        emitter.Update(position, cueName, 0f, force2D, force3D, filterRoute, pitch);
+                    }
+                    catch (Exception ex)
+                    {
+                        if (emitter.ShouldLogUpdateFailure(quietNow))
+                        {
+                            V2DebugLog.WriteEvent("emitter-update-failed", string.Format(
+                                System.Globalization.CultureInfo.InvariantCulture,
+                                "{0} cue={1} route={2} filter={3} force2d={4} force3d={5} vol={6:0.000} pos={7:0.0},{8:0.0},{9:0.0} {10}",
+                                layer,
+                                cueName ?? "?",
+                                (diagnosticRoute ?? "?") + " stage=" + (emitter.LastStage ?? "?"),
+                                filterRoute,
+                                force2D ? "Y" : "N",
+                                force3D ? "Y" : "N",
+                                0f,
+                                position.X,
+                                position.Y,
+                                position.Z,
+                                ex.Message));
+                        }
+
+                        emitter.RecoverAfterFailedUpdate(TimeSpan.FromSeconds(1));
+                        return;
+                    }
+
+                    if (keepAliveAtZero || holdSilent)
                         return;
 
-                    emitter.SetVolume(0f);
-                    if (keepAliveAtZero)
-                        return;
-
-                    if (!holdSilent || emitter.ShouldStopAfterSilence(DateTime.UtcNow, DetailSilentReleaseMs))
+                    if (emitter.ShouldStopAfterSilence(quietNow, DetailSilentReleaseMs))
                         emitter.Stop();
                     return;
                 }
@@ -621,7 +758,6 @@ namespace RealisticSoundPlus.AudioEngineV2
                     emitter = new LayerEmitter(anchor, layer, _direction);
                 }
 
-                bool force3D = !force2D || force2DPositional;
                 if (firstStart && startMuted)
                 {
                     value = 0f;
@@ -675,8 +811,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                 if (listener.Position == Vector3D.Zero || position == Vector3D.Zero)
                     return 1f;
 
-                float distance = (float)Vector3D.Distance(listener.Position, position);
-                return SixDirectionSourceModel.EvaluateDistanceGain(distance, settings.V2EmitterDistance, settings.V2DistanceCurve);
+                return V2EngineFilterModel.CalculateDistanceGain(listener, position, settings);
             }
 
             private void LogDetailDiagnostics(RealisticSoundPlusSettings settings, V2AudioListenerState listener, DirectionSnapshot snapshot, float rawDetailCommand, float detailCommand, float activeInput, float idleInput, float idleTarget, float activeTarget, float distanceGain, float pitch, string idleVariant, string activeVariant, DateTime now)
@@ -694,11 +829,12 @@ namespace RealisticSoundPlus.AudioEngineV2
 
                 V2DebugLog.WriteEvent("detail", string.Format(
                     System.Globalization.CultureInfo.InvariantCulture,
-                    "{0} src={1} raw={2:0.00} cmd={3:0.00} activeIn={4:0.00} idleIn={5:0.000} idleTarget={6:0.000} activeTarget={7:0.000} idle={8}/{9:0.00} dist={10:0.0}/{11:0} dgain={12:0.00} dcurve={13:0.00} pitch={14:0.00} idleCue={15}/{16} activeCue={17}/{18}",
+                    "{0} src={1} raw={2:0.00} cmd={3:0.00} cmdMs={4:0} activeIn={5:0.00} idleIn={6:0.000} idleTarget={7:0.000} activeTarget={8:0.000} idle={9}/{10:0.00} dist={11:0.0}/{12:0} dgain={13:0.00} dcurve={14:0.00} pitch={15:0.00} idleCue={16}/{17} activeCue={18}/{19}",
                     _direction,
                     snapshot.DetailLoadSource ?? "?",
                     rawDetailCommand,
                     detailCommand,
+                    settings.V2DetailCommandSmoothingMs,
                     activeInput,
                     idleInput,
                     idleTarget,
@@ -865,17 +1001,18 @@ namespace RealisticSoundPlus.AudioEngineV2
                 LastStage = "set-position";
                 Position = position;
                 Emitter.SetPosition(position);
+                AudioEngineV2Runtime.SetEmitterPosition(Emitter, position);
                 LastStage = "force-flags";
                 Emitter.Force2D = force2D;
                 Emitter.Force3D = force3D;
                 LastStage = "register";
-                AudioEngineV2Runtime.RegisterEmitter(Emitter, filterRoute);
+                AudioEngineV2Runtime.RegisterEmitter(Emitter, filterRoute, RouteName);
                 LastStage = "effect-subtype";
                 string filterEffectSubtype = AudioEngineV2Runtime.GetEngineFilterEffectSubtype(Emitter) ?? string.Empty;
                 LastStage = "effect-signature";
                 string filterEffectSignature = AudioEngineV2Runtime.GetEngineFilterEffectSignature(Emitter) ?? filterEffectSubtype;
                 int bindingGeneration = AudioEngineV2Runtime.EmitterBindingGeneration;
-                bool filterChanged = _filterRoute != filterRoute || !string.Equals(_filterEffectSignature, filterEffectSignature, StringComparison.OrdinalIgnoreCase);
+                bool filterChanged = _filterRoute != filterRoute || !string.Equals(_filterEffectSubtype, filterEffectSubtype, StringComparison.OrdinalIgnoreCase);
                 bool bindingChanged = _bindingGeneration != bindingGeneration;
                 bool needsRebind = !IsPlaying
                     || !string.Equals(_cueName, cueName, StringComparison.OrdinalIgnoreCase)
@@ -899,7 +1036,6 @@ namespace RealisticSoundPlus.AudioEngineV2
                     _force3D = force3D;
                     _filterRoute = filterRoute;
                     _filterEffectSubtype = filterEffectSubtype;
-                    _filterEffectSignature = filterEffectSignature;
                     _bindingGeneration = bindingGeneration;
                     _rebindFadeStartUtc = DateTime.UtcNow;
                     LastStage = "sound-pair";
@@ -929,6 +1065,8 @@ namespace RealisticSoundPlus.AudioEngineV2
                         position.Y,
                         position.Z));
                 }
+
+                _filterEffectSignature = filterEffectSignature;
 
                 LastStage = "set-volume";
                 SetVolume(volume);

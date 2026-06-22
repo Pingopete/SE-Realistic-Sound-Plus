@@ -12,11 +12,14 @@ namespace RealisticSoundPlus.Patches
             ShipSeatAudioPatch.ResetRuntimeState();
             ExteriorSoundTransmission.ResetRuntimeState();
             AudioDiagnostics.ResetRuntimeState();
+            AudioVoiceCatalog.ResetRuntimeState();
             AudioEngineV2Runtime.ResetForSession(reason);
             V2DebugLog.ResetForSession(reason);
             V2ThrusterAudioPatch.ResetRuntimeState();
             V2ShipEnvironmentPatch.ResetRuntimeState();
             V2VanillaShipCueSuppressionPatch.ResetRuntimeState();
+            EnvironmentAmbiencePatch.ResetRuntimeState();
+            V2BlockRangeScaler.ResetRuntimeState();
 
             MyLog.Default.WriteLineAndConsole("[RealisticSoundPlus] Audio runtime state reset: " + reason);
         }

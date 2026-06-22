@@ -23,8 +23,10 @@ The current build creates a replacement ship engine soundscape for listener stat
 - Detail emitters fall back to vanilla thruster block `PrimarySound` cues if a thruster type cannot be classified.
 - State emitters use confirmed vanilla ship sound group run-loop cues, classified as small/large by grid mass where available.
 - Inside state emitters force Keen's paired D2/local cue variant while still playing from the six directional emitter positions.
-- V2-created 3D engine emitters use the shared filter/transmission path.
-- Exterior detail emitters use `/rsp filter`; inside/local detail and state emitters use `/rsp internalfilter`.
+- V2-created engine emitters can use the dynamic `enginefilter`, which calculates a separate low-pass cutoff/Q for each emitter from listener distance, atmosphere, inside/contact state, and the air/hull path controls.
+- The menu now separates engine audio controls, engine-filter controls/readouts, and preliminary player/aux filter telemetry into distinct sections.
+- The player/aux section now applies a first-pass direct `auxfilter` to classified non-engine voices: environment/weather, physical block/world emitters, and player-local cues.
+- Exterior detail emitters use `/rsp externalfilter`; inside/local detail and state emitters use `/rsp internalfilter`.
 - When V2 owns the current ship soundscape, confirmed vanilla ship-state cues are suppressed so the replacement emitters are not hidden under the stock centered mix.
 
 Debug marker colors:
@@ -37,9 +39,16 @@ Debug marker colors:
 1. Load the local Pulsar plugin build.
 2. Enter a powered ship with working thrusters.
 3. Run `/rsp sounds on`.
-4. Check that the overlay line starts with `route=v2`.
-5. Toggle `/rsp detail off` and `/rsp state off` independently to isolate each layer.
-6. Tune `/rsp dist`, `/rsp distcurve`, `/rsp detailgain`, and `/rsp stategain` while listening from inside the ship.
+4. Check the vertical route/status block at the top of the source list.
+5. Run `/rsp menu` if you want clickable sliders, toggles, and filter dropdowns.
+6. Run `/rsp filters on` for the separate filter-controller overlay.
+7. Run `/rsp catalog` after moving through a test area to print/log the unique session sounds RSP has seen.
+8. Toggle `/rsp detail off` and `/rsp state off` independently to isolate each layer.
+9. Tune `/rsp dist`, `/rsp distcurve`, `/rsp detailgain`, and `/rsp stategain` while listening from inside the ship.
+
+The settings menu is organized as `Engine Audio`, `Engine Filter`, and `Player / Aux Filter`. It includes live response charts for `enginefilter` and `auxfilter`. `enginefilter` can run dynamically per emitter; the chart shows the most recent/nearest calculated engine filter curve. `auxfilter` is reserved for future non-engine/block ambience filtering. These charts are not live audio spectrum displays yet.
+
+Each custom filter slot currently applies one XAudio source-voice filter shape at a time. Stacking low-pass, high-pass, band-pass, and notch stages on the same sound would require a different multi-stage route, such as submix/effect-chain research or extra parallel voices, and is not part of the current safe test path.
 
 ## Second Monitor Test Reference
 
@@ -59,16 +68,24 @@ Current live V2 test defaults:
 | `distcurve` | `1.00` | Distance falloff curve inside `dist`. |
 | `cmdsmooth` | `2000` | Detail command smoothing time in milliseconds. |
 | `emitterfade` | `120` | Short fade after cue, dimension, filter, or route rebinds. |
-| `filter` | `Deep` | Low-pass effect for V2 3D engine emitters. |
-| `internalfilter` | `Off` | Independent low-pass effect for inside/local detail and state emitters. |
-| `filter1` | `300 Hz / Q 0.70` | Custom low-pass test filter selectable by exterior or internal route. |
-| `filter2` | `1200 Hz / Q 0.70` | Second custom low-pass test filter selectable by exterior or internal route. |
+| `externalfilter` | `EngineFilter` | Filter route for outside/contact V2 engine emitters. |
+| `internalfilter` | `EngineFilter` | Filter route for inside/local V2 engine emitters. |
+| `enginefilter` | `LowPass / dynamic on` | Per-emitter engine filter driven by distance, atmosphere, interior/contact state, and air/hull controls. |
+| `engineinteriorair` | `0.35` | How strongly pressurized interior air contributes to the engine filter. Raise this if full-atmosphere interiors are too muffled. |
+| `playerEnv` | `ray 120m / seal +0.30` | Wind/environment muffling probe based on local openness plus vanilla inside-room state. |
+| `playerfilter` | `on` | Applies aux filtering to classified non-engine voices. |
+| `auxCandidates` | readout + applied | Per-source occlusion estimate for physical non-engine audio emitters. Block voices use this to drive auxfilter. |
+| `auxAtmOverride` | `off / 0.00` | Optional player/aux-only pressure simulation for block, environment, and player-local filters. |
+| `auxfilter` | `LowPass / 1200 Hz / Q 0.70` | Shared player/aux filter shape. Clear cutoff is `auxfilterfreq`; muffled cutoffs are split by category: `envmufflefreq`, `blockmufflefreq`, and `auxmufflefreq` for local/player sounds. |
+| `atmoverride` | `off / 0.00` | Optional test override that makes V2 atmosphere reads return the chosen pressure. |
+| `reverb` | `off / diff 0.45 / room 0.35` | Experimental global XAudio reverb test. Applies broadly to game audio while enabled and restores vanilla reverb state when disabled. |
 | `sounds` | `on` | Center debug overlay starts enabled on this branch. |
 | `log` | `on` | V2 debug log writes once per second. |
 
 Most useful first commands:
 
 ```text
+/rsp menu
 /rsp show
 /rsp sounds on
 /rsp logpath
@@ -78,13 +95,34 @@ Most useful first commands:
 /rsp gain 4
 /rsp detailgain 4
 /rsp detail2dpos on
-/rsp filter filter1
-/rsp filter1freq 300
-/rsp filter1q 0.7
-/rsp internalfilter off
-/rsp internalfilter filter2
-/rsp filter2freq 1200
-/rsp filter2q 0.7
+/rsp externalfilter enginefilter
+/rsp internalfilter enginefilter
+/rsp enginefilterdynamic on
+/rsp atmoverride on
+/rsp externalatm 0.5
+/rsp engineairnear 6500
+/rsp engineairfar 800
+/rsp engineinteriorair 1.0
+/rsp playerenvray 120
+/rsp playersealedextra 0.3
+/rsp playerfilter on
+/rsp envfilter on
+/rsp blockfilter on
+/rsp localfilter on
+/rsp auxatmoverride on
+/rsp auxatm 0.5
+/rsp envmufflefreq 900
+/rsp blockmufflefreq 120
+/rsp auxmufflefreq 120
+/rsp blockdistancescale 4
+/rsp enginehullnear 250
+/rsp enginehullfar 50
+/rsp auxfiltertype lowpass
+/rsp auxfilterfreq 1200
+/rsp auxfilterq 0.7
+/rsp reverb on
+/rsp reverbdiffusion 0.45
+/rsp reverbroomsize 0.35
 /rsp idle off
 /rsp idlegain 0.25
 /rsp stategain 4
@@ -221,26 +259,86 @@ Settings are saved to `%APPDATA%\SpaceEngineers\RealisticSoundPlus.xml` and hot-
 | `/rsp quietlog 4` | `/rsp quietforce`, `/rsp smallforce` | `4.00` | `1..10` | `log10(force)` treated as the small/quiet end of thruster scaling. |
 | `/rsp loudlog 7` | `/rsp loudforce`, `/rsp largeforce` | `7.00` | `quietlog+0.1..12` | `log10(force)` treated as the large/loud end of thruster scaling. |
 
-### Filtering And Transmission
+### Engine Filter
 
 | Command | Aliases | Default | Range | Function |
 | --- | --- | ---: | --- | --- |
-| `/rsp muffling 1` | `/rsp muffle` | `1.00` | `0..1` | Strength of the shared V2 muffling/filter transmission model. |
-| `/rsp interior 0.2` | `/rsp interiorbase` | `0.20` | `0.05..1` | Baseline transmission floor while muffled. Source range is still controlled by `dist` and `distcurve`. |
-| `/rsp atmfloor 0.5` | `/rsp atmospherefloor`, `/rsp atmosphericfloor` | `0.50` | `0..1` | Amount of muffling retained at full planetary air density while inside. |
-| `/rsp filter deep` | `/rsp externalfilter`, `/rsp extfilter` | `deep` | options | Selects the exterior low-pass effect for outside/on-hull V2 detail emitters. Options: `off`, `helmet`, `cockpit`, `cockpitnooxy`, `realship`, `deep`, `filter1`, `filter2`. |
-| `/rsp internalfilter off` | `/rsp intfilter`, `/rsp insidefilter` | `off` | options | Selects the independent inside/local low-pass effect for inside D2/local detail and state emitters. Same options as `/rsp filter`. |
-| `/rsp filter1freq 300` | `/rsp filter1frequency`, `/rsp f1freq` | `300` | `20..7350` Hz | Sets custom low-pass filter 1 cutoff frequency. Emitters using `filter1` rebind live. Values above the runtime-safe range are clamped. |
-| `/rsp filter1q 0.7` | `/rsp f1q` | `0.70` | `0.1..10` | Sets custom low-pass filter 1 Q value. |
-| `/rsp filter2freq 1200` | `/rsp filter2frequency`, `/rsp f2freq` | `1200` | `20..7350` Hz | Sets custom low-pass filter 2 cutoff frequency. Emitters using `filter2` rebind live. Values above the runtime-safe range are clamped. |
-| `/rsp filter2q 0.7` | `/rsp f2q` | `0.70` | `0.1..10` | Sets custom low-pass filter 2 Q value. |
+| `/rsp externalfilter enginefilter` | `/rsp filter`, `/rsp extfilter` | `enginefilter` | options | Selects the exterior/contact filter route for V2 engine emitters. Options: `off`, `helmet`, `cockpit`, `cockpitnooxy`, `realship`, `deep`, `enginefilter`, `auxfilter`. Old `filter1/filter2` names still work as aliases. |
+| `/rsp internalfilter enginefilter` | `/rsp intfilter`, `/rsp insidefilter` | `enginefilter` | options | Selects the inside/local filter route for V2 engine emitters. |
+| `/rsp enginefilterdynamic on` | `/rsp enginedynamic`, `/rsp dynamicfilter` | `on` | bool | Makes `enginefilter` calculate a unique low-pass cutoff/Q for each emitter from distance, atmosphere, inside/contact state, and air/hull path settings. |
+| `/rsp enginefiltertype lowpass` | `/rsp filter1type`, `/rsp f1type` | `lowpass` | options | Static fallback shape for `enginefilter` when dynamic mode is off. Inactive while dynamic mode is on. |
+| `/rsp enginefilterfreq 300` | `/rsp filter1freq`, `/rsp f1freq` | `300` | `5..7350` Hz | Static fallback cutoff/center frequency for `enginefilter`. Inactive while dynamic mode is on. |
+| `/rsp enginefilterq 0.7` | `/rsp filter1q`, `/rsp f1q` | `0.70` | `0.1..10` | Static fallback Q for `enginefilter`. Inactive while dynamic mode is on. |
+| `/rsp engineairnear 6500` | `/rsp airnear` | `6500` | `5..7350` Hz | Brightest airborne cutoff for a nearby emitter in atmosphere. |
+| `/rsp engineairfar 800` | `/rsp airfar` | `800` | `5..7350` Hz | Airborne cutoff at the far end of the air filter range. |
+| `/rsp engineairrange 1000` | `/rsp airrange` | `1000` | `1..5000` m | Distance over which airborne high frequencies fade. |
+| `/rsp engineaircurve 1` | `/rsp aircurve` | `1.00` | `0.1..5` | Curve shaping for the airborne distance-to-cutoff response. |
+| `/rsp engineairq 0.75` | `/rsp airq` | `0.75` | `0.1..10` | Q used when airborne propagation dominates. |
+| `/rsp engineinteriorair 0.35` | `/rsp interiorair`, `/rsp insideair`, `/rsp airblend` | `0.35` | `0..4` | Weight of the airborne path while inside the ship. Higher values make pressurized interiors less muffled. |
+| `/rsp enginehullnear 250` | `/rsp hullnear` | `250` | `5..7350` Hz | Structure-borne cutoff when close to an engine path. |
+| `/rsp enginehullfar 50` | `/rsp hullfar` | `50` | `5..7350` Hz | Structure-borne cutoff farther from the active engine path. |
+| `/rsp enginehullrange 80` | `/rsp hullrange` | `80` | `1..1000` m | Distance over which hull/contact sound gets darker. |
+| `/rsp enginehullcurve 1` | `/rsp hullcurve` | `1.00` | `0.1..5` | Curve shaping for the hull distance-to-cutoff response. |
+| `/rsp enginehullq 1.15` | `/rsp hullq` | `1.15` | `0.1..10` | Q used when structure-borne hull transmission dominates. |
+| `/rsp engineinteriorcutoff 700` | `/rsp interiorcutoff` | `700` | `5..7350` Hz | Maximum airborne cutoff allowed when the listener is inside the ship. |
+| `/rsp enginevacuumcutoff 120` | `/rsp vacuumcutoff` | `120` | `5..7350` Hz | Low cutoff used for vacuum/contact structural transmission. |
+| `/rsp atmoverride on|off` | `/rsp atmosphereoverride` | `off` | bool | Forces V2 atmosphere reads to use the test pressure below. Useful for testing atmosphere transitions without moving the ship. |
+| `/rsp externalatm 0.5` | `/rsp testatm` | `0.00` | `0..1` | Test external atmosphere pressure used while override is on. |
+
+### Player / Aux Filter
+
+First-pass player/aux filter math:
+
+- Environment/weather voices use the player-facing environment probe: `muffle = occlusion + remaining * vacuum`. `envfloor` only keeps the RSP-owned wind/weather bed faintly alive; it does not affect block emitters or player-local sounds.
+- Block/world emitters use source-to-listener rays plus distance: `muffle = sourceOcclusion + remaining * distance + remaining * sealedExtra + remaining * vacuum`. The same resolved distance also scales block voice volume so machinery can fade out over `blockrange`.
+- Player-local voices use local atmosphere only: `muffle = 1 - localAtmosphere`.
+- The resulting muffling amount log-blends from `auxfilterfreq` to a category-specific muffled cutoff: `envmufflefreq` for wind/weather, `blockmufflefreq` for machinery/block emitters, and `auxmufflefreq` for player-local cues. All share `auxfilterq`.
+- `auxatmoverride` and `auxatm` simulate player/aux pressure only. They do not change the engine filter's atmosphere input.
+
+Important wind limitation: this pass filters wind/rain/weather voices only while vanilla is still playing them. If vanilla fully stops a wind voice in a room, RSP cannot make that stopped voice audible through filtering alone. Persistent muffled wind will require a later RSP-owned environment bed after we identify the correct vanilla wind/weather cue family.
+
+| Command | Aliases | Default | Range | Function |
+| --- | --- | ---: | --- | --- |
+| `/rsp playerfilter on|off` | `/rsp auxfilterroute` | `on` | bool | Master switch for direct player/aux filtering. Engine sounds are not routed through this. |
+| `/rsp envfilter on|off` | `/rsp environmentfilter`, `/rsp windfilter` | `on` | bool | Filters wind/rain/weather-style voices when they are currently playing. |
+| `/rsp blockfilter on|off` | `/rsp auxblockfilter`, `/rsp machinefilter` | `on` | bool | Filters and distance-attenuates resolved non-engine emitters such as machinery/block ambience using source path occlusion and distance. |
+| `/rsp localfilter on|off` | `/rsp playerlocalfilter`, `/rsp playersoundfilter` | `on` | bool | Filters player-local cues such as footsteps/body/breathing by local atmosphere only. |
+| `/rsp auxatmoverride on|off` | `/rsp auxpressureoverride`, `/rsp playerfilteratmoverride` | `off` | bool | Enables simulated pressure for player/aux filtering only. |
+| `/rsp auxatm 0.5` | `/rsp auxpressure`, `/rsp auxvacuum` | `0.00` | `0..1` | Simulated player/aux pressure used while aux override is enabled. Setting this by command also enables override. |
+| `/rsp playerenvray 120` | `/rsp envray`, `/rsp occlusionray` | `120` | `5..1000` m | Ray length for the player wind/environment occlusion probe. |
+| `/rsp playerenvcurve 1` | `/rsp envcurve`, `/rsp occlusioncurve` | `1.00` | `0.1..5` | Curve applied to structural occlusion. Higher values make partial cover less muffled. |
+| `/rsp playersealedextra 0.3` | `/rsp sealedextra`, `/rsp sealextra` | `0.30` | `0..1` | Extra muffling added when vanilla inside-room state and low open-ray fraction suggest a sealed room. |
+| `/rsp playersealthreshold 0.12` | `/rsp sealthreshold`, `/rsp sealopen` | `0.12` | `0..1` | Open-ray fraction below which an inside room is treated as sealed by the preliminary probe. |
+| `/rsp auxfiltertype lowpass` | `/rsp filter2type`, `/rsp f2type` | `lowpass` | options | Shape for `auxfilter`, reserved for future non-engine/block ambience routes. |
+| `/rsp auxfilterfreq 1200` | `/rsp filter2freq`, `/rsp f2freq` | `1200` | `5..7350` Hz | Clear/bright aux cutoff used when calculated muffling is low. |
+| `/rsp envmufflefreq 900` | `/rsp windmufflefreq`, `/rsp envmuffledfreq` | `900` | `5..7350` Hz | Dark cutoff used for wind/weather when environment muffling is strongest. |
+| `/rsp blockmufflefreq 120` | `/rsp blockmuffledfreq`, `/rsp blockcutoff` | `120` | `5..7350` Hz | Dark cutoff used for block/machinery emitters when block muffling is strongest. |
+| `/rsp auxmufflefreq 120` | `/rsp playerfiltermufflefreq`, `/rsp mufflefreq` | `120` | `5..7350` Hz | Dark cutoff used for player-local pressure muffling. |
+| `/rsp auxfilterq 0.7` | `/rsp filter2q`, `/rsp f2q` | `0.70` | `0.1..10` | Shared aux filter Q. |
+| `/rsp blockdistancescale 4` | `/rsp blockscale`, `/rsp blockdist` | `1.00` | `0.1..100` | Multiplies each vanilla block cue's own MaxDistance while preserving cue-to-cue range differences. |
+| `/rsp blockrange 80` | `/rsp auxblockrange`, `/rsp playerfilterblockrange` | `80` | `1..1000` m | Fallback range only used when a block cue has no vanilla MaxDistance definition. |
+| `/rsp blockcurve 1` | `/rsp auxblockcurve`, `/rsp playerfilterblockcurve` | `1.00` | `0.1..5` | Shape of block emitter volume/frequency falloff over `blockrange`. |
+
+### Global Reverb Test
+
+This is an experimental global XAudio route, not an enginefilter or auxfilter stage. Keen's exposed `SetReverbParameters` wrapper is a no-op in the tested build, so RSP enables the game-audio submix reverb and applies the parameter block directly. The menu's `Reverb Affected Voices` readout lists live source voices currently routed through that game-audio submix; HUD and music use separate routes.
+
+| Command | Aliases | Default | Range | Function |
+| --- | --- | ---: | --- | --- |
+| `/rsp reverb on|off` | `/rsp globalreverb`, `/rsp reverbtest` | `off` | bool | Toggles the global reverb experiment. When turned off, RSP attempts to restore the vanilla reverb state it captured before enabling the test. |
+| `/rsp reverbdiffusion 0.45` | `/rsp reverbdiff`, `/rsp globalreverbdiff` | `0.45` | `0..1` | Direct XAudio reverb diffusion. Higher values make reflections denser/smoother. |
+| `/rsp reverbroomsize 0.35` | `/rsp reverbroom`, `/rsp globalreverbroom` | `0.35` | `0..1` | Direct XAudio room-size/decay shaping. Higher values should sound larger/longer. |
+| `/rsp reverbvoices` | `/rsp reverbsounds`, `/rsp reverbaffected` | n/a | n/a | Prints/logs live source voices currently routed through the game-audio submix that the global reverb effect modifies. |
 
 ### Debug And Utility
 
 | Command | Aliases | Default | Function |
 | --- | --- | ---: | --- |
+| `/rsp menu` | `/rsp ui` | n/a | Toggles the in-game V2 settings menu. Runtime values apply immediately; Save writes XML. Frequency sliders use logarithmic response. |
 | `/rsp show` | none | n/a | Prints current runtime settings. |
-| `/rsp sounds on|off` | `/rsp audio` | `on` | Toggles centered audio overlay. |
+| `/rsp sounds on|off` | `/rsp audio` | `off` | Toggles centered audio overlay. Saved setting persists after `/rsp save`. |
+| `/rsp filters on|off` | `/rsp filteroverlay`, `/rsp controllers` | `off` | Toggles the separate filter-controller overlay. |
+| `/rsp catalog` | `/rsp soundcatalog`, `/rsp voicecatalog` | n/a | Prints/logs unique sound cues encountered this session with category guesses. |
 | `/rsp log on|off` | `/rsp debuglog` | `on` | Toggles V2 file logging. |
 | `/rsp logpath` | none | n/a | Prints the V2 debug log path. |
 | `/rsp save` | none | n/a | Writes current settings to XML. |

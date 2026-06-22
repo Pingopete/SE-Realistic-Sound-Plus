@@ -79,6 +79,9 @@ namespace RealisticSoundPlus.Patches
 
         public static float GetAtmosphericPressure(Vector3D position)
         {
+            if (SettingsManager.Current.V2AtmosphereOverrideEnabled)
+                return Clamp01(SettingsManager.Current.V2AtmosphereOverride);
+
             if (_pressureLookupDisabled || position == Vector3D.Zero)
                 return 0f;
 

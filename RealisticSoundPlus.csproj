@@ -12,6 +12,11 @@
     <DeployToPulsarOnBuild>true</DeployToPulsarOnBuild>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Remove="bin\**\*.cs" />
+    <Compile Remove="obj\**\*.cs" />
+    <Compile Remove="staged_mods\**\*.cs" />
+  </ItemGroup>
+  <ItemGroup>
     <Reference Include="0Harmony">
       <HintPath>$(GameBin)\0Harmony.dll</HintPath>
       <Private>false</Private>
@@ -24,6 +29,10 @@
       <HintPath>$(GameBin)\Sandbox.Game.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="Sandbox.Graphics">
+      <HintPath>$(GameBin)\Sandbox.Graphics.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="SpaceEngineers.Game">
       <HintPath>$(GameBin)\SpaceEngineers.Game.dll</HintPath>
       <Private>false</Private>
@@ -34,6 +43,10 @@
     </Reference>
     <Reference Include="VRage.Game">
       <HintPath>$(GameBin)\VRage.Game.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="VRage.Input">
+      <HintPath>$(GameBin)\VRage.Input.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="VRage.Library">

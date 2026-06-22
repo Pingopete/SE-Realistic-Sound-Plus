@@ -20,16 +20,16 @@ namespace RealisticSoundPlus
         private static readonly Color QuietColor = new Color(170, 180, 190, 255);
         private static DateTime _lastVoiceLogUtc = DateTime.MinValue;
 
-        public static bool Enabled { get; private set; } = true;
+        public static bool Enabled => SettingsManager.Current.AudioOverlayEnabled;
 
         public static void Toggle()
         {
-            Enabled = !Enabled;
+            SetEnabled(!Enabled);
         }
 
         public static void SetEnabled(bool enabled)
         {
-            Enabled = enabled;
+            SettingsManager.Current.AudioOverlayEnabled = enabled;
         }
 
         public static void Draw()
@@ -46,23 +46,32 @@ namespace RealisticSoundPlus
                 AddRows(rows, "H", played.Hud);
 
                 rows.Sort((left, right) => right.Score.CompareTo(left.Score));
+                V2AuxSourceOcclusionTelemetry.LogIfDue();
                 LogTopRows(rows);
 
                 int shown = Math.Min(rows.Count, MaxRows);
                 Vector2 viewportSize = GetViewportSize();
                 float centerX = viewportSize.X * 0.5f;
+                float statusX = Math.Max(24f, centerX - 470f);
                 float rowHeight = 22f;
-                float startY = Math.Max(80f, viewportSize.Y * 0.12f);
+                float startY = Math.Max(55f, viewportSize.Y * 0.075f);
 
-                DrawLine(0, "Realistic Sound+ audio debug  |  /rsp sounds off", HeaderColor, 0.68f, centerX, startY, rowHeight);
-                DrawLine(1, AudioDiagnostics.FormatGlobal(), HeaderColor, 0.48f, centerX, startY, rowHeight);
-                DrawLine(2, AudioEngineV2Runtime.FormatDebugLine(), HeaderColor, 0.44f, centerX, startY, rowHeight);
-                DrawLine(3, "type  eng  count  volume  cue  | route tr sc base fin d p", HeaderColor, 0.50f, centerX, startY, rowHeight);
+                int rowIndex = 0;
+                DrawText(statusX, startY + rowIndex++ * rowHeight, "Realistic Sound+ audio debug  |  /rsp sounds off  |  /rsp filters", HeaderColor, 0.66f, MyGuiDrawAlignEnum.HORISONTAL_LEFT_AND_VERTICAL_TOP);
+                string[] globalLines = AudioDiagnostics.FormatGlobalLines();
+                for (int i = 0; i < globalLines.Length; i++)
+                    DrawText(statusX, startY + rowIndex++ * rowHeight, globalLines[i], HeaderColor, 0.48f, MyGuiDrawAlignEnum.HORISONTAL_LEFT_AND_VERTICAL_TOP);
+                string[] v2Lines = V2AudioDebugState.FormatCompactLines();
+                for (int i = 0; i < v2Lines.Length; i++)
+                    DrawText(statusX, startY + rowIndex++ * rowHeight, v2Lines[i], HeaderColor, 0.44f, MyGuiDrawAlignEnum.HORISONTAL_LEFT_AND_VERTICAL_TOP);
+
+                rowIndex++;
+                DrawLine(rowIndex++, "type  eng  count  volume  cue  | route tr sc base fin d p", HeaderColor, 0.50f, centerX, startY, rowHeight);
                 AudioEngineV2Runtime.DrawDebugMarkers();
 
                 if (rows.Count == 0)
                 {
-                    DrawLine(5, "No currently playing source voices reported.", QuietColor, 0.56f, centerX, startY, rowHeight);
+                    DrawLine(rowIndex + 1, "No currently playing source voices reported.", QuietColor, 0.56f, centerX, startY, rowHeight);
                     return;
                 }
 
@@ -81,15 +90,15 @@ namespace RealisticSoundPlus
                         row.Score,
                         row.CueName,
                         diagnostic);
-                    DrawLine(i + 5, text, row.Score > 0.05f ? TextColor : QuietColor, 0.46f, centerX, startY, rowHeight);
+                    DrawLine(rowIndex + i, text, row.Score > 0.05f ? TextColor : QuietColor, 0.46f, centerX, startY, rowHeight);
                 }
 
                 if (rows.Count > shown)
-                    DrawLine(shown + 6, "+ " + (rows.Count - shown).ToString(CultureInfo.InvariantCulture) + " more", QuietColor, 0.5f, centerX, startY, rowHeight);
+                    DrawLine(rowIndex + shown + 1, "+ " + (rows.Count - shown).ToString(CultureInfo.InvariantCulture) + " more", QuietColor, 0.5f, centerX, startY, rowHeight);
             }
             catch (Exception ex)
             {
-                Enabled = false;
+                SetEnabled(false);
                 MyLog.Default.WriteLineAndConsole("[RealisticSoundPlus] Disabling audio debug overlay after error: " + ex);
             }
         }
@@ -122,7 +131,9 @@ namespace RealisticSoundPlus
                 }
 
                 row.Count++;
-                row.Score += Math.Max(0f, voice.Volume * voice.VolumeMultiplier);
+                float score = Math.Max(0f, voice.Volume * voice.VolumeMultiplier);
+                row.Score += score;
+                V2AuxSourceOcclusionTelemetry.RecordVoice(kind, cueName, voice, score);
             }
 
             foreach (Row row in byCue.Values)
@@ -183,13 +194,12 @@ namespace RealisticSoundPlus
 
         private static void DrawLine(int row, string text, Color color, float scale, float centerX, float startY, float rowHeight)
         {
-            MyRenderProxy.DebugDrawText2D(
-                new Vector2(centerX, startY + row * rowHeight),
-                text,
-                color,
-                scale,
-                MyGuiDrawAlignEnum.HORISONTAL_CENTER_AND_VERTICAL_TOP,
-                false);
+            DrawText(centerX, startY + row * rowHeight, text, color, scale, MyGuiDrawAlignEnum.HORISONTAL_CENTER_AND_VERTICAL_TOP);
+        }
+
+        internal static void DrawText(float x, float y, string text, Color color, float scale, MyGuiDrawAlignEnum align)
+        {
+            MyRenderProxy.DebugDrawText2D(new Vector2(x, y), text, color, scale, align, false);
         }
 
         private sealed class Row

@@ -35,8 +35,12 @@ namespace RealisticSoundPlus
             ResetAudioRuntimeIfSessionChanged();
             SettingsCommands.TryRegister();
             AudioEngineV2Runtime.Update();
+            V2ConnectorImpactAudio.Update();
+            AudioVoiceCatalog.Update();
             V2DebugLog.Update();
+            V2AuxOcclusionDebugOverlay.Draw();
             AudioDebugOverlay.Draw();
+            FilterDebugOverlay.Draw();
 
             if (++_settingsPollFrame >= 300)
             {
@@ -64,6 +68,7 @@ namespace RealisticSoundPlus
 
             try
             {
+                RspSettingsMenu.CloseIfOpen();
                 SettingsCommands.Unregister();
                 _harmony?.UnpatchAll(HarmonyId);
                 AudioPatchRuntime.ResetForSession("plugin dispose");
