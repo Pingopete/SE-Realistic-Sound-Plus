@@ -1,5 +1,18 @@
 # Realistic Sound Plus
 
+This project started off with the original goal of fixing some of the most eggregious audio bugs foound with the base game's realistic sound mode but has since expanded into many other areas to provide an much more immersive audio experience in se1.
+
+Main 3 ares:
+- thruster sound realism improvements: sound dmpening through ship walls and simulation of sound transmission of thrusters through atmosphere with varying pressure and through hull/structural probagation.
+
+- progressive environmental audio muffling inside structures on planets: ambient enviromental audio effects no longer cut off when occlusion reached a binary on/off value, it instead persists and becomes increasingly more muffled, low passed, and volume reduced depending on the amount of structure between the player and the outside world - decending from the surface into a deep base gradually darkens external wind/rain/other sounds for a much more immersive on planet audio experience.
+
+- in-game realistic reverb: a global reverb wet bus is being added which produces reverb for all sounds. Reverb parameters are driven by spherical raycast hit data aroound the player and constantly update to produce a realistic reverb audio enviroment greatly adding immersion to the player experience when inside structures.  
+
+
+
+
+
 git pull test
 Client-side Pulsar plugin for Space Engineers realistic audio mode.
 
