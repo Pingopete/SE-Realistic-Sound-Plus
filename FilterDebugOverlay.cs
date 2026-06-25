@@ -59,6 +59,7 @@ namespace RealisticSoundPlus
                 Draw(x, y + line++ * row, string.Format(CultureInfo.InvariantCulture, "block distance: fallback={0:0}m scale={1:0.00} curve={2:0.00}", s.PlayerFilterBlockRange, s.PlayerFilterBlockRangeScale, s.PlayerFilterBlockDistanceCurve), TextColor, 0.43f);
                 line = DrawMultiline(x, y, row, line, V2BlockRangeScaler.FormatStatus(), TextColor, 0.38f, 2);
                 line = DrawMultiline(x, y, row, line, V2PlayerEnvironmentTelemetry.FormatSummary(), TextColor, 0.38f, 2);
+                line = DrawMultiline(x, y, row, line, V2PlayerEnvironmentTelemetry.FormatReverbDebugSummary(), TextColor, 0.38f, 2);
                 line = DrawMultiline(x, y, row, line, V2PlayerFilterRuntime.FormatSummary(), TextColor, 0.40f, 2);
                 line = DrawMultiline(x, y, row, line, V2PlayerFilterRuntime.FormatSources(6), DimColor, 0.36f, 7);
                 line++;

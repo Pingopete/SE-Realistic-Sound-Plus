@@ -39,6 +39,7 @@ namespace RealisticSoundPlus
             AudioVoiceCatalog.Update();
             V2DebugLog.Update();
             V2AuxOcclusionDebugOverlay.Draw();
+            V2PlayerEnvironmentTelemetry.DrawReverbRayDebug();
             AudioDebugOverlay.Draw();
             FilterDebugOverlay.Draw();
 

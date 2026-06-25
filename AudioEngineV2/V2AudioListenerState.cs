@@ -10,7 +10,11 @@ namespace RealisticSoundPlus.AudioEngineV2
     internal struct V2AudioListenerState
     {
         private const double SeatInteriorCameraRange = 12.0;
+        private const double StableListenerHoldRange = 10.0;
+        private static readonly TimeSpan StableListenerHold = TimeSpan.FromMilliseconds(800);
         private static readonly BindingFlags InstanceMembers = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+        private static V2AudioListenerState _lastReliableState;
+        private static DateTime _lastReliableUtc = DateTime.MinValue;
 
         public Vector3D Position;
         public float Atmosphere;
@@ -26,12 +30,19 @@ namespace RealisticSoundPlus.AudioEngineV2
         public string ContactSource;
         public string CharacterMovementState;
 
+        public static void ResetStability()
+        {
+            _lastReliableState = default(V2AudioListenerState);
+            _lastReliableUtc = DateTime.MinValue;
+        }
+
         public static V2AudioListenerState Capture()
         {
             Vector3D position = MyAPIGateway.Session?.Camera?.Position ?? Vector3D.Zero;
             bool controlledShip = TryGetControlledShip(out long controlledGridId, out Vector3D controlledPosition, out Vector3 moveInput, out bool hasMoveInput);
             bool characterGridContact = TryGetCharacterGridContact(out long contactGridId, out string contactSource, out string characterMovementState);
-            bool seatedInteriorCamera = controlledShip && IsCameraNearControlledShip(position, controlledPosition);
+            bool firstPersonCamera = IsFirstPersonCamera();
+            bool seatedInteriorCamera = controlledShip && firstPersonCamera && IsCameraNearControlledShip(position, controlledPosition);
             bool vanillaInside = false;
             string roomName = "room=?";
             long gridEntityId = 0L;
@@ -51,13 +62,16 @@ namespace RealisticSoundPlus.AudioEngineV2
             if (characterGridContact && !controlledShip && vanillaInside && !HasUsableVanillaRoom(roomName))
                 vanillaInside = false;
 
+            if (controlledShip && !firstPersonCamera)
+                vanillaInside = false;
+
             bool insideShip = vanillaInside || seatedInteriorCamera;
             bool routeActive = insideShip || controlledShip || characterGridContact;
             string modeName = insideShip
                 ? (seatedInteriorCamera ? "inside-seat" : "inside-room")
                 : (controlledShip ? "outside-seat-camera" : (characterGridContact ? "outside-grid-contact-" + contactSource : "vanilla-fallback"));
 
-            return new V2AudioListenerState
+            V2AudioListenerState raw = new V2AudioListenerState
             {
                 Position = position,
                 Atmosphere = ExteriorSoundTransmission.GetAtmosphericPressure(position),
@@ -73,6 +87,65 @@ namespace RealisticSoundPlus.AudioEngineV2
                 ContactSource = contactSource,
                 CharacterMovementState = characterMovementState
             };
+
+            return Stabilize(raw);
+        }
+
+        private static V2AudioListenerState Stabilize(V2AudioListenerState raw)
+        {
+            DateTime now = DateTime.UtcNow;
+            if (IsReliableListenerState(raw))
+            {
+                _lastReliableState = raw;
+                _lastReliableUtc = now;
+                return raw;
+            }
+
+            if (!CanReuseLastReliableState(raw, now))
+                return raw;
+
+            V2AudioListenerState stable = raw;
+            stable.InsideShip = _lastReliableState.InsideShip;
+            stable.SeatedInShip = _lastReliableState.SeatedInShip || raw.SeatedInShip;
+            stable.VanillaFallback = false;
+            stable.RoomName = _lastReliableState.RoomName;
+            stable.GridEntityId = _lastReliableState.GridEntityId;
+            stable.ContactGridEntityId = raw.ContactGridEntityId != 0L ? raw.ContactGridEntityId : _lastReliableState.ContactGridEntityId;
+            stable.ContactSource = string.IsNullOrWhiteSpace(raw.ContactSource) ? _lastReliableState.ContactSource : raw.ContactSource;
+            stable.ModeName = string.IsNullOrWhiteSpace(_lastReliableState.ModeName)
+                ? "grid-hold"
+                : _lastReliableState.ModeName + "-hold";
+            return stable;
+        }
+
+        private static bool IsReliableListenerState(V2AudioListenerState state)
+        {
+            if (state.VanillaFallback || state.GridEntityId == 0L)
+                return false;
+
+            return state.InsideShip
+                || state.SeatedInShip
+                || !string.IsNullOrWhiteSpace(state.ContactSource);
+        }
+
+        private static bool CanReuseLastReliableState(V2AudioListenerState raw, DateTime now)
+        {
+            if (_lastReliableUtc == DateTime.MinValue)
+                return false;
+
+            if (now - _lastReliableUtc > StableListenerHold)
+                return false;
+
+            if (_lastReliableState.GridEntityId == 0L)
+                return false;
+
+            if (!raw.VanillaFallback && raw.GridEntityId != 0L)
+                return false;
+
+            if (raw.Position == Vector3D.Zero || _lastReliableState.Position == Vector3D.Zero)
+                return true;
+
+            return Vector3D.DistanceSquared(raw.Position, _lastReliableState.Position) <= StableListenerHoldRange * StableListenerHoldRange;
         }
 
         private static bool HasUsableVanillaRoom(string roomName)
@@ -173,6 +246,18 @@ namespace RealisticSoundPlus.AudioEngineV2
                 return true;
 
             return Vector3D.DistanceSquared(cameraPosition, controlledPosition) <= SeatInteriorCameraRange * SeatInteriorCameraRange;
+        }
+
+        private static bool IsFirstPersonCamera()
+        {
+            try
+            {
+                return MyAPIGateway.Session?.CameraController?.IsInFirstPersonView ?? true;
+            }
+            catch
+            {
+                return true;
+            }
         }
 
         private static bool TryGetControlledShip(out long gridEntityId, out Vector3D controlledPosition, out Vector3 moveInput, out bool hasMoveInput)

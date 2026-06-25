@@ -6,6 +6,8 @@ using RealisticSoundPlus.Patches;
 using Sandbox.Game.Entities;
 using Sandbox.ModAPI;
 using VRage.Audio;
+using VRage.Game.Entity;
+using VRage.ModAPI;
 using VRageMath;
 
 namespace RealisticSoundPlus.AudioEngineV2
@@ -13,20 +15,46 @@ namespace RealisticSoundPlus.AudioEngineV2
     internal static class V2AuxSourceOcclusionTelemetry
     {
         private const int MaxSamples = 32;
-        private const int MaxCalculationCache = 96;
+        private const int MaxPathProbeCache = 256;
+        private const float DefaultSourceClearRadius = 1.6f;
+        private const float MaxSourceClearRadius = 5.0f;
+        private const float MaxSourceSkipMeters = 6.0f;
+        private const float ListenerClearRadius = 0.6f;
+        private const float SourceClearMargin = 0.5f;
+        private const float VoxelOcclusionEpsilon = 0.001f;
+        private const float VoxelOcclusionMinUsefulWeight = 0.05f;
+        private const float BlockVoxelMinBlockedMeters = 0.35f;
+        private const double PathProbeSourceCellMeters = 1.5;
         private static readonly TimeSpan SampleLifetime = TimeSpan.FromSeconds(2);
-        private static readonly TimeSpan CalculationCacheLifetime = TimeSpan.FromMilliseconds(200);
+        private static readonly TimeSpan PathProbeInterval = TimeSpan.FromMilliseconds(250);
+        private static readonly TimeSpan PathProbeLifetime = TimeSpan.FromSeconds(8);
+        private static readonly TimeSpan OcclusionSmoothingResetGap = TimeSpan.FromSeconds(1.5);
+        private const int MaxOcclusionSmoothing = 256;
         private static readonly Dictionary<string, V2AuxSourceOcclusionSample> Samples = new Dictionary<string, V2AuxSourceOcclusionSample>(StringComparer.OrdinalIgnoreCase);
-        private static readonly Dictionary<string, V2AuxSourceOcclusionSample> CalculationCache = new Dictionary<string, V2AuxSourceOcclusionSample>(StringComparer.OrdinalIgnoreCase);
+        private static readonly Dictionary<string, PathProbeState> PathProbeCache = new Dictionary<string, PathProbeState>(StringComparer.OrdinalIgnoreCase);
+        private static readonly Dictionary<string, OcclusionSmoothState> OcclusionSmoothing = new Dictionary<string, OcclusionSmoothState>(StringComparer.OrdinalIgnoreCase);
         private static readonly List<string> Order = new List<string>();
         private static DateTime _lastLogUtc = DateTime.MinValue;
+        private static long _pathProbeCacheHits;
+        private static long _pathProbeCacheMisses;
+        private static long _rangeRejects;
+        private static long _pathRays;
+        private static long _voxelEstimates;
+        private static long _thicknessEstimates;
 
         public static void Reset()
         {
             Samples.Clear();
-            CalculationCache.Clear();
+            PathProbeCache.Clear();
+            OcclusionSmoothing.Clear();
             Order.Clear();
             _lastLogUtc = DateTime.MinValue;
+            _pathProbeCacheHits = 0L;
+            _pathProbeCacheMisses = 0L;
+            _rangeRejects = 0L;
+            _pathRays = 0L;
+            _voxelEstimates = 0L;
+            _thicknessEstimates = 0L;
         }
 
         public static void Update()
@@ -42,7 +70,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             if (!RspDynamicAudioFilters.TryResolveEmitter(voice, out MyEntity3DSoundEmitter emitter) || emitter == null)
                 return;
 
-            Vector3D source = emitter.SourcePosition;
+            Vector3D source = ResolveEmitterSourcePosition(emitter);
             Vector3D listener = AudioEngineV2Runtime.Listener.Position;
             if (listener == Vector3D.Zero)
                 listener = MyAPIGateway.Session?.Camera?.Position ?? Vector3D.Zero;
@@ -50,7 +78,9 @@ namespace RealisticSoundPlus.AudioEngineV2
             if (source == Vector3D.Zero || listener == Vector3D.Zero)
                 return;
 
-            V2AuxSourceOcclusionSample sample = Calculate(kind, cueName, score, source, listener, "physical");
+            RecordRangeRelation(cueName, source, listener);
+
+            V2AuxSourceOcclusionSample sample = Calculate(kind, cueName, score, source, listener, "physical", ResolveEmitterEntityId(emitter));
             sample.CustomRangeApplied = TryApplyCustomRange(emitter, cueName, sample.EffectiveRange, sample.VanillaMaxDistance);
             if (sample.CustomRangeApplied)
                 sample.EstimatedGain = CalculateEstimatedGain(sample, true);
@@ -90,6 +120,19 @@ namespace RealisticSoundPlus.AudioEngineV2
                 strongestMuffle,
                 strongestCutoff,
                 strongest);
+        }
+
+        public static string FormatPerfSummary()
+        {
+            return string.Format(
+                CultureInfo.InvariantCulture,
+                "aux rayState={4}/{5} rangeFar={0} rays={1} voxel={2} thick={3}",
+                _rangeRejects,
+                _pathRays,
+                _voxelEstimates,
+                _thicknessEstimates,
+                _pathProbeCacheHits,
+                _pathProbeCacheMisses);
         }
 
         public static string FormatSources(int maxLines)
@@ -200,7 +243,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             if (emitter == null)
                 return false;
 
-            Vector3D source = emitter.SourcePosition;
+            Vector3D source = ResolveEmitterSourcePosition(emitter);
             Vector3D listener = AudioEngineV2Runtime.Listener.Position;
             if (listener == Vector3D.Zero)
                 listener = MyAPIGateway.Session?.Camera?.Position ?? Vector3D.Zero;
@@ -208,7 +251,9 @@ namespace RealisticSoundPlus.AudioEngineV2
             if (source == Vector3D.Zero || listener == Vector3D.Zero)
                 return false;
 
-            sample = Calculate(kind, cueName, score, source, listener, "physical");
+            RecordRangeRelation(cueName, source, listener);
+
+            sample = Calculate(kind, cueName, score, source, listener, "physical", ResolveEmitterEntityId(emitter));
             sample.CustomRangeApplied = TryApplyCustomRange(emitter, cueName, sample.EffectiveRange, sample.VanillaMaxDistance);
             if (sample.CustomRangeApplied)
                 sample.EstimatedGain = CalculateEstimatedGain(sample, true);
@@ -226,33 +271,74 @@ namespace RealisticSoundPlus.AudioEngineV2
             if (source == Vector3D.Zero || listener == Vector3D.Zero)
                 return false;
 
-            sample = Calculate(kind, cueName, score, source, listener, "resolved");
+            RecordRangeRelation(cueName, source, listener);
+
+            sample = Calculate(kind, cueName, score, source, listener, "resolved", 0L);
             StoreSample(sample, source);
             return true;
         }
 
-        private static V2AuxSourceOcclusionSample Calculate(string kind, string cueName, float score, Vector3D source, Vector3D listener, string className)
+        public static bool TryCalculate(string kind, string cueName, float score, Vector3D source, long sourceEntityId, out V2AuxSourceOcclusionSample sample)
+        {
+            sample = default(V2AuxSourceOcclusionSample);
+            Vector3D listener = AudioEngineV2Runtime.Listener.Position;
+            if (listener == Vector3D.Zero)
+                listener = MyAPIGateway.Session?.Camera?.Position ?? Vector3D.Zero;
+
+            if (source == Vector3D.Zero || listener == Vector3D.Zero)
+                return false;
+
+            RecordRangeRelation(cueName, source, listener);
+
+            sample = Calculate(kind, cueName, score, source, listener, "resolved", sourceEntityId);
+            StoreSample(sample, source);
+            return true;
+        }
+
+        private static V2AuxSourceOcclusionSample Calculate(string kind, string cueName, float score, Vector3D source, Vector3D listener, string className, long sourceEntityId)
         {
             RealisticSoundPlusSettings settings = SettingsManager.Current;
             float distance = (float)Vector3D.Distance(source, listener);
             float pathLength = distance;
             float vanillaMaxDistance = V2BlockRangeScaler.ResolveVanillaMaxDistance(cueName, settings);
-            float rangeScale = Math.Max(0.1f, settings.PlayerFilterBlockRangeScale);
             float effectiveRange = V2BlockRangeScaler.ResolveEffectiveRange(settings, vanillaMaxDistance);
-            string cacheKey = BuildCalculationKey(cueName, source, listener, settings);
+            float rangeScale = vanillaMaxDistance > 0.5f ? effectiveRange / vanillaMaxDistance : 1f;
             DateTime now = DateTime.UtcNow;
-            if (CalculationCache.TryGetValue(cacheKey, out V2AuxSourceOcclusionSample cached)
-                && now - cached.UpdatedUtc <= CalculationCacheLifetime)
-            {
-                cached.UpdatedUtc = now;
-                cached.Kind = kind;
-                cached.ClassName = className ?? cached.ClassName;
-                cached.Score = score;
-                return cached;
-            }
+            int open;
+            int blocked;
+            float openWeight;
+            float totalWeight;
+            float weightedBlockedMeters;
+            bool mainRayBlocked;
+            Vector3D probeFrom = Vector3D.Zero;
+            Vector3D probeTo = Vector3D.Zero;
 
-            ProbePath(source, listener, settings, out int open, out int blocked, out float openWeight, out float totalWeight, out float weightedBlockedMeters);
-            TryFindFirstBlockedPosition(source, listener, out bool mainRayBlocked, out Vector3D firstBlockedPosition);
+            // Only probe occlusion within audible range. Beyond it, casting a ray is meaningless and
+            // can spuriously report a full block (e.g. a source with a stale/far position), which would
+            // silence a voice the distance/range gain already handles. Treat far sources as unoccluded.
+            float maxProbeMeters = Math.Max(effectiveRange, settings.PlayerFilterBlockMaxRange) * 1.5f + 10f;
+            if (distance <= maxProbeMeters)
+            {
+                ResolveSourceClearance(source, sourceEntityId, out long _, out float sourceClearRadius);
+                ProbePath(cueName, source, listener, sourceEntityId, settings, now, sourceClearRadius, out open, out blocked, out openWeight, out totalWeight, out weightedBlockedMeters, out mainRayBlocked);
+                if (settings.PlayerFilterPathDebugEnabled)
+                {
+                    // Expose the exact probed sub-segment (after source-clearance and listener skips) so the
+                    // debug overlay draws the same span the thickness estimate measured, with the skipped
+                    // near-source/near-listener stretches shown separately. Pure math, so enabling the
+                    // overlay does not alter the audible occlusion result.
+                    ComputeProbeEndpoints(source, listener, sourceClearRadius, out probeFrom, out probeTo);
+                }
+            }
+            else
+            {
+                open = 1;
+                blocked = 0;
+                openWeight = 1f;
+                totalWeight = 1f;
+                weightedBlockedMeters = 0f;
+                mainRayBlocked = false;
+            }
             int rays = open + blocked;
             if (rays == 0)
             {
@@ -291,9 +377,13 @@ namespace RealisticSoundPlus.AudioEngineV2
             }
 
             float sealedExtra = isSealed ? settings.PlayerFilterBlockSealedFactor : 0f;
-            float pathMuffling = Clamp01(continuous + (1f - continuous) * distanceFactor);
+            float pathMuffling = continuous;
             float finalMuffling = ApplyOcclusionStrength(Clamp01(pathMuffling + (1f - pathMuffling) * sealedExtra), settings.PlayerFilterOcclusionStrength);
             finalMuffling = LimitNearSourceMuffling(finalMuffling, distance, openFraction, estimatedBlockedLength, blockThicknessScale);
+            // A single source->listener ray is a binary test: it flips fully blocked/open as the listener
+            // moves across wall edges, doorways, and gaps. Smoothing the per-source occlusion over time turns
+            // those flips into a graded result — the temporal equivalent of averaging several spatial rays.
+            finalMuffling = SmoothOcclusion(sourceEntityId, source, cueName, finalMuffling, now, settings);
             float localAtmosphere = ResolveListenerAtmosphere(source, listener);
             float occlusionMuffling = ApplyOcclusionStrength(Clamp01(continuous + (1f - continuous) * sealedExtra), settings.PlayerFilterOcclusionStrength);
             float rangeCompensation = desiredDistanceGain / Math.Max(0.05f, vanillaDistanceGain);
@@ -309,7 +399,8 @@ namespace RealisticSoundPlus.AudioEngineV2
                 Score = score,
                 SourcePosition = source,
                 ListenerPosition = listener,
-                FirstBlockedPosition = firstBlockedPosition,
+                ProbeFrom = probeFrom,
+                ProbeTo = probeTo,
                 Distance = distance,
                 PathLength = pathLength,
                 MainRayBlocked = mainRayBlocked,
@@ -339,16 +430,107 @@ namespace RealisticSoundPlus.AudioEngineV2
                 EstimatedQ = settings.Filter2Q,
                 LocalAtmosphere = localAtmosphere
             };
-            StoreCalculation(cacheKey, sample);
             return sample;
         }
 
-        private static void StoreCalculation(string cacheKey, V2AuxSourceOcclusionSample sample)
+        // The owning block entity is the authoritative physical source position. emitter.SourcePosition
+        // can freeze on a stale world point — observed pinned ~60 km away at a previously-visited base
+        // while the block sits a few metres from the listener — which pushes the source out of probe
+        // range and silently disables occlusion (rays never fire, muffle collapses to atmosphere only).
+        // The game's audio engine plays the block at its live entity position, so we trust that too and
+        // fall back to SourcePosition only when no entity position is available.
+        private static Vector3D ResolveEmitterSourcePosition(MyEntity3DSoundEmitter emitter)
         {
-            if (CalculationCache.Count > MaxCalculationCache)
-                PurgeCalculationCache();
+            if (emitter == null)
+                return Vector3D.Zero;
 
-            CalculationCache[cacheKey] = sample;
+            try
+            {
+                MyEntity entity = emitter.Entity;
+                if (entity != null && entity.PositionComp != null)
+                {
+                    Vector3D entityPosition = entity.PositionComp.GetPosition();
+                    if (entityPosition != Vector3D.Zero)
+                        return entityPosition;
+                }
+            }
+            catch
+            {
+            }
+
+            return emitter.SourcePosition;
+        }
+
+        private static long ResolveEmitterEntityId(MyEntity3DSoundEmitter emitter)
+        {
+            return emitter?.Entity?.EntityId ?? 0L;
+        }
+
+        // Exponential moving average of the per-source occlusion, keyed by the owning block entity so each
+        // physical source is smoothed independently. Replaces the spatial averaging the old multi-ray model
+        // provided: a single ray slipping through a gap for a few frames now only nudges the result instead
+        // of collapsing it to zero. Time constant is tunable (PlayerFilterBlockOcclusionSmoothingMs); 0 = off.
+        private static float SmoothOcclusion(long sourceEntityId, Vector3D source, string cueName, float target, DateTime now, RealisticSoundPlusSettings settings)
+        {
+            target = Clamp01(target);
+            float timeConstantMs = Math.Max(0f, settings?.PlayerFilterBlockOcclusionSmoothingMs ?? 0f);
+            if (timeConstantMs <= 0.001f)
+                return target;
+
+            string key = sourceEntityId != 0L
+                ? "e" + sourceEntityId.ToString(CultureInfo.InvariantCulture)
+                : BuildKey(cueName, source);
+
+            if (!OcclusionSmoothing.TryGetValue(key, out OcclusionSmoothState state) || now - state.UpdatedUtc > OcclusionSmoothingResetGap)
+            {
+                if (OcclusionSmoothing.Count > MaxOcclusionSmoothing)
+                    PurgeOcclusionSmoothing(now);
+                if (OcclusionSmoothing.Count > MaxOcclusionSmoothing)
+                    OcclusionSmoothing.Clear();
+
+                OcclusionSmoothing[key] = new OcclusionSmoothState { Muffle = target, UpdatedUtc = now };
+                return target;
+            }
+
+            float elapsedMs = (float)Math.Max(0.0, (now - state.UpdatedUtc).TotalMilliseconds);
+            float alpha = Clamp01(elapsedMs / timeConstantMs);
+            float smoothed = Clamp01(state.Muffle + (target - state.Muffle) * alpha);
+            OcclusionSmoothing[key] = new OcclusionSmoothState { Muffle = smoothed, UpdatedUtc = now };
+            return smoothed;
+        }
+
+        private static void PurgeOcclusionSmoothing(DateTime now)
+        {
+            if (OcclusionSmoothing.Count == 0)
+                return;
+
+            List<string> remove = null;
+            foreach (KeyValuePair<string, OcclusionSmoothState> pair in OcclusionSmoothing)
+            {
+                if (now - pair.Value.UpdatedUtc <= OcclusionSmoothingResetGap)
+                    continue;
+
+                if (remove == null)
+                    remove = new List<string>();
+                remove.Add(pair.Key);
+            }
+
+            if (remove == null)
+                return;
+
+            for (int i = 0; i < remove.Count; i++)
+                OcclusionSmoothing.Remove(remove[i]);
+        }
+
+        private static void RecordRangeRelation(string cueName, Vector3D source, Vector3D listener)
+        {
+            RealisticSoundPlusSettings settings = SettingsManager.Current;
+            float vanillaRange = V2BlockRangeScaler.ResolveVanillaMaxDistance(cueName, settings);
+            float effectiveRange = V2BlockRangeScaler.ResolveEffectiveRange(settings, vanillaRange);
+            double range = Math.Max(1.0, effectiveRange) + 0.5;
+            bool withinRange = Vector3D.DistanceSquared(source, listener) <= range * range;
+            if (!withinRange)
+                _rangeRejects = SaturatingIncrement(_rangeRejects);
         }
 
         private static void StoreSample(V2AuxSourceOcclusionSample sample, Vector3D source)
@@ -451,108 +633,171 @@ namespace RealisticSoundPlus.AudioEngineV2
             return Clamp01(1f - (float)Math.Pow(normalized, curve));
         }
 
-        private static void ProbePath(Vector3D source, Vector3D listener, RealisticSoundPlusSettings settings, out int open, out int blocked, out float openWeight, out float totalWeight, out float weightedBlockedMeters)
+        private static void ProbePath(string cueName, Vector3D source, Vector3D listener, long sourceEntityId, RealisticSoundPlusSettings settings, DateTime now, float sourceClearRadius, out int open, out int blocked, out float openWeight, out float totalWeight, out float weightedBlockedMeters, out bool mainRayBlocked)
         {
-            open = 0;
-            blocked = 0;
-            openWeight = 0f;
-            totalWeight = 0f;
-            weightedBlockedMeters = 0f;
-            Vector3D path = listener - source;
-            double length = path.Length();
-            if (length <= 0.5)
+            string key = BuildPathProbeKey(cueName, source, sourceEntityId, settings);
+            if (!PathProbeCache.TryGetValue(key, out PathProbeState state))
+                state = CreateDefaultPathProbe(now);
+
+            bool probeDue = now - state.LastProbeUtc >= PathProbeInterval;
+            if (probeDue)
             {
-                open = 1;
-                openWeight = 1f;
-                totalWeight = 1f;
-                return;
+                _pathProbeCacheMisses = SaturatingIncrement(_pathProbeCacheMisses);
+                PathProbeMeasurement measurement = ProbeSinglePath(source, listener, settings, settings.PlayerFilterBlockStructureThicknessScale, sourceClearRadius);
+                state = CreatePathProbeState(measurement, now);
+                state.LastProbeUtc = now;
+                state.UpdatedUtc = now;
+                StorePathProbe(key, state, now);
+            }
+            else
+            {
+                _pathProbeCacheHits = SaturatingIncrement(_pathProbeCacheHits);
+                state.UpdatedUtc = now;
+                PathProbeCache[key] = state;
             }
 
-            Vector3D forward = path / length;
-            Vector3D right = MyAPIGateway.Session?.Camera?.WorldMatrix.Right ?? Vector3D.Right;
-            Vector3D up = MyAPIGateway.Session?.Camera?.WorldMatrix.Up ?? Vector3D.Up;
-            ComputeProbeEndpoints(source, listener, out Vector3D fromBase, out Vector3D toBase);
-            float blockThicknessScale = Math.Max(0.1f, settings.PlayerFilterBlockStructureThicknessScale);
-            float voxelWeight = Math.Max(0f, settings.PlayerFilterVoxelOcclusionWeight);
-            Vector3D[] offsets =
+            open = state.Open;
+            blocked = state.Blocked;
+            openWeight = state.OpenWeight;
+            totalWeight = state.TotalWeight;
+            weightedBlockedMeters = state.WeightedBlockedMeters;
+            mainRayBlocked = state.MainRayBlocked;
+        }
+
+        private static PathProbeState CreateDefaultPathProbe(DateTime now)
+        {
+            return new PathProbeState
             {
-                Vector3D.Zero,
-                right * 0.35,
-                -right * 0.35,
-                up * 0.35,
-                -up * 0.35
+                UpdatedUtc = now,
+                LastProbeUtc = DateTime.MinValue,
+                Open = 1,
+                Blocked = 0,
+                OpenWeight = 1f,
+                TotalWeight = 1f,
+                WeightedBlockedMeters = 0f,
+                MainRayBlocked = false,
+                Initialized = false
+            };
+        }
+
+        private static PathProbeState CreatePathProbeState(PathProbeMeasurement measurement, DateTime now)
+        {
+            return new PathProbeState
+            {
+                UpdatedUtc = now,
+                LastProbeUtc = now,
+                Open = measurement.Open,
+                Blocked = measurement.Blocked,
+                OpenWeight = measurement.OpenWeight,
+                TotalWeight = measurement.TotalWeight,
+                WeightedBlockedMeters = measurement.WeightedBlockedMeters,
+                MainRayBlocked = measurement.MainRayBlocked,
+                Initialized = true
+            };
+        }
+
+        private static PathProbeMeasurement ProbeSinglePath(Vector3D source, Vector3D listener, RealisticSoundPlusSettings settings, float structureThicknessScale, float sourceClearRadius)
+        {
+            PathProbeMeasurement measurement = new PathProbeMeasurement
+            {
+                Open = 1,
+                Blocked = 0,
+                OpenWeight = 1f,
+                TotalWeight = 1f,
+                WeightedBlockedMeters = 0f,
+                MainRayBlocked = false
             };
 
-            for (int i = 0; i < offsets.Length; i++)
-            {
-                Vector3D to = toBase + offsets[i];
-                bool rayAvailable = V2PlayerEnvironmentTelemetry.TryRayBlocked(fromBase, to, out bool hit);
-                float voxelMeters = voxelWeight > 0.001f
-                    ? V2PlayerEnvironmentTelemetry.EstimateVoxelBlockedLength(fromBase, to, 0.75f, 48)
-                    : 0f;
-                bool voxelHit = voxelMeters > 0.001f;
-                if (rayAvailable || voxelHit)
-                {
-                    totalWeight += 1f;
-                    if (hit || voxelHit)
-                    {
-                        blocked++;
-                        float blockedMeters = hit ? V2PlayerEnvironmentTelemetry.EstimateBlockedLength(fromBase, to, 0.5f, 48) : 0f;
-                        if (voxelHit)
-                            blockedMeters += voxelMeters * voxelWeight;
-
-                        if (blockedMeters <= 0.001f)
-                            blockedMeters = Math.Max(0.1f, blockThicknessScale);
-
-                        weightedBlockedMeters += blockedMeters;
-                        openWeight += V2PlayerEnvironmentTelemetry.CalculateThicknessTransmission(blockedMeters, blockThicknessScale);
-                    }
-                    else
-                    {
-                        open++;
-                        openWeight += 1f;
-                    }
-                }
-            }
-        }
-
-        private static bool TryFindFirstBlockedPosition(Vector3D source, Vector3D listener, out bool blocked, out Vector3D firstBlockedPosition)
-        {
-            blocked = false;
-            firstBlockedPosition = Vector3D.Zero;
-
             Vector3D path = listener - source;
             double length = path.Length();
             if (length <= 0.5)
-                return false;
+                return measurement;
 
-            ComputeProbeEndpoints(source, listener, out Vector3D from, out Vector3D to);
+            // Listener is at/just outside the source block itself: there is no room for occluding
+            // structure between them, so report open rather than letting the probe graze the source
+            // block's own cells (which previously caused phantom close-range muffling).
+            if (length <= Math.Max(0.75f, sourceClearRadius + SourceClearMargin) + 0.75)
+                return measurement;
+
+            ComputeProbeEndpoints(source, listener, sourceClearRadius, out Vector3D from, out Vector3D to);
+            float blockThicknessScale = Math.Max(0.1f, structureThicknessScale);
+            float voxelWeight = NormalizeVoxelWeight(settings.PlayerFilterBlockVoxelOcclusionWeight);
+            _pathRays = SaturatingIncrement(_pathRays);
             bool rayAvailable = V2PlayerEnvironmentTelemetry.TryRayBlocked(from, to, out bool hit);
-            float voxelWeight = Math.Max(0f, SettingsManager.Current?.PlayerFilterVoxelOcclusionWeight ?? 0f);
-            float voxelMeters = voxelWeight > 0.001f
-                ? V2PlayerEnvironmentTelemetry.EstimateVoxelBlockedLength(from, to, 0.75f, 48)
+            float rawVoxelMeters = voxelWeight > VoxelOcclusionEpsilon
+                ? EstimateVoxelBlockedLength(from, to)
                 : 0f;
-            if ((!rayAvailable || !hit) && voxelMeters <= 0.001f)
-                return true;
+            float voxelMeters = rawVoxelMeters * voxelWeight;
+            float voxelThreshold = Math.Max(BlockVoxelMinBlockedMeters, blockThicknessScale * 0.20f);
+            bool voxelHit = voxelMeters > voxelThreshold;
 
-            blocked = true;
-            double low = 0.0;
-            double high = 1.0;
-            for (int i = 0; i < 12; i++)
+            if (!rayAvailable && !voxelHit)
+                return measurement;
+
+            measurement.TotalWeight = 1f;
+            measurement.MainRayBlocked = (rayAvailable && hit) || voxelHit;
+            if (hit || voxelHit)
             {
-                double mid = (low + high) * 0.5;
-                Vector3D probe = Vector3D.Lerp(from, to, mid);
-                if (V2PlayerEnvironmentTelemetry.TryRayBlocked(from, probe, out bool midHit) && midHit)
-                    high = mid;
-                else
-                    low = mid;
+                float blockedMeters = 0f;
+                if (hit)
+                {
+                    blockedMeters = EstimateBlockedLength(from, to);
+                    if (blockedMeters <= 0.001f)
+                        blockedMeters = Math.Max(0.1f, blockThicknessScale * 0.25f);
+                }
+
+                if (voxelHit)
+                    blockedMeters += voxelMeters;
+
+                measurement.Open = 0;
+                measurement.Blocked = 1;
+                measurement.WeightedBlockedMeters = blockedMeters;
+                measurement.OpenWeight = V2PlayerEnvironmentTelemetry.CalculateThicknessTransmission(blockedMeters, blockThicknessScale);
+                return measurement;
             }
 
-            firstBlockedPosition = Vector3D.Lerp(from, to, high);
-            return true;
+            measurement.Open = 1;
+            measurement.Blocked = 0;
+            measurement.OpenWeight = 1f;
+            measurement.WeightedBlockedMeters = 0f;
+            return measurement;
         }
 
-        private static void ComputeProbeEndpoints(Vector3D source, Vector3D listener, out Vector3D from, out Vector3D to)
+        private static void StorePathProbe(string key, PathProbeState state, DateTime now)
+        {
+            if (PathProbeCache.Count > MaxPathProbeCache)
+                PurgePathProbeCache(now);
+
+            if (PathProbeCache.Count > MaxPathProbeCache)
+                PathProbeCache.Clear();
+
+            PathProbeCache[key] = state;
+        }
+
+        private static void PurgePathProbeCache(DateTime now)
+        {
+            if (PathProbeCache.Count == 0)
+                return;
+
+            List<string> remove = null;
+            foreach (KeyValuePair<string, PathProbeState> pair in PathProbeCache)
+            {
+                if (now - pair.Value.UpdatedUtc <= PathProbeLifetime && PathProbeCache.Count <= MaxPathProbeCache)
+                    continue;
+
+                if (remove == null)
+                    remove = new List<string>();
+                remove.Add(pair.Key);
+            }
+
+            if (remove == null)
+                return;
+
+            for (int i = 0; i < remove.Count; i++)
+                PathProbeCache.Remove(remove[i]);
+        }
+
+        private static void ComputeProbeEndpoints(Vector3D source, Vector3D listener, float sourceClearRadius, out Vector3D from, out Vector3D to)
         {
             from = source;
             to = listener;
@@ -562,7 +807,9 @@ namespace RealisticSoundPlus.AudioEngineV2
                 return;
 
             Vector3D forward = path / length;
-            double sourceSkip = Math.Min(2.5, Math.Max(0.75, length * 0.15));
+            double proportionalSkip = Math.Max(0.75, length * 0.15);
+            double clearanceSkip = Math.Max(0.75, sourceClearRadius + SourceClearMargin);
+            double sourceSkip = Math.Min(MaxSourceSkipMeters, Math.Max(proportionalSkip, clearanceSkip));
             double listenerSkip = Math.Min(0.35, length * 0.1);
             if (sourceSkip + listenerSkip >= length * 0.85)
             {
@@ -572,6 +819,38 @@ namespace RealisticSoundPlus.AudioEngineV2
 
             from = source + forward * sourceSkip;
             to = listener - forward * listenerSkip;
+        }
+
+        // Resolves the source emitter's owning grid id and a bounding radius for its own block, so
+        // the probe ray can both skip past the block (#2) and ignore source-grid hits inside that
+        // radius (#1) without losing genuine same-grid walls farther along the path.
+        private static void ResolveSourceClearance(Vector3D source, long sourceEntityId, out long sourceGridId, out float sourceClearRadius)
+        {
+            sourceGridId = 0L;
+            sourceClearRadius = DefaultSourceClearRadius;
+            if (sourceEntityId == 0L)
+                return;
+
+            try
+            {
+                if (!MyEntities.TryGetEntityById(sourceEntityId, out MyEntity entity) || entity == null)
+                    return;
+
+                IMyEntity top = entity.GetTopMostParent();
+                sourceGridId = top?.EntityId ?? entity.EntityId;
+
+                // Use the block's own bounding sphere; skip the whole-grid case so a large host grid
+                // does not inflate the clearance.
+                if (!(entity is MyCubeGrid) && entity.PositionComp != null)
+                {
+                    float radius = (float)entity.PositionComp.WorldVolume.Radius;
+                    if (radius > 0.1f)
+                        sourceClearRadius = Clamp(radius, 0.75f, MaxSourceClearRadius);
+                }
+            }
+            catch
+            {
+            }
         }
 
         private static void PurgeStale()
@@ -587,34 +866,14 @@ namespace RealisticSoundPlus.AudioEngineV2
                 }
             }
 
-            PurgeCalculationCache();
+            PurgePathProbeCache(now);
+            PurgeOcclusionSmoothing(now);
             V2BlockRangeScaler.Update();
         }
 
         private static bool TryApplyCustomRange(MyEntity3DSoundEmitter emitter, string cueName, float range, float vanillaRange)
         {
             return V2BlockRangeScaler.TryApplyToEmitter(emitter, cueName, range, vanillaRange, "aux");
-        }
-
-        private static void PurgeCalculationCache()
-        {
-            DateTime now = DateTime.UtcNow;
-            List<string> remove = null;
-            foreach (KeyValuePair<string, V2AuxSourceOcclusionSample> pair in CalculationCache)
-            {
-                if (now - pair.Value.UpdatedUtc <= CalculationCacheLifetime && CalculationCache.Count <= MaxCalculationCache)
-                    continue;
-
-                if (remove == null)
-                    remove = new List<string>();
-                remove.Add(pair.Key);
-            }
-
-            if (remove == null)
-                return;
-
-            for (int i = 0; i < remove.Count; i++)
-                CalculationCache.Remove(remove[i]);
         }
 
         private static string BuildKey(string cueName, Vector3D source)
@@ -628,26 +887,46 @@ namespace RealisticSoundPlus.AudioEngineV2
                 source.Z);
         }
 
-        private static string BuildCalculationKey(string cueName, Vector3D source, Vector3D listener, RealisticSoundPlusSettings settings)
+        private static string BuildPathProbeKey(string cueName, Vector3D source, long sourceEntityId, RealisticSoundPlusSettings settings)
         {
+            if (sourceEntityId != 0L)
+            {
+                return string.Format(
+                    CultureInfo.InvariantCulture,
+                    "ent:{0}|t{1:0.00}|v{2:0.00}",
+                    sourceEntityId,
+                    settings?.PlayerFilterBlockStructureThicknessScale ?? 2.5f,
+                    NormalizeVoxelWeight(settings?.PlayerFilterBlockVoxelOcclusionWeight ?? 0f));
+            }
+
             return string.Format(
                 CultureInfo.InvariantCulture,
-                "{0}:{1:0.0}:{2:0.0}:{3:0.0}>{4:0.0}:{5:0.0}:{6:0.0}|r{7:0.00}|f{8:0}|c{9:0.00}|o{10:0.00}|t{11:0.00}|bc{12:0.00}|v{13:0.00}|seal{14:0.00}",
-                cueName ?? "?",
-                source.X,
-                source.Y,
-                source.Z,
-                listener.X,
-                listener.Y,
-                listener.Z,
-                settings?.PlayerFilterBlockRangeScale ?? 1f,
-                settings?.PlayerFilterBlockRange ?? 80f,
-                settings?.PlayerFilterBlockDistanceCurve ?? 1f,
-                settings?.PlayerFilterOcclusionStrength ?? 1f,
+                "pos:{0:0.0}:{1:0.0}:{2:0.0}|t{3:0.00}|v{4:0.00}",
+                Quantize(source.X, PathProbeSourceCellMeters),
+                Quantize(source.Y, PathProbeSourceCellMeters),
+                Quantize(source.Z, PathProbeSourceCellMeters),
                 settings?.PlayerFilterBlockStructureThicknessScale ?? 2.5f,
-                settings?.PlayerFilterBlockOcclusionCurve ?? 1f,
-                settings?.PlayerFilterVoxelOcclusionWeight ?? 2f,
-                settings?.PlayerFilterBlockSealedFactor ?? 0f);
+                NormalizeVoxelWeight(settings?.PlayerFilterBlockVoxelOcclusionWeight ?? 0f));
+        }
+
+        private static float EstimateVoxelBlockedLength(Vector3D from, Vector3D to)
+        {
+            _voxelEstimates = SaturatingIncrement(_voxelEstimates);
+            return V2PlayerEnvironmentTelemetry.EstimateVoxelBlockedLength(from, to, 0.75f, 48);
+        }
+
+        private static float EstimateBlockedLength(Vector3D from, Vector3D to)
+        {
+            _thicknessEstimates = SaturatingIncrement(_thicknessEstimates);
+            return V2PlayerEnvironmentTelemetry.EstimateBlockedLength(from, to, 0.75f, 24);
+        }
+
+        private static double Quantize(double value, double step)
+        {
+            if (step <= 0.0)
+                return value;
+
+            return Math.Round(value / step) * step;
         }
 
         private static float BlendCutoff(float clearCutoff, float muffledCutoff, float amount)
@@ -692,6 +971,46 @@ namespace RealisticSoundPlus.AudioEngineV2
                 return Clamp01(amount * strength);
 
             return Clamp01(1f - (float)Math.Pow(1f - amount, strength));
+        }
+
+        private static long SaturatingIncrement(long value)
+        {
+            return value == long.MaxValue ? value : value + 1L;
+        }
+
+        private static float NormalizeVoxelWeight(float value)
+        {
+            value = Math.Max(0f, value);
+            return value < VoxelOcclusionMinUsefulWeight ? 0f : value;
+        }
+
+        private struct PathProbeMeasurement
+        {
+            public int Open;
+            public int Blocked;
+            public float OpenWeight;
+            public float TotalWeight;
+            public float WeightedBlockedMeters;
+            public bool MainRayBlocked;
+        }
+
+        private struct PathProbeState
+        {
+            public DateTime UpdatedUtc;
+            public DateTime LastProbeUtc;
+            public int Open;
+            public int Blocked;
+            public float OpenWeight;
+            public float TotalWeight;
+            public float WeightedBlockedMeters;
+            public bool MainRayBlocked;
+            public bool Initialized;
+        }
+
+        private struct OcclusionSmoothState
+        {
+            public float Muffle;
+            public DateTime UpdatedUtc;
         }
     }
 }

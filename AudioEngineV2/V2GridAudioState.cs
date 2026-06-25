@@ -30,13 +30,17 @@ namespace RealisticSoundPlus.AudioEngineV2
         private const double DetailSilentReleaseMs = 1500.0;
 
         private readonly DirectionState[] _directions = new DirectionState[6];
+        private readonly DirectionState _remoteCollapsed;
         private DateTime _lastUpdateUtc = DateTime.MinValue;
+        private bool _remoteCollapsedMode;
 
         public V2GridAudioState(MyCubeGrid grid)
         {
             GridEntityId = grid != null ? grid.EntityId : 0L;
             for (int i = 0; i < _directions.Length; i++)
                 _directions[i] = new DirectionState((V2ThrustDirectionGroup)i);
+
+            _remoteCollapsed = new DirectionState(V2ThrustDirectionGroup.Forward, "remote-grid", collapseContributors: true, gridCentered: true);
         }
 
         public long GridEntityId { get; }
@@ -45,6 +49,12 @@ namespace RealisticSoundPlus.AudioEngineV2
         {
             if (thruster == null || thruster.CubeGrid == null)
                 return;
+
+            if (_remoteCollapsedMode)
+            {
+                _remoteCollapsed.Stop();
+                _remoteCollapsedMode = false;
+            }
 
             V2ThrustDirectionGroup direction = DirectionFromVector(thruster.GridThrustDirection);
             string activeDetailCue = V2CueCatalog.SelectDetailActiveCue(thruster);
@@ -65,6 +75,39 @@ namespace RealisticSoundPlus.AudioEngineV2
             _directions[(int)direction].Report(thruster, thruster.WorldMatrix.Translation, command, target, presence, activeDetailCue, idleDetailCue, load.Source);
             if (updateAudio)
                 Update(thruster.CubeGrid, listener);
+        }
+
+        public void ReportRemoteThrusterCollapsed(MyThrust thruster, V2AudioListenerState listener, bool updateAudio)
+        {
+            if (thruster == null || thruster.CubeGrid == null)
+                return;
+
+            if (!_remoteCollapsedMode)
+            {
+                for (int i = 0; i < _directions.Length; i++)
+                    _directions[i].Stop();
+
+                _remoteCollapsedMode = true;
+            }
+
+            string activeDetailCue = V2CueCatalog.SelectDetailActiveCue(thruster);
+            string idleDetailCue = V2CueCatalog.SelectDetailIdleCue(thruster);
+            float maxForce = GetMaxForce(thruster);
+            float presence = CalculateThrusterPresence(maxForce, SettingsManager.Current);
+            DetailLoadSample load = CalculateCommandLoad(thruster, listener);
+            if (load.Value <= 0f)
+            {
+                _remoteCollapsed.Report(thruster, thruster.WorldMatrix.Translation, 0f, 0f, presence, activeDetailCue, idleDetailCue, load.Source);
+                if (updateAudio)
+                    UpdateRemoteCollapsed(thruster.CubeGrid, listener);
+                return;
+            }
+
+            float command = Clamp01(load.Value);
+            float target = Clamp01(command * presence);
+            _remoteCollapsed.Report(thruster, thruster.WorldMatrix.Translation, command, target, presence, activeDetailCue, idleDetailCue, load.Source);
+            if (updateAudio)
+                UpdateRemoteCollapsed(thruster.CubeGrid, listener);
         }
 
         public void Update(MyCubeGrid grid, V2AudioListenerState listener)
@@ -93,13 +136,46 @@ namespace RealisticSoundPlus.AudioEngineV2
             }
         }
 
+        public void UpdateRemoteCollapsed(MyCubeGrid grid, V2AudioListenerState listener)
+        {
+            DateTime now = DateTime.UtcNow;
+            if (now - _lastUpdateUtc < DirectionUpdateInterval)
+                return;
+
+            _lastUpdateUtc = now;
+            string stateCue = V2CueCatalog.SelectStateLoopCue(grid);
+            try
+            {
+                _remoteCollapsed.Update(grid, listener, stateCue, now);
+            }
+            catch (Exception ex)
+            {
+                V2DebugLog.WriteEvent("direction-update-failed", string.Format(
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    "grid={0} dir=remote-grid {1}",
+                    grid != null ? grid.EntityId : 0L,
+                    ex.Message));
+            }
+        }
+
         public void Stop()
         {
             for (int i = 0; i < _directions.Length; i++)
                 _directions[i].Stop();
+
+            _remoteCollapsed.Stop();
+            _remoteCollapsedMode = false;
         }
 
         public void Silence()
+        {
+            for (int i = 0; i < _directions.Length; i++)
+                _directions[i].Silence();
+
+            _remoteCollapsed.Silence();
+        }
+
+        public void SilenceDirectionalEmitters()
         {
             for (int i = 0; i < _directions.Length; i++)
                 _directions[i].Silence();
@@ -113,7 +189,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                     return false;
             }
 
-            return true;
+            return _remoteCollapsed.IsStale(now);
         }
 
         public int CountActiveDetailSources()
@@ -124,6 +200,9 @@ namespace RealisticSoundPlus.AudioEngineV2
                 if (_directions[i].DetailActive)
                     count++;
             }
+
+            if (_remoteCollapsed.DetailActive)
+                count++;
 
             return count;
         }
@@ -137,6 +216,9 @@ namespace RealisticSoundPlus.AudioEngineV2
                     count++;
             }
 
+            if (_remoteCollapsed.StateActive)
+                count++;
+
             return count;
         }
 
@@ -149,6 +231,9 @@ namespace RealisticSoundPlus.AudioEngineV2
                     count++;
             }
 
+            if (_remoteCollapsed.HasKnownContribution)
+                count++;
+
             return count;
         }
 
@@ -156,6 +241,8 @@ namespace RealisticSoundPlus.AudioEngineV2
         {
             for (int i = 0; i < _directions.Length; i++)
                 _directions[i].DrawDebugMarkers();
+
+            _remoteCollapsed.DrawDebugMarkers();
         }
 
         private static DetailLoadSample CalculateCommandLoad(MyThrust thruster, V2AudioListenerState listener)
@@ -352,6 +439,9 @@ namespace RealisticSoundPlus.AudioEngineV2
         {
             private readonly Dictionary<MyThrust, Contribution> _contributors = new Dictionary<MyThrust, Contribution>();
             private readonly V2ThrustDirectionGroup _direction;
+            private readonly string _routeLabel;
+            private readonly bool _collapseContributors;
+            private readonly bool _gridCentered;
             private LayerEmitter _detailIdle;
             private LayerEmitter _detailActive;
             private LayerEmitter _state;
@@ -373,9 +463,12 @@ namespace RealisticSoundPlus.AudioEngineV2
             private string _knownIdleDetailCue;
             private DateTime _lastKnownUtc = DateTime.MinValue;
 
-            public DirectionState(V2ThrustDirectionGroup direction)
+            public DirectionState(V2ThrustDirectionGroup direction, string routeLabel = null, bool collapseContributors = false, bool gridCentered = false)
             {
                 _direction = direction;
+                _routeLabel = string.IsNullOrWhiteSpace(routeLabel) ? direction.ToString() : routeLabel;
+                _collapseContributors = collapseContributors;
+                _gridCentered = gridCentered;
             }
 
             public bool DetailActive => (_detailIdle != null && _detailIdle.IsPlaying) || (_detailActive != null && _detailActive.IsPlaying);
@@ -417,10 +510,14 @@ namespace RealisticSoundPlus.AudioEngineV2
             public void Update(MyCubeGrid grid, V2AudioListenerState listener, string stateCue, DateTime now)
             {
                 DirectionSnapshot snapshot = BuildSnapshot(grid, now);
+                if (_gridCentered)
+                    snapshot.Position = ResolveGridCenter(grid, snapshot.Position);
                 _lastPosition = snapshot.Position;
 
                 RealisticSoundPlusSettings settings = SettingsManager.Current;
-                float distanceGain = CalculateDistanceGain(listener, snapshot.Position, settings);
+                long sourceGridId = grid != null ? grid.EntityId : 0L;
+                long sourceEntityId = snapshot.Anchor != null ? snapshot.Anchor.EntityId : 0L;
+                float distanceGain = CalculateDistanceGain(listener, snapshot.Position, settings, sourceGridId, sourceEntityId);
                 float rawDetailCommand = Clamp01(snapshot.Command);
                 float detailCommand = MoveToward(_detailCommandValue, rawDetailCommand, ref _lastDetailCommandUpdateUtc, settings.V2DetailCommandSmoothingMs);
                 _detailCommandValue = detailCommand;
@@ -455,8 +552,8 @@ namespace RealisticSoundPlus.AudioEngineV2
                 stateTarget *= SmoothStep(stateInput / settings.V2SoftFadeRatio);
                 LogDetailDiagnostics(settings, listener, snapshot, rawDetailCommand, detailCommand, activeInput, idleInput, idleDetailTarget, activeDetailTarget, distanceGain, activePitch, idleVariant, activeVariant, now);
 
-                string idleRoute = string.Format(System.Globalization.CultureInfo.InvariantCulture, "v2-detail-{0}-idle/{1}/{2} raw={3:0.00} cmd={4:0.00}", _direction, idleVariant, snapshot.DetailLoadSource ?? "?", rawDetailCommand, detailCommand);
-                string activeRoute = string.Format(System.Globalization.CultureInfo.InvariantCulture, "v2-detail-{0}-active/{1}/{2} raw={3:0.00} cmd={4:0.00} out={5:0.00} pitch={6:0.00}", _direction, activeVariant, snapshot.DetailLoadSource ?? "?", rawDetailCommand, detailCommand, activeInput, activePitch);
+                string idleRoute = string.Format(System.Globalization.CultureInfo.InvariantCulture, "v2-detail-{0}-idle/{1}/{2} raw={3:0.00} cmd={4:0.00}", _routeLabel, idleVariant, snapshot.DetailLoadSource ?? "?", rawDetailCommand, detailCommand);
+                string activeRoute = string.Format(System.Globalization.CultureInfo.InvariantCulture, "v2-detail-{0}-active/{1}/{2} raw={3:0.00} cmd={4:0.00} out={5:0.00} pitch={6:0.00}", _routeLabel, activeVariant, snapshot.DetailLoadSource ?? "?", rawDetailCommand, detailCommand, activeInput, activePitch);
                 V2FilterRoute detailFilterRoute = listener.InsideShip ? V2FilterRoute.Internal : V2FilterRoute.External;
                 UpdateLayer(ref _detailIdle, ref _detailIdleValue, ref _lastDetailIdleUpdateUtc, snapshot.Anchor, snapshot.Position, idleDetailPlayable ? snapshot.IdleDetailCue : null, idleDetailTarget, V2AudioLayer.Detail, idleDetail2DPositional, idleDetail2DPositional, detailFilterRoute, idleRoute, holdSilent: true);
                 UpdateLayer(ref _detailActive, ref _detailActiveValue, ref _lastDetailActiveUpdateUtc, snapshot.Anchor, snapshot.Position, activeDetailPlayable ? snapshot.ActiveDetailCue : null, activeDetailTarget, V2AudioLayer.Detail, activeDetail2DPositional, activeDetail2DPositional, detailFilterRoute, activeRoute, keepAliveAtZero: true, pitch: activePitch);
@@ -539,6 +636,8 @@ namespace RealisticSoundPlus.AudioEngineV2
                 float strongestCommand = 0f;
                 float strongestPresence = 0f;
                 float strongestGeometryWeight = 0f;
+                float activeTargetSum = 0f;
+                float commandWeightedByTarget = 0f;
                 MyThrust strongestThruster = null;
                 MyThrust strongestGeometryThruster = null;
                 string strongestActiveDetailCue = null;
@@ -586,6 +685,8 @@ namespace RealisticSoundPlus.AudioEngineV2
 
                     weightedPosition += contributionPosition * contribution.Target;
                     totalWeight += contribution.Target;
+                    activeTargetSum += contribution.Target;
+                    commandWeightedByTarget += contribution.Command * contribution.Target;
                     if (contribution.Target > strongestTarget)
                     {
                         strongestTarget = contribution.Target;
@@ -612,6 +713,12 @@ namespace RealisticSoundPlus.AudioEngineV2
                     : (totalGeometryWeight > 0f
                         ? geometryWeightedPosition / totalGeometryWeight
                         : (_hasKnownSource ? knownPosition : (grid?.WorldMatrix.Translation ?? _lastPosition)));
+                if (_collapseContributors && activeTargetSum > 0.0001f)
+                {
+                    strongestTarget = Clamp01(activeTargetSum);
+                    strongestCommand = Clamp01(commandWeightedByTarget / activeTargetSum);
+                }
+
                 string activeDetailCue = strongestActiveDetailCue ?? strongestGeometryActiveDetailCue ?? _knownActiveDetailCue ?? _knownIdleDetailCue;
                 string idleDetailCue = strongestGeometryIdleDetailCue ?? _knownIdleDetailCue ?? strongestGeometryActiveDetailCue ?? _knownActiveDetailCue;
                 string loadSource = strongestLoadSource ?? strongestGeometryLoadSource ?? "none";
@@ -706,7 +813,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                         if (!keepAliveAtZero)
                             return;
 
-                        emitter = new LayerEmitter(anchor, layer, _direction);
+                        emitter = new LayerEmitter(anchor, layer, _direction, _routeLabel);
                     }
 
                     DateTime quietNow = DateTime.UtcNow;
@@ -755,7 +862,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                 bool firstStart = emitter == null;
                 if (firstStart)
                 {
-                    emitter = new LayerEmitter(anchor, layer, _direction);
+                    emitter = new LayerEmitter(anchor, layer, _direction, _routeLabel);
                 }
 
                 if (firstStart && startMuted)
@@ -806,12 +913,12 @@ namespace RealisticSoundPlus.AudioEngineV2
                 AudioDiagnostics.RecordCueName(cueName, route, value, ExteriorSoundTransmission.Calculate(position), target, finalEmitterVolume, position);
             }
 
-            private static float CalculateDistanceGain(V2AudioListenerState listener, Vector3D position, RealisticSoundPlusSettings settings)
+            private static float CalculateDistanceGain(V2AudioListenerState listener, Vector3D position, RealisticSoundPlusSettings settings, long sourceGridId, long sourceEntityId)
             {
                 if (listener.Position == Vector3D.Zero || position == Vector3D.Zero)
                     return 1f;
 
-                return V2EngineFilterModel.CalculateDistanceGain(listener, position, settings);
+                return V2EngineFilterModel.CalculateDistanceGain(listener, position, settings, sourceGridId, sourceEntityId);
             }
 
             private void LogDetailDiagnostics(RealisticSoundPlusSettings settings, V2AudioListenerState listener, DirectionSnapshot snapshot, float rawDetailCommand, float detailCommand, float activeInput, float idleInput, float idleTarget, float activeTarget, float distanceGain, float pitch, string idleVariant, string activeVariant, DateTime now)
@@ -830,7 +937,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                 V2DebugLog.WriteEvent("detail", string.Format(
                     System.Globalization.CultureInfo.InvariantCulture,
                     "{0} src={1} raw={2:0.00} cmd={3:0.00} cmdMs={4:0} activeIn={5:0.00} idleIn={6:0.000} idleTarget={7:0.000} activeTarget={8:0.000} idle={9}/{10:0.00} dist={11:0.0}/{12:0} dgain={13:0.00} dcurve={14:0.00} pitch={15:0.00} idleCue={16}/{17} activeCue={18}/{19}",
-                    _direction,
+                    _routeLabel,
                     snapshot.DetailLoadSource ?? "?",
                     rawDetailCommand,
                     detailCommand,
@@ -936,6 +1043,37 @@ namespace RealisticSoundPlus.AudioEngineV2
 
                 MyRenderProxy.DebugDrawSphere(position, radius, color, 0.85f, false, false, false, false);
             }
+
+            private static Vector3D ResolveGridCenter(MyCubeGrid grid, Vector3D fallback)
+            {
+                if (grid == null)
+                    return fallback;
+
+                try
+                {
+                    if (grid.PositionComp != null)
+                    {
+                        Vector3D center = grid.PositionComp.WorldAABB.Center;
+                        if (center != Vector3D.Zero)
+                            return center;
+                    }
+                }
+                catch
+                {
+                }
+
+                try
+                {
+                    Vector3D origin = grid.WorldMatrix.Translation;
+                    if (origin != Vector3D.Zero)
+                        return origin;
+                }
+                catch
+                {
+                }
+
+                return fallback;
+            }
         }
 
         private sealed class LayerEmitter
@@ -959,12 +1097,14 @@ namespace RealisticSoundPlus.AudioEngineV2
             private DateTime _lastUpdateFailureLogUtc = DateTime.MinValue;
             private int _bindingGeneration = -1;
             private float _pitch = 1f;
+            private readonly string _routeLabel;
 
-            public LayerEmitter(MyThrust anchor, V2AudioLayer layer, V2ThrustDirectionGroup direction)
+            public LayerEmitter(MyThrust anchor, V2AudioLayer layer, V2ThrustDirectionGroup direction, string routeLabel = null)
             {
                 Anchor = anchor;
                 Layer = layer;
                 Direction = direction;
+                _routeLabel = string.IsNullOrWhiteSpace(routeLabel) ? direction.ToString() : routeLabel;
                 Emitter = new MyEntity3DSoundEmitter(anchor, false);
                 Emitter.VolumeMultiplier = 0f;
                 AudioEngineV2Runtime.RegisterEmitter(Emitter, V2FilterRoute.External);
@@ -991,8 +1131,8 @@ namespace RealisticSoundPlus.AudioEngineV2
                 get
                 {
                     return Layer == V2AudioLayer.Detail
-                        ? "v2-detail-" + Direction
-                        : "v2-state-" + Direction;
+                        ? "v2-detail-" + _routeLabel
+                        : "v2-state-" + _routeLabel;
                 }
             }
 
@@ -1006,7 +1146,9 @@ namespace RealisticSoundPlus.AudioEngineV2
                 Emitter.Force2D = force2D;
                 Emitter.Force3D = force3D;
                 LastStage = "register";
-                AudioEngineV2Runtime.RegisterEmitter(Emitter, filterRoute, RouteName);
+                long sourceGridId = Anchor?.CubeGrid != null ? Anchor.CubeGrid.EntityId : 0L;
+                long sourceEntityId = Anchor != null ? Anchor.EntityId : 0L;
+                AudioEngineV2Runtime.RegisterEmitter(Emitter, filterRoute, RouteName, sourceGridId, sourceEntityId);
                 LastStage = "effect-subtype";
                 string filterEffectSubtype = AudioEngineV2Runtime.GetEngineFilterEffectSubtype(Emitter) ?? string.Empty;
                 LastStage = "effect-signature";
@@ -1190,14 +1332,31 @@ namespace RealisticSoundPlus.AudioEngineV2
 
                 try
                 {
+                    LastStage = "stop-mute";
                     Emitter.VolumeMultiplier = 0f;
+                    LastStage = "stop-sound";
                     Emitter.StopSound(false, false, false);
+                    LastStage = "stop-unregister";
                     AudioEngineV2Runtime.UnregisterEmitter(Emitter);
                     V2DebugLog.WriteEvent("emitter-stop", RouteName + " cue=" + (_cueName ?? "?"));
                 }
                 catch (Exception ex)
                 {
                     MyLog.Default.WriteLine("[RealisticSoundPlus] V2 emitter stop failed: " + ex.Message);
+                    V2DebugLog.WriteEvent("emitter-stop-failed", string.Format(
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        "{0} cue={1} stage={2} force2d={3} force3d={4} playing={5} pos={6:0.0},{7:0.0},{8:0.0} {9}: {10}",
+                        RouteName,
+                        _cueName ?? "?",
+                        LastStage ?? "?",
+                        _force2D ? "Y" : "N",
+                        _force3D ? "Y" : "N",
+                        IsPlaying ? "Y" : "N",
+                        Position.X,
+                        Position.Y,
+                        Position.Z,
+                        ex.GetType().Name,
+                        ex.Message));
                 }
                 finally
                 {

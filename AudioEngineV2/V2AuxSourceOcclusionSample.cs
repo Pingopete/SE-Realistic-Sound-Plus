@@ -12,7 +12,8 @@ namespace RealisticSoundPlus.AudioEngineV2
         public float Score;
         public Vector3D SourcePosition;
         public Vector3D ListenerPosition;
-        public Vector3D FirstBlockedPosition;
+        public Vector3D ProbeFrom;
+        public Vector3D ProbeTo;
         public float Distance;
         public float PathLength;
         public bool MainRayBlocked;

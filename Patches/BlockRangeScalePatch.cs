@@ -8,13 +8,21 @@ using VRage.Utils;
 
 namespace RealisticSoundPlus.Patches
 {
-    // Disabled while the vanilla distance gate is tested through the narrower IsCloseEnough hook below.
-    // Leaving the code here makes it easy to re-enable after we isolate the safe insertion point.
+    [HarmonyPatch(typeof(MyEntity3DSoundEmitter), "PlaySoundWithDistance", new[] { typeof(MyCueId), typeof(bool), typeof(bool), typeof(bool), typeof(bool), typeof(bool), typeof(bool), typeof(bool?) })]
     internal static class BlockRangeScalePlaySoundPatch
     {
         private static void Prefix(MyEntity3DSoundEmitter __instance, MyCueId soundId)
         {
             V2BlockRangeScaler.TryPrimeEmitter(__instance, soundId.ToString(), "play");
+        }
+    }
+
+    [HarmonyPatch(typeof(MyEntity3DSoundEmitter), "SetSound", new[] { typeof(IMySourceVoice), typeof(string) })]
+    internal static class SoundEmitterVoiceBindingPatch
+    {
+        private static void Postfix(MyEntity3DSoundEmitter __instance, IMySourceVoice __0)
+        {
+            RspDynamicAudioFilters.RecordEmitterVoiceBinding(__instance, __0);
         }
     }
 
@@ -71,6 +79,13 @@ namespace RealisticSoundPlus.Patches
     [HarmonyPatch(typeof(MyEntity3DSoundEmitter), "IsCloseEnough")]
     internal static class BlockRangeScaleIsCloseEnoughPatch
     {
+        // This emitter-level check fires heavily as the listener moves. The source-gate hook above is the
+        // narrower insertion point for extending block sound range without per-movement emitter churn.
+        private static bool Prepare()
+        {
+            return false;
+        }
+
         private static void Prefix(MyEntity3DSoundEmitter __instance)
         {
             if (__instance == null)

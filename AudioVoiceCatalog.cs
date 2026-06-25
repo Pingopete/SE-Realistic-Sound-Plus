@@ -151,6 +151,8 @@ namespace RealisticSoundPlus
         {
             if (voice == null || !voice.IsValid || !voice.IsPlaying)
                 return;
+            if (V2ReverbDiagnosticPing.IsOwnedWetVoice(voice))
+                return;
 
             string cueName = voice.CueEnum.ToString();
             if (string.IsNullOrWhiteSpace(cueName) || cueName == "NullOrEmpty")
@@ -185,6 +187,9 @@ namespace RealisticSoundPlus
 
             if (V2AuxCueClassifier.IsEngineCue(cueName))
                 return "engine";
+
+            if (V2AuxCueClassifier.IsControllableActionCue(cueName))
+                return physical ? "block" : "local";
 
             if (V2AuxCueClassifier.IsPlayerLocalCue(cueName))
                 return "local";

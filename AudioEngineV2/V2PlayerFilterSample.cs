@@ -1,4 +1,5 @@
 using System;
+using VRageMath;
 
 namespace RealisticSoundPlus.AudioEngineV2
 {
@@ -8,6 +9,9 @@ namespace RealisticSoundPlus.AudioEngineV2
         public string Category;
         public string CueName;
         public float Score;
+        public Vector3D SourcePosition;
+        public Vector3D EntityWorldPosition;
+        public long SourceEntityId;
         public float Distance;
         public float Muffle;
         public float Frequency;

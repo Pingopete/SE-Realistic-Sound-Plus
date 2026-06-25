@@ -44,6 +44,7 @@ namespace RealisticSoundPlus
         {
             string[] parts = commandText.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
             string command = parts.Length == 0 ? "show" : parts[0].ToLowerInvariant();
+            V2DebugLog.WriteEvent("command", "chat " + (string.IsNullOrWhiteSpace(commandText) ? "show" : commandText));
 
             try
             {
@@ -51,7 +52,7 @@ namespace RealisticSoundPlus
                 {
                     case "help":
                     case "?":
-                        Notify("/rsp menu | /rsp show | /rsp sounds | /rsp filters | /rsp catalog | /rsp reverbvoices | /rsp detail on | /rsp idle off | /rsp state on | /rsp detailgain 2 | /rsp dist 200 | /rsp cmdsmooth 2000 | /rsp auxsmooth 1000 | /rsp externalfilter enginefilter | /rsp reverb on | /rsp playerenvray 120 | /rsp save");
+                        Notify("/rsp menu | /rsp show | /rsp sounds | /rsp filters | /rsp catalog | /rsp reverbdiag | /rsp reverbroute world|global|managed | /rsp detail on | /rsp idle off | /rsp state on | /rsp detailgain 2 | /rsp cmdsmooth 2000 | /rsp auxsmooth 1000 | /rsp reverb on | /rsp playerenvray 120 | /rsp save");
                         break;
                     case "show":
                         Notify(SettingsManager.Summary());
@@ -133,6 +134,11 @@ namespace RealisticSoundPlus
                     case "blockpathdebug":
                         SetPlayerFilterPathDebug(parts);
                         break;
+                    case "reverbraydebug":
+                    case "roomraydebug":
+                    case "envreverbraydebug":
+                        SetReverbRayDebug(parts);
+                        break;
                     case "auxatmoverride":
                     case "auxpressureoverride":
                     case "playerfilteratmoverride":
@@ -190,10 +196,49 @@ namespace RealisticSoundPlus
                     case "reverbtest":
                         SetGlobalReverb(parts);
                         break;
+                    case "reverbroute":
+                    case "reverbmode":
+                    case "reverbbus":
+                        SetGlobalReverbRoute(parts);
+                        break;
                     case "reverbvoices":
                     case "reverbsounds":
                     case "reverbaffected":
                         PrintReverbVoices();
+                        break;
+                    case "reverbdiag":
+                    case "reverbdiagnostic":
+                    case "reverbdiagnostics":
+                        PrintReverbDiagnostics();
+                        break;
+                    case "reverbping":
+                    case "reverbtestping":
+                    case "reverbimpulse":
+                    case "dspping":
+                    case "dspreverbping":
+                        PlayReverbPing();
+                        break;
+                    case "reverbpreset":
+                    case "reverbpresetping":
+                    case "reverbnativepreset":
+                        PlayReverbPreset(parts);
+                        break;
+                    case "reverbxapo":
+                    case "reverbsimple":
+                    case "reverbsimplexapo":
+                        PlayReverbXapo();
+                        break;
+                    case "reverbcue":
+                    case "reverbgamecue":
+                    case "reverbwetcue":
+                    case "dspcue":
+                    case "dspreverbcue":
+                        PlayReverbCue(parts);
+                        break;
+                    case "dspdiag":
+                    case "dspreverbdiag":
+                    case "reverbcuediag":
+                        PrintDspCueDiagnostics(parts);
                         break;
                     default:
                         SetValue(command, parts);
@@ -299,12 +344,80 @@ namespace RealisticSoundPlus
             Notify(SettingsManager.Summary());
         }
 
+        private static void SetGlobalReverbRoute(string[] parts)
+        {
+            if (parts.Length < 2)
+            {
+                Notify("Usage: /rsp reverbroute <world|global|managed|globalbus|custombus>");
+                return;
+            }
+
+            if (!SettingsManager.TrySetGlobalReverbRoute(parts[1]))
+            {
+                Notify("Usage: /rsp reverbroute <world|global|managed|globalbus|custombus>");
+                return;
+            }
+
+            SettingsManager.Current.GlobalReverbEnabled = true;
+            V2DebugLog.WriteEvent("command", "global reverb route " + SettingsManager.Current.GlobalReverbRoute);
+            Notify("Reverb route " + SettingsManager.Current.GlobalReverbRoute + ". " + GetReverbStatus());
+        }
+
         private static void PrintReverbVoices()
         {
-            string status = V2GlobalReverbRuntime.FormatStatus();
-            string voices = V2GlobalReverbRuntime.FormatAffectedVoices(8).Replace(Environment.NewLine, " | ");
-            V2DebugLog.WriteEvent("global-reverb-voices", status + " | " + voices);
-            Notify(status + " | " + voices);
+            string status = GetReverbStatus();
+            V2DebugLog.WriteEvent("reverb-status", status);
+            Notify(status);
+        }
+
+        private static string GetReverbStatus()
+        {
+            if (SettingsManager.IsGlobalReverbGlobalBusRoute(SettingsManager.Current))
+                return V2GlobalReverbRuntime.FormatStatus() + " | " + V2ManagedDspReverbRuntime.FormatStatus();
+
+            return V2ManagedDspReverbRuntime.FormatStatus();
+        }
+
+        private static void PrintReverbDiagnostics()
+        {
+            SettingsManager.Current.GlobalReverbEnabled = true;
+            PrintReverbVoices();
+            Notify(V2ManagedDspReverbRuntime.LastStatus);
+        }
+
+        private static void PlayReverbPing()
+        {
+            SettingsManager.Current.GlobalReverbEnabled = true;
+            string status = V2ManagedDspReverbRuntime.PlayImpulse();
+            Notify(status);
+        }
+
+        private static void PlayReverbPreset(string[] parts)
+        {
+            string status = "reverbPreset=legacy-disabled: managed DSP route is active; use /rsp reverbping or /rsp reverbcue [cue]";
+            V2DebugLog.WriteEvent("dsp-reverb-preset", status);
+            Notify(status);
+        }
+
+        private static void PlayReverbXapo()
+        {
+            string status = V2ReverbDiagnosticPing.PlayXapo();
+            Notify(status);
+        }
+
+        private static void PlayReverbCue(string[] parts)
+        {
+            SettingsManager.Current.GlobalReverbEnabled = true;
+            string cueName = parts.Length >= 2 ? parts[1] : "ArcPlayStepsMetal";
+            string status = V2ManagedDspReverbRuntime.PlayCue(cueName);
+            Notify(status);
+        }
+
+        private static void PrintDspCueDiagnostics(string[] parts)
+        {
+            string cueName = parts.Length >= 2 ? parts[1] : "ArcPlayStepsMetal";
+            string status = V2ManagedDspReverbRuntime.DiagnoseCue(cueName);
+            Notify(status);
         }
 
         private static void SetV2Detail(string[] parts)
@@ -535,6 +648,17 @@ namespace RealisticSoundPlus
             if (parts.Length < 2 || !SettingsManager.TrySetPlayerFilterPathDebug(parts[1]))
             {
                 Notify("Usage: /rsp auxpathdebug <on|off>");
+                return;
+            }
+
+            Notify(SettingsManager.Summary());
+        }
+
+        private static void SetReverbRayDebug(string[] parts)
+        {
+            if (parts.Length < 2 || !SettingsManager.TrySetReverbRayDebug(parts[1]))
+            {
+                Notify("Usage: /rsp reverbraydebug <on|off>");
                 return;
             }
 
