@@ -34,7 +34,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             _lastWriteUtc = now;
             WriteLine(string.Format(
                 CultureInfo.InvariantCulture,
-                "{0:o} | {1} | {2} | engineFilter={3} | playerEnv={4} | playerFilter={5} | envAmbience={6} | blockPerf={7} | auxPerf={8} | {9}",
+                "{0:o} | {1} | {2} | engineFilter={3} | playerEnv={4} | playerFilter={5} | envAmbience={6} | blockPerf={7} | auxPerf={8} | dezip={9} | {10}",
                 now,
                 AudioDiagnostics.FormatGlobal(),
                 AudioEngineV2Runtime.FormatDebugLine(),
@@ -44,6 +44,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                 EnvironmentAmbiencePatch.FormatSummary(),
                 V2BlockSoundSourceResolver.FormatPerfSummary(),
                 V2AuxSourceOcclusionTelemetry.FormatPerfSummary(),
+                RspDynamicAudioFilters.FormatSmoothingSummary(),
                 SettingsManager.Summary()));
         }
 

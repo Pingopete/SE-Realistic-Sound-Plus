@@ -41,6 +41,9 @@ namespace RealisticSoundPlus.AudioEngineV2
         private static long _pathRays;
         private static long _voxelEstimates;
         private static long _thicknessEstimates;
+        private static long _airPathFound;
+        private static long _airPathMerged;
+        private static long _thinSealHits;
 
         public static void Reset()
         {
@@ -55,6 +58,9 @@ namespace RealisticSoundPlus.AudioEngineV2
             _pathRays = 0L;
             _voxelEstimates = 0L;
             _thicknessEstimates = 0L;
+            _airPathFound = 0L;
+            _airPathMerged = 0L;
+            _thinSealHits = 0L;
         }
 
         public static void Update()
@@ -126,26 +132,29 @@ namespace RealisticSoundPlus.AudioEngineV2
         {
             return string.Format(
                 CultureInfo.InvariantCulture,
-                "aux rayState={4}/{5} rangeFar={0} rays={1} voxel={2} thick={3}",
+                "aux rayState={4}/{5} rangeFar={0} rays={1} voxel={2} thick={3} airPath={6}/{7} thinSeal={8}",
                 _rangeRejects,
                 _pathRays,
                 _voxelEstimates,
                 _thicknessEstimates,
                 _pathProbeCacheHits,
-                _pathProbeCacheMisses);
+                _pathProbeCacheMisses,
+                _airPathFound,
+                _airPathMerged,
+                _thinSealHits);
         }
 
         public static string FormatSources(int maxLines)
         {
             PurgeStale();
             if (Samples.Count == 0)
-                return "cue/class  dist  range  open near thick  room seal muff  cutoff  gain";
+                return "cue/class  dist  range  open near thick  room seal muff  cutoff  gain  air";
 
             List<V2AuxSourceOcclusionSample> sorted = new List<V2AuxSourceOcclusionSample>(Samples.Values);
             sorted.Sort((left, right) => right.Score.CompareTo(left.Score));
 
             StringBuilder builder = new StringBuilder();
-            builder.Append("cue/class  dist  range  open near thick  room seal muff  cutoff  gain");
+            builder.Append("cue/class  dist  range  open near thick  room seal muff  cutoff  gain  air");
             int count = Math.Min(maxLines, sorted.Count);
             for (int i = 0; i < count; i++)
             {
@@ -153,7 +162,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                 builder.AppendLine();
                 builder.AppendFormat(
                     CultureInfo.InvariantCulture,
-                    "{0,-18} {1,4:0}m {2,3:0}/{3,3:0}{8}m {4,4:0.00} {12,4:0.00} {9,4:0.0}m {11,-4} {10} {5,4:0.00} {6,5:0}Hz {7,4:0.00}",
+                    "{0,-18} {1,4:0}m {2,3:0}/{3,3:0}{8}m {4,4:0.00} {12,4:0.00} {9,4:0.0}m {11,-4} {10} {5,4:0.00} {6,5:0}Hz {7,4:0.00} {13}",
                     Trim(sample.CueName, 18),
                     sample.Distance,
                     sample.VanillaMaxDistance,
@@ -166,7 +175,10 @@ namespace RealisticSoundPlus.AudioEngineV2
                     sample.EstimatedBlockedLength,
                     sample.SealedExtraApplied ? "S" : "-",
                     FormatRoomComparison(sample),
-                    sample.NearFieldScale);
+                    sample.NearFieldScale,
+                    sample.AirPathAvailable
+                        ? string.Format(CultureInfo.InvariantCulture, "{0:0}m{1}", sample.AirPathLength, sample.MergedFromAirPath ? "M" : "-")
+                        : "-");
             }
 
             return builder.ToString();
@@ -404,6 +416,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             float preAirMuffling = finalMuffling;
             if (mainRayBlocked && airPathAvailable)
             {
+                _airPathFound = SaturatingIncrement(_airPathFound);
                 float structMuffle = finalMuffling;
                 float structGainDist = EvaluateDistanceGain(distance, effectiveRange, settings.PlayerFilterBlockDistanceCurve);
                 float structTrans = V2PlayerEnvironmentTelemetry.CalculateThicknessTransmission(estimatedBlockedLength, blockThicknessScale);
@@ -423,6 +436,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                     continuous = newContinuous;
                     finalMuffling = Math.Min(finalMuffling, mergedMuffle);
                     mergedFromAirPath = true;
+                    _airPathMerged = SaturatingIncrement(_airPathMerged);
                     estimatedGain = CalculateEstimatedGain(continuous, sealedExtra, localAtmosphere, rangeCompensation);
                     estimatedCutoff = BlendCutoff(settings.Filter2Frequency, settings.PlayerFilterBlockMuffledFrequency, finalMuffling);
                 }
@@ -845,6 +859,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                     && V2GridStructureProbe.IsCellAirtight(sealGrid, sealCell))
                 {
                     transA = Math.Min(transA, 1f - lossA);
+                    _thinSealHits = SaturatingIncrement(_thinSealHits);
                 }
 
                 measurement.OpenWeight = transA;

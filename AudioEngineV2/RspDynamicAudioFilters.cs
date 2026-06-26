@@ -69,6 +69,8 @@ namespace RealisticSoundPlus.AudioEngineV2
         private const int MaxLiveFilterSmoothing = 512;
         private static readonly TimeSpan LiveFilterSmoothingResetGap = TimeSpan.FromMilliseconds(500);
         private static readonly Dictionary<IMySourceVoice, LiveFilterSmoothState> LiveFilterSmoothing = new Dictionary<IMySourceVoice, LiveFilterSmoothState>();
+        private static long _liveFilterSmoothApplied;
+        private static long _liveFilterSmoothSnaps;
 
         private static string _lastRegisteredSignature;
         private static string _lastLiveEffectSignature;
@@ -147,6 +149,8 @@ namespace RealisticSoundPlus.AudioEngineV2
             _loggedNotReady = false;
             EmitterVoiceBindings.Clear();
             LiveFilterSmoothing.Clear();
+            _liveFilterSmoothApplied = 0L;
+            _liveFilterSmoothSnaps = 0L;
         }
 
         public static bool IsCustomFilterSubtype(string subtype)
@@ -1158,6 +1162,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                     PurgeLiveFilterSmoothing(now);
 
                 LiveFilterSmoothing[voice] = new LiveFilterSmoothState { Frequency = frequency, Q = q, UpdatedUtc = now };
+                if (_liveFilterSmoothSnaps < long.MaxValue) _liveFilterSmoothSnaps++;
                 return;
             }
 
@@ -1174,6 +1179,21 @@ namespace RealisticSoundPlus.AudioEngineV2
             LiveFilterSmoothing[voice] = new LiveFilterSmoothState { Frequency = smoothedFrequency, Q = smoothedQ, UpdatedUtc = now };
             frequency = smoothedFrequency;
             q = smoothedQ;
+            if (_liveFilterSmoothApplied < long.MaxValue) _liveFilterSmoothApplied++;
+        }
+
+        // Diagnostic line for the root-level de-zipper (V2 debug log). voices=live smoothing entries,
+        // applied=writes smoothed toward target, snaps=new/stale-reset entries that bypassed smoothing.
+        public static string FormatSmoothingSummary()
+        {
+            float tc = SettingsManager.Current?.LiveFilterSmoothingMs ?? DefaultLiveFilterSmoothingMs;
+            return string.Format(
+                CultureInfo.InvariantCulture,
+                "voices={0} applied={1} snaps={2} tc={3:0}ms",
+                LiveFilterSmoothing.Count,
+                _liveFilterSmoothApplied,
+                _liveFilterSmoothSnaps,
+                tc);
         }
 
         private static void PurgeLiveFilterSmoothing(DateTime now)

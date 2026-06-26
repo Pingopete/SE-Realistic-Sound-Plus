@@ -22,11 +22,6 @@ namespace RealisticSoundPlus.AudioEngineV2
         private static readonly TimeSpan PressureRefreshInterval = TimeSpan.FromMilliseconds(100);
         private const int SphereRingSegments = 6;
         private const float SphereRayWeight = 1.00f;
-        private const int RollingProbeRaysPerUpdate = 16;
-        private const int RollingProbeMaxSamples = 160;
-        private const double RollingProbeMinWindowSeconds = 1.0;
-        private const double RollingProbeMaxWindowSeconds = 5.0;
-        private const double RollingProbeResetMoveMetersSquared = 4.0;
         private const double StableListenerMoveMetersSquared = 0.25;
         private const double HighRingDegrees = 30.0;
         private const double UpperRingDegrees = 60.0;
@@ -46,7 +41,6 @@ namespace RealisticSoundPlus.AudioEngineV2
 
         private static readonly BindingFlags InstanceMembers = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
         private static readonly HashSet<IMyEntity> GridSearchScratch = new HashSet<IMyEntity>();
-        private static readonly List<RollingRaySample> RollingProbeSamples = new List<RollingRaySample>(RollingProbeMaxSamples);
         private static readonly List<VRage.Game.ModAPI.IHitInfo> DirectRayHits = new List<VRage.Game.ModAPI.IHitInfo>(16);
         private static readonly List<VRage.Game.ModAPI.IHitInfo> ThicknessRayHits = new List<VRage.Game.ModAPI.IHitInfo>(32);
         private static readonly List<float> ThicknessHitDistances = new List<float>(32);
@@ -76,16 +70,6 @@ namespace RealisticSoundPlus.AudioEngineV2
         private static DateTime _lastOxygenDebugUtc = DateTime.MinValue;
         private static List<ReverbRayDebugSample> _reverbRayDebugSamples = new List<ReverbRayDebugSample>(64);
         private static DateTime _lastReverbRayDebugUtc = DateTime.MinValue;
-        private static int _rollingProbeSequence;
-        private static Vector3D _rollingProbeAnchor = Vector3D.Zero;
-        private static long _rollingProbeGridId;
-        private static long _rollingProbeContactGridId;
-        private static bool _rollingProbeInsideShip;
-        private static bool _rollingProbeVanillaFallback;
-        private static string _rollingProbeModeName;
-        private static float _rollingProbeRayLength;
-        private static float _rollingProbeThicknessScale;
-        private static float _rollingProbeVoxelWeight;
 
         public static void Reset()
         {
@@ -272,14 +256,21 @@ namespace RealisticSoundPlus.AudioEngineV2
                 sample.NaturalGravityStrength);
             return summary + string.Format(
                 CultureInfo.InvariantCulture,
-                " room={0} r={1:0.0}m med={2:0.0}m hit={3}/{4} decay={5:0.0}s pre={6:0}ms",
+                " room={0} r={1:0.0}m med={2:0.0}m hit={3}/{4} decay={5:0.0}s pre={6:0}ms"
+                + " envmap={7}/{8}/{9} min={10} fb={11} thinSeal={12}",
                 sample.ReverbRoomAvailable ? sample.ReverbRoomSource ?? "ray" : "none",
                 sample.ReverbRoomEquivalentRadius,
                 sample.ReverbRoomMedianDistance,
                 sample.ReverbRoomHits,
                 sample.ReverbRoomRays,
                 sample.ReverbAutoDecaySeconds,
-                sample.ReverbAutoPredelayMs);
+                sample.ReverbAutoPredelayMs,
+                _envMapDiagIncluded,
+                _envMapDiagSampled,
+                _envMapCellCount,
+                _envMapDiagMinCoverage,
+                _envMapDiagFallback ? "Y" : "N",
+                _envThinSealHits);
         }
 
         public static string FormatDetails()
@@ -1120,52 +1111,6 @@ namespace RealisticSoundPlus.AudioEngineV2
             return Math.Sqrt(dx * dx + dy * dy + dz * dz);
         }
 
-        private static void ProbeRollingDirections(
-            V2AudioListenerState listener,
-            RealisticSoundPlusSettings settings,
-            DateTime now,
-            Vector3D position,
-            Vector3D up,
-            Vector3D right,
-            Vector3D forward,
-            float rayLength,
-            float thicknessScale,
-            float voxelWeight,
-            RoomRayAccumulator roomProbe,
-            List<ReverbRayDebugSample> reverbRayDebug,
-            ref int open,
-            ref int blocked,
-            ref float openWeight,
-            ref float totalWeight,
-            ref float weightedBlockedMeters,
-            ref float weightedVoxelBlockedMeters)
-        {
-            double windowSeconds = ResolveRollingProbeWindowSeconds(settings);
-            PrepareRollingProbeAccumulator(listener, position, rayLength, thicknessScale, voxelWeight);
-
-            for (int i = 0; i < RollingProbeRaysPerUpdate; i++)
-            {
-                int sequence = _rollingProbeSequence++;
-                Vector3D direction = BuildSeededProbeDirection(up, right, forward, sequence, listener, position);
-                bool includeEnvironment = Vector3D.Dot(direction, up) >= 0.0;
-                RollingRaySample sample = TraceRollingDirection(position, direction, up, SphereRayWeight, rayLength, thicknessScale, voxelWeight, includeEnvironment, now);
-                StoreRollingProbeSample(sample);
-            }
-
-            PurgeRollingProbeSamples(now, windowSeconds);
-            AggregateRollingProbeSamples(
-                now,
-                windowSeconds,
-                roomProbe,
-                reverbRayDebug,
-                ref open,
-                ref blocked,
-                ref openWeight,
-                ref totalWeight,
-                ref weightedBlockedMeters,
-                ref weightedVoxelBlockedMeters);
-        }
-
         // ===================== Persistent directional environment occlusion map =====================
         // Replaces the time-windowed random rolling-probe buffer (the methods above are now dead, kept until a
         // cleanup pass) with a persistent listener-relative Fibonacci-lattice cell map. Each cell remembers its
@@ -1185,6 +1130,12 @@ namespace RealisticSoundPlus.AudioEngineV2
         private static float _envMapRayLength;
         private static float _envMapThicknessScale;
         private static float _envMapVoxelWeight;
+        // Env-map + thin-seal diagnostics (surfaced in FormatSummary for the V2 debug log).
+        private static int _envMapDiagIncluded;
+        private static int _envMapDiagSampled;
+        private static int _envMapDiagMinCoverage;
+        private static bool _envMapDiagFallback;
+        private static long _envThinSealHits;
 
         private static void EnsureEnvMap(int cellCount)
         {
@@ -1317,9 +1268,12 @@ namespace RealisticSoundPlus.AudioEngineV2
             int n = _envMapCellCount;
 
             int envIncluded = 0;
+            int sampledCells = 0;
             for (int i = 0; i < n; i++)
             {
                 EnvMapCell c = _envMap[i];
+                if (c.Sampled)
+                    sampledCells++;
                 if (c.Sampled && c.Confidence > confidenceThreshold && c.IncludeEnvironment && c.EnvironmentAvailable)
                     envIncluded++;
             }
@@ -1327,6 +1281,10 @@ namespace RealisticSoundPlus.AudioEngineV2
             // Coverage guard: until enough fresh directional cells exist, leave the accumulators at zero so the
             // caller's empty-result fallback fires instead of trusting a partial hemisphere (no reset muffle sweep).
             int minCoverage = Math.Max(8, n / 4);
+            _envMapDiagIncluded = envIncluded;
+            _envMapDiagSampled = sampledCells;
+            _envMapDiagMinCoverage = minCoverage;
+            _envMapDiagFallback = envIncluded < minCoverage;
             if (envIncluded < minCoverage)
                 return;
 
@@ -1430,6 +1388,11 @@ namespace RealisticSoundPlus.AudioEngineV2
             _envMapRayLength = 0f;
             _envMapThicknessScale = 0f;
             _envMapVoxelWeight = 0f;
+            _envMapDiagIncluded = 0;
+            _envMapDiagSampled = 0;
+            _envMapDiagMinCoverage = 0;
+            _envMapDiagFallback = false;
+            _envThinSealHits = 0L;
         }
 
         private struct EnvMapCell
@@ -1486,52 +1449,6 @@ namespace RealisticSoundPlus.AudioEngineV2
                 Color color = new Color((byte)(255f * (1f - open01)), (byte)(255f * open01), (byte)40, alpha);
                 MyRenderProxy.DebugDrawLine3D(origin, origin + dir * length, color, color, false, false);
             }
-        }
-
-        private static void PrepareRollingProbeAccumulator(V2AudioListenerState listener, Vector3D position, float rayLength, float thicknessScale, float voxelWeight)
-        {
-            bool reset = RollingProbeSamples.Count == 0
-                || _rollingProbeAnchor == Vector3D.Zero
-                || Vector3D.DistanceSquared(position, _rollingProbeAnchor) > RollingProbeResetMoveMetersSquared
-                || listener.GridEntityId != _rollingProbeGridId
-                || listener.ContactGridEntityId != _rollingProbeContactGridId
-                || listener.InsideShip != _rollingProbeInsideShip
-                || listener.VanillaFallback != _rollingProbeVanillaFallback
-                || !string.Equals(listener.ModeName ?? string.Empty, _rollingProbeModeName ?? string.Empty, StringComparison.Ordinal)
-                || Math.Abs(rayLength - _rollingProbeRayLength) > 0.25f
-                || Math.Abs(thicknessScale - _rollingProbeThicknessScale) > 0.05f
-                || Math.Abs(voxelWeight - _rollingProbeVoxelWeight) > 0.01f;
-
-            if (reset)
-            {
-                RollingProbeSamples.Clear();
-                _rollingProbeAnchor = position;
-                _rollingProbeSequence = BuildRollingProbeSeed(listener, position);
-            }
-
-            _rollingProbeGridId = listener.GridEntityId;
-            _rollingProbeContactGridId = listener.ContactGridEntityId;
-            _rollingProbeInsideShip = listener.InsideShip;
-            _rollingProbeVanillaFallback = listener.VanillaFallback;
-            _rollingProbeModeName = listener.ModeName;
-            _rollingProbeRayLength = rayLength;
-            _rollingProbeThicknessScale = thicknessScale;
-            _rollingProbeVoxelWeight = voxelWeight;
-        }
-
-        private static void ResetRollingProbeAccumulator()
-        {
-            RollingProbeSamples.Clear();
-            _rollingProbeSequence = 0;
-            _rollingProbeAnchor = Vector3D.Zero;
-            _rollingProbeGridId = 0L;
-            _rollingProbeContactGridId = 0L;
-            _rollingProbeInsideShip = false;
-            _rollingProbeVanillaFallback = false;
-            _rollingProbeModeName = null;
-            _rollingProbeRayLength = 0f;
-            _rollingProbeThicknessScale = 0f;
-            _rollingProbeVoxelWeight = 0f;
         }
 
         private static RollingRaySample TraceRollingDirection(Vector3D position, Vector3D direction, Vector3D skyUp, float weight, float rayLength, float thicknessScale, float voxelWeight, bool includeEnvironment, DateTime now)
@@ -1594,141 +1511,10 @@ namespace RealisticSoundPlus.AudioEngineV2
                 && V2GridStructureProbe.IsCellAirtight(sealRollGrid, sealRollCell))
             {
                 transRoll = Math.Min(transRoll, 1f - Clamp01(rollSettings.PlayerEnvSealedBarrierLoss));
+                if (_envThinSealHits < long.MaxValue) _envThinSealHits++;
             }
             sample.OpenWeight = sample.Weight * transRoll;
             return sample;
-        }
-
-        private static void StoreRollingProbeSample(RollingRaySample sample)
-        {
-            RollingProbeSamples.Add(sample);
-            if (RollingProbeSamples.Count <= RollingProbeMaxSamples)
-                return;
-
-            int remove = RollingProbeSamples.Count - RollingProbeMaxSamples;
-            RollingProbeSamples.RemoveRange(0, remove);
-        }
-
-        private static void PurgeRollingProbeSamples(DateTime now, double windowSeconds)
-        {
-            double maxAgeSeconds = Math.Max(RollingProbeMinWindowSeconds, windowSeconds);
-            for (int i = RollingProbeSamples.Count - 1; i >= 0; i--)
-            {
-                if ((now - RollingProbeSamples[i].UpdatedUtc).TotalSeconds > maxAgeSeconds)
-                    RollingProbeSamples.RemoveAt(i);
-            }
-        }
-
-        private static void AggregateRollingProbeSamples(
-            DateTime now,
-            double windowSeconds,
-            RoomRayAccumulator roomProbe,
-            List<ReverbRayDebugSample> reverbRayDebug,
-            ref int open,
-            ref int blocked,
-            ref float openWeight,
-            ref float totalWeight,
-            ref float weightedBlockedMeters,
-            ref float weightedVoxelBlockedMeters)
-        {
-            for (int i = 0; i < RollingProbeSamples.Count; i++)
-            {
-                RollingRaySample sample = RollingProbeSamples[i];
-                float ageWeight = CalculateRollingProbeAgeWeight(sample.UpdatedUtc, now, windowSeconds);
-                if (ageWeight <= 0.001f)
-                    continue;
-
-                roomProbe?.Add(sample.RayAvailable, sample.RayHit, sample.RayDistance);
-                if (reverbRayDebug != null)
-                {
-                    reverbRayDebug.Add(new ReverbRayDebugSample
-                    {
-                        From = sample.DebugFrom,
-                        To = sample.DebugTo,
-                        Available = sample.RayAvailable,
-                        Hit = sample.RayHit
-                    });
-                }
-
-                if (!sample.IncludeEnvironment || !sample.EnvironmentAvailable)
-                    continue;
-
-                float weightedSample = sample.Weight * ageWeight;
-                totalWeight += weightedSample;
-                if (sample.EnvironmentBlocked)
-                {
-                    blocked++;
-                    weightedBlockedMeters += weightedSample * sample.BlockedMeters;
-                    weightedVoxelBlockedMeters += weightedSample * sample.VoxelMeters;
-                    openWeight += sample.OpenWeight * ageWeight;
-                }
-                else
-                {
-                    open++;
-                    openWeight += weightedSample;
-                }
-            }
-        }
-
-        private static float CalculateRollingProbeAgeWeight(DateTime updatedUtc, DateTime now, double windowSeconds)
-        {
-            if (windowSeconds <= 0.001)
-                return 1f;
-
-            double ageSeconds = Math.Max(0.0, (now - updatedUtc).TotalSeconds);
-            return Clamp01(1f - (float)(ageSeconds / windowSeconds));
-        }
-
-        private static double ResolveRollingProbeWindowSeconds(RealisticSoundPlusSettings settings)
-        {
-            double smoothingSeconds = Math.Max(0.0, (settings?.PlayerFilterSmoothingMs ?? 1000f) / 1000.0);
-            return Clamp((float)Math.Max(RollingProbeMinWindowSeconds, Math.Min(RollingProbeMaxWindowSeconds, smoothingSeconds)), (float)RollingProbeMinWindowSeconds, (float)RollingProbeMaxWindowSeconds);
-        }
-
-        private static Vector3D BuildSeededProbeDirection(Vector3D up, Vector3D right, Vector3D forward, int sequence, V2AudioListenerState listener, Vector3D position)
-        {
-            uint seed = HashUInt((uint)sequence);
-            seed ^= HashUInt((uint)(listener.GridEntityId ^ (listener.GridEntityId >> 32)));
-            seed ^= HashUInt((uint)(listener.ContactGridEntityId ^ (listener.ContactGridEntityId >> 32)));
-            seed ^= HashUInt((uint)Math.Round(position.X * 4.0));
-            seed ^= HashUInt((uint)Math.Round(position.Y * 4.0) * 16777619u);
-            seed ^= HashUInt((uint)Math.Round(position.Z * 4.0) * 2166136261u);
-
-            double z = UnitFromHash(seed) * 2.0 - 1.0;
-            double angle = UnitFromHash(HashUInt(seed ^ 0x9E3779B9u)) * Math.PI * 2.0;
-            double radial = Math.Sqrt(Math.Max(0.0, 1.0 - z * z));
-            Vector3D tangent = right * Math.Cos(angle) + forward * Math.Sin(angle);
-            Vector3D direction = up * z + tangent * radial;
-            if (!direction.IsValid() || direction.LengthSquared() <= 0.0001)
-                return up;
-
-            direction.Normalize();
-            return direction;
-        }
-
-        private static int BuildRollingProbeSeed(V2AudioListenerState listener, Vector3D position)
-        {
-            uint seed = HashUInt((uint)(listener.GridEntityId ^ (listener.GridEntityId >> 32)));
-            seed ^= HashUInt((uint)(listener.ContactGridEntityId ^ (listener.ContactGridEntityId >> 32)));
-            seed ^= HashUInt((uint)Math.Round(position.X * 2.0));
-            seed ^= HashUInt((uint)Math.Round(position.Y * 2.0) * 16777619u);
-            seed ^= HashUInt((uint)Math.Round(position.Z * 2.0) * 2166136261u);
-            return (int)(seed & 0x7FFFFFFF);
-        }
-
-        private static uint HashUInt(uint value)
-        {
-            value ^= value >> 16;
-            value *= 0x7FEB352Du;
-            value ^= value >> 15;
-            value *= 0x846CA68Bu;
-            value ^= value >> 16;
-            return value;
-        }
-
-        private static double UnitFromHash(uint value)
-        {
-            return (value & 0x00FFFFFF) / 16777216.0;
         }
 
         private static void ProbeRing(Vector3D position, Vector3D up, Vector3D right, Vector3D forward, double degreesFromUp, float weight, float rayLength, float thicknessScale, float voxelWeight, bool includeEnvironment, RoomRayAccumulator roomProbe, List<ReverbRayDebugSample> reverbRayDebug, ref int open, ref int blocked, ref float openWeight, ref float totalWeight, ref float weightedBlockedMeters, ref float weightedVoxelBlockedMeters)
@@ -1792,6 +1578,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                     && V2GridStructureProbe.IsCellAirtight(sealDirGrid, sealDirCell))
                 {
                     transDir = Math.Min(transDir, 1f - Clamp01(dirSettings.PlayerEnvSealedBarrierLoss));
+                    if (_envThinSealHits < long.MaxValue) _envThinSealHits++;
                 }
                 openWeight += safeWeight * transDir;
                 return;
