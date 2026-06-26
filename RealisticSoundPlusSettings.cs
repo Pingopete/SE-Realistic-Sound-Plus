@@ -79,6 +79,9 @@ namespace RealisticSoundPlus
         // "Sound goes where air goes": treat any non-airtight cell as passable (stairs, catwalks, gratings) so
         // the air path can travel a stairwell packed with stair blocks. OFF = empty cells + open doors only.
         public bool PlayerFilterBlockAirPathThroughBlocks { get; set; } = false;
+        // Cost penalty for routing through a grated/non-sealing block vs open air. Higher = the path prefers the
+        // open stairwell void far more strongly over a short hop through a grated floor. 0 = pure shortest path.
+        public float PlayerFilterBlockAirPathOpenBias { get; set; } = 6f;
         public bool PlayerEnvMapDebugEnabled { get; set; } = false;
         public bool PlayerFilterEnabled { get; set; } = true;
         public bool PlayerFilterEnvironmentEnabled { get; set; } = true;
@@ -445,6 +448,9 @@ namespace RealisticSoundPlus
                 case "blockairpathreach":
                 case "airpathreach":
                 case "airreach": value = settings.PlayerFilterBlockAirPathReach; return true;
+                case "blockairopenbias":
+                case "airopenbias":
+                case "openbias": value = settings.PlayerFilterBlockAirPathOpenBias; return true;
                 case "envmapcells": value = settings.PlayerEnvMapCellCount; return true;
                 case "envmapalpha": value = settings.PlayerEnvMapCellAlpha; return true;
                 case "envmapdecay": value = settings.PlayerEnvMapConfidenceDecayMeters; return true;
@@ -848,6 +854,11 @@ namespace RealisticSoundPlus
                 case "airpathreach":
                 case "airreach":
                     Current.PlayerFilterBlockAirPathReach = value;
+                    break;
+                case "blockairopenbias":
+                case "airopenbias":
+                case "openbias":
+                    Current.PlayerFilterBlockAirPathOpenBias = value;
                     break;
                 case "envmapcells":
                     Current.PlayerEnvMapCellCount = (int)value;
@@ -1632,6 +1643,7 @@ namespace RealisticSoundPlus
             Current.PlayerFilterBlockRepositionSlewMs = Clamp(Current.PlayerFilterBlockRepositionSlewMs, 1f, 2000f);
             Current.PlayerFilterBlockRepositionPortalAvgMs = Clamp(Current.PlayerFilterBlockRepositionPortalAvgMs, 1f, 2000f);
             Current.PlayerFilterBlockAirPathReach = Clamp(Current.PlayerFilterBlockAirPathReach, 1f, 16f);
+            Current.PlayerFilterBlockAirPathOpenBias = Clamp(Current.PlayerFilterBlockAirPathOpenBias, 0f, 30f);
             Current.PlayerFilterAtmosphereOverride = Clamp(Current.PlayerFilterAtmosphereOverride, 0f, 1f);
             Current.PlayerFilterOcclusionStrength = Clamp(Current.PlayerFilterOcclusionStrength, 0f, 4f);
             Current.PlayerFilterEnvironmentVolumeMuffleWeight = Clamp(Current.PlayerFilterEnvironmentVolumeMuffleWeight, 0f, 4f);

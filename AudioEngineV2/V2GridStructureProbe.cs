@@ -221,17 +221,18 @@ namespace RealisticSoundPlus.AudioEngineV2
         // "reaching" the listener around the outside of a genuinely sealing wall. Now a tunable: this default
         // is the floor when no explicit reach is given.
         private const int AirPathBoundsPad = 3;
+        private const int DefaultOpenBias = 6;
 
         // Length-only overload (back-compat): callers that only need the detour distance.
         public static bool TryFindAirPath(IMyCubeGrid grid, Vector3D sourceWorld, Vector3D listenerWorld, out float pathLengthMeters)
         {
-            return TryFindAirPath(grid, sourceWorld, listenerWorld, AirPathBoundsPad, MaxAirPathCells, false, null, out pathLengthMeters, out _, out _);
+            return TryFindAirPath(grid, sourceWorld, listenerWorld, AirPathBoundsPad, MaxAirPathCells, false, DefaultOpenBias, null, out pathLengthMeters, out _, out _);
         }
 
         // Default-reach overload (back-compat for the portal callers).
         public static bool TryFindAirPath(IMyCubeGrid grid, Vector3D sourceWorld, Vector3D listenerWorld, out float pathLengthMeters, out Vector3D portalWorld, out bool portalValid)
         {
-            return TryFindAirPath(grid, sourceWorld, listenerWorld, AirPathBoundsPad, MaxAirPathCells, false, null, out pathLengthMeters, out portalWorld, out portalValid);
+            return TryFindAirPath(grid, sourceWorld, listenerWorld, AirPathBoundsPad, MaxAirPathCells, false, DefaultOpenBias, null, out pathLengthMeters, out portalWorld, out portalValid);
         }
 
         // Bounded 6-connected flood fill through traversable cells (empty air gaps + open doors) from the
@@ -244,7 +245,7 @@ namespace RealisticSoundPlus.AudioEngineV2
         // Also extracts the PORTAL: the last cell on the reconstructed path that the LISTENER still has a clear
         // line of sight to (the doorway the sound diffracts through on your side). This is the psychoacoustic
         // localisation point for emitter repositioning - direction comes from here, distance from pathLength.
-        public static bool TryFindAirPath(IMyCubeGrid grid, Vector3D sourceWorld, Vector3D listenerWorld, int reachPad, int maxCells, bool throughBlocks, List<Vector3D> routeOut, out float pathLengthMeters, out Vector3D portalWorld, out bool portalValid)
+        public static bool TryFindAirPath(IMyCubeGrid grid, Vector3D sourceWorld, Vector3D listenerWorld, int reachPad, int maxCells, bool throughBlocks, int openBias, List<Vector3D> routeOut, out float pathLengthMeters, out Vector3D portalWorld, out bool portalValid)
         {
             pathLengthMeters = 0f;
             portalWorld = Vector3D.Zero;
@@ -271,50 +272,71 @@ namespace RealisticSoundPlus.AudioEngineV2
                 Vector3I lo = Vector3I.Min(sourceCell, listenerCell) - pad;
                 Vector3I hi = Vector3I.Max(sourceCell, listenerCell) + pad;
 
-                // Local buffers (not shared statics): the overlay and other consumers may call this; per-call
-                // allocation is cheap because the flood-fill is gated to ~once / 250 ms / blocked source.
-                Queue<Vector3I> queue = new Queue<Vector3I>(256);
-                Dictionary<Vector3I, int> depthByCell = new Dictionary<Vector3I, int>(512);
+                // Cost-weighted search (Dijkstra via ordered cost buckets) that PREFERS OPEN AIR. An empty cell
+                // or open door costs 1; a passable non-airtight block (grated stairs/catwalks/floor in
+                // throughBlocks mode) costs 1+openBias. So a longer route through the open stairwell beats a
+                // short hop straight up through a grated floor, and the portal climbs the stairwell instead of
+                // sitting directly below you. Airtight cells (solid walls/floors, closed doors) are impassable.
+                // Local buffers (not shared statics); gated to ~once / 250 ms / blocked source.
+                Dictionary<Vector3I, int> dist = new Dictionary<Vector3I, int>(512);
                 Dictionary<Vector3I, Vector3I> cameFrom = new Dictionary<Vector3I, Vector3I>(512);
-                depthByCell[sourceCell] = 0;
-                queue.Enqueue(sourceCell);
+                SortedDictionary<int, Queue<Vector3I>> frontier = new SortedDictionary<int, Queue<Vector3I>>();
+                dist[sourceCell] = 0;
+                PushFrontier(frontier, 0, sourceCell);
 
                 bool reached = false;
-                while (queue.Count > 0 && !reached)
+                while (frontier.Count > 0 && !reached)
                 {
-                    if (depthByCell.Count >= maxCells)
+                    if (dist.Count >= maxCells)
                         break;
 
-                    Vector3I current = queue.Dequeue();
-                    int depth = depthByCell[current];
+                    int cost = PopMinFrontier(frontier, out Vector3I current);
+                    if (cost > dist[current])
+                        continue; // stale entry superseded by a cheaper relaxation
 
                     for (int i = 0; i < Neighbors6.Length; i++)
                     {
                         Vector3I next = current + Neighbors6[i];
                         if (next.X < lo.X || next.X > hi.X || next.Y < lo.Y || next.Y > hi.Y || next.Z < lo.Z || next.Z > hi.Z)
                             continue;
-                        if (depthByCell.ContainsKey(next))
-                            continue;
 
                         if (next == listenerCell)
                         {
-                            pathLengthMeters = (depth + 1) * gridSize;
                             cameFrom[listenerCell] = current;
                             reached = true;
                             break;
                         }
 
-                        if (!IsCellTraversable(grid, next, throughBlocks))
-                            continue;
+                        int step = StepCost(grid, next, throughBlocks, openBias);
+                        if (step < 0)
+                            continue; // impassable
 
-                        depthByCell[next] = depth + 1;
-                        cameFrom[next] = current;
-                        queue.Enqueue(next);
+                        int nd = cost + step;
+                        if (!dist.TryGetValue(next, out int old) || nd < old)
+                        {
+                            dist[next] = nd;
+                            cameFrom[next] = current;
+                            PushFrontier(frontier, nd, next);
+                        }
                     }
                 }
 
                 if (!reached)
                     return false;
+
+                // Metric path length (for attenuation) = hop count along the chosen route * cell size (the cost
+                // is openBias-weighted and not a distance, so count hops separately).
+                int hops = 0;
+                Vector3I lengthWalk = listenerCell;
+                int lenGuard = 0;
+                while (cameFrom.TryGetValue(lengthWalk, out Vector3I lprev) && lenGuard++ < maxCells)
+                {
+                    hops++;
+                    lengthWalk = lprev;
+                    if (lprev == sourceCell)
+                        break;
+                }
+                pathLengthMeters = hops * gridSize;
 
                 // Portal = farthest cell on the listener->source chain still in clear line of sight from the
                 // listener. Walk cameFrom from the listener toward the source; stop at the first cell hidden
@@ -431,48 +453,62 @@ namespace RealisticSoundPlus.AudioEngineV2
             return lastClear;
         }
 
-        // A cell sound can pass through. Default: an empty cell (air gap) or an open/opening door; solid blocks
-        // stop the fill. throughBlocks mode ("sound goes where air goes"): an OCCUPIED cell also passes if the
-        // gas system counts it as part of a breathable room (grated stairs/catwalks/railings sit inside the room
-        // volume) and it is not an airtight seal. This routes a path UP a stairwell packed with stair blocks
-        // while still being stopped by a solid floor/wall (not in any room) - so it does not leak straight up
-        // through the floor the way a bare !airtight test did.
-        private static bool IsCellTraversable(IMyCubeGrid grid, Vector3I cell, bool throughBlocks)
+        // Cost to ENTER a cell, or -1 if impassable. Empty/open-door = 1 (open air). In throughBlocks mode a
+        // non-airtight occupied cell (grated stairs/catwalks/floor) is passable but costs 1+openBias, so the
+        // search prefers open routes (the stairwell void) and only squeezes through grated structure when it
+        // must - and far less readily than a short straight-up hop through a grated floor. Airtight cells
+        // (solid walls/floors, closed doors) are impassable. Works on unsealed grids (no gas-room dependency).
+        private static int StepCost(IMyCubeGrid grid, Vector3I cell, bool throughBlocks, int openBias)
         {
             IMySlimBlock slim = grid.GetCubeBlock(cell);
             if (slim == null)
-                return true; // empty cell: air gap
+                return 1; // empty cell: open air
 
             Sandbox.ModAPI.Ingame.IMyDoor door = slim.FatBlock as Sandbox.ModAPI.Ingame.IMyDoor;
             if (door != null)
             {
                 Sandbox.ModAPI.Ingame.DoorStatus status = door.Status;
-                return status == Sandbox.ModAPI.Ingame.DoorStatus.Open
-                    || status == Sandbox.ModAPI.Ingame.DoorStatus.Opening;
+                return (status == Sandbox.ModAPI.Ingame.DoorStatus.Open
+                    || status == Sandbox.ModAPI.Ingame.DoorStatus.Opening) ? 1 : -1;
             }
 
-            if (throughBlocks)
-                return IsCellInGasRoom(grid, cell) && !IsCellAirtight(grid, cell);
+            if (!throughBlocks)
+                return -1; // solid block stops the open-only fill
 
-            return false;
+            if (IsCellAirtight(grid, cell))
+                return -1; // sealed armour/wall: blocks even in through-blocks mode
+
+            return 1 + (openBias < 0 ? 0 : openBias); // grated/non-sealing block: passable but penalised
         }
 
-        // Whether a cell sits inside a breathable gas room (the game's own air-connectivity truth). True for the
-        // open volume of a stairwell even when grated stair blocks occupy the cells; false (null room) for solid
-        // walls/floors. This is what lets the air path follow the stairwell the gas system already connects.
-        private static bool IsCellInGasRoom(IMyCubeGrid grid, Vector3I cell)
+        // For LOS / grazing only: a cell the sightline can pass (cost-free passability, no openBias).
+        private static bool IsCellTraversable(IMyCubeGrid grid, Vector3I cell, bool throughBlocks)
         {
-            try
+            return StepCost(grid, cell, throughBlocks, 0) >= 0;
+        }
+
+        private static void PushFrontier(SortedDictionary<int, Queue<Vector3I>> frontier, int cost, Vector3I cell)
+        {
+            if (!frontier.TryGetValue(cost, out Queue<Vector3I> q))
             {
-                IMyGridGasSystem gas = grid.GasSystem;
-                if (gas == null)
-                    return false;
-                return gas.GetOxygenRoomForCubeGridPosition(ref cell) != null;
+                q = new Queue<Vector3I>();
+                frontier[cost] = q;
             }
-            catch
-            {
-                return false;
-            }
+            q.Enqueue(cell);
+        }
+
+        // Pop a cell at the lowest cost bucket. SortedDictionary keeps keys ordered, so the first entry is the
+        // minimum; its enumerator is a value type, so this allocates nothing per pop.
+        private static int PopMinFrontier(SortedDictionary<int, Queue<Vector3I>> frontier, out Vector3I cell)
+        {
+            SortedDictionary<int, Queue<Vector3I>>.Enumerator e = frontier.GetEnumerator();
+            e.MoveNext();
+            int key = e.Current.Key;
+            Queue<Vector3I> q = e.Current.Value;
+            cell = q.Dequeue();
+            if (q.Count == 0)
+                frontier.Remove(key);
+            return key;
         }
 
         private struct CachedRoomGeometry
