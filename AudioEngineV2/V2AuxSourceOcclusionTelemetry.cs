@@ -792,17 +792,31 @@ namespace RealisticSoundPlus.AudioEngineV2
                         return;
                     }
 
-                    int reach = (int)Math.Max(1f, settings.PlayerFilterBlockAirPathReach);
-                    int budget = Math.Min(32768, Math.Max(4096, reach * reach * reach * 32));
+                    int baseReach = (int)Math.Max(1f, settings.PlayerFilterBlockAirPathReach);
                     int openBias = (int)Math.Max(0f, settings.PlayerFilterBlockAirPathOpenBias);
+                    bool throughBlocks = settings.PlayerFilterBlockAirPathThroughBlocks;
                     List<Vector3D> route = settings.PlayerFilterPathDebugEnabled ? new List<Vector3D>(32) : null;
-                    if (sourceGrid != null && V2GridStructureProbe.TryFindAirPath(sourceGrid, source, listener, reach, budget, settings.PlayerFilterBlockAirPathThroughBlocks, openBias, route, out float airLen, out Vector3D portal, out bool portalOk))
+                    if (sourceGrid != null)
                     {
-                        state.AirPathAvailable = true;
-                        state.AirPathLength = airLen;
-                        state.PortalWorld = portal;
-                        state.PortalValid = portalOk;
-                        state.AirRoute = route;
+                        // Adaptive reach: a sealed stairwell can sit outside the tight source<->listener box, so
+                        // if no path is found, expand the search a couple of times before giving up (removes
+                        // manual reach tuning as a failure point). Still gated by the 250 ms probe cache.
+                        for (int attempt = 0; attempt < 3; attempt++)
+                        {
+                            int reach = Math.Min(16, baseReach << attempt);
+                            int budget = Math.Min(32768, Math.Max(4096, reach * reach * reach * 32));
+                            if (V2GridStructureProbe.TryFindAirPath(sourceGrid, source, listener, reach, budget, throughBlocks, openBias, route, out float airLen, out Vector3D portal, out bool portalOk))
+                            {
+                                state.AirPathAvailable = true;
+                                state.AirPathLength = airLen;
+                                state.PortalWorld = portal;
+                                state.PortalValid = portalOk;
+                                state.AirRoute = route;
+                                break;
+                            }
+                            if (reach >= 16)
+                                break;
+                        }
                     }
                 }
 
