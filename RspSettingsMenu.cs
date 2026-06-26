@@ -175,6 +175,7 @@ namespace RealisticSoundPlus
             AddSection(content, ref y, "Filter And Readouts");
             AddFilterDropdown(content, ref y, "Thruster Filter", () => SettingsManager.Current.EngineFilter, SetUnifiedEngineFilterRoute, "Filter route used for both atmospheric and hull thruster propagation.");
             AddToggle(content, ref y, "Dynamic Propagation", () => SettingsManager.Current.EngineFilterDynamic, value => SettingsManager.Current.EngineFilterDynamic = value, "Makes thruster tone follow distance, atmosphere, hull contact, and occlusion.");
+            AddSlider(content, ref y, "Filter Smoothing", "livefiltersmooth", 0f, 200f, 0, () => SettingsManager.Current.LiveFilterSmoothingMs, "Smooths live filter cutoff changes (ms) to remove pops/zipper; higher = more lag, 0 = off.");
             AddFilterChart(content, ref y, "Thruster Response", V2EngineFilterTelemetry.RepresentativeType, V2EngineFilterTelemetry.RepresentativeFrequency, V2EngineFilterTelemetry.RepresentativeQ, "Preview of the current thruster filter frequency/Q.");
             AddReadout(content, ref y, "Environment", V2EngineFilterTelemetry.FormatEnvironment, "Live listener/source atmosphere and room data feeding thruster propagation.", 0.050f);
             AddReadout(content, ref y, "Thrusters", () => V2EngineFilterTelemetry.FormatEmitters(6), "Recent thruster emitters and their dynamic filter outputs.", 0.145f, 0.36f);
@@ -219,8 +220,17 @@ namespace RealisticSoundPlus
             AddInlineReadout(content, ref y, V2PlayerFilterRuntime.FormatEnvironmentLiveReadout, "Live env output: covered sky, final muffling, and final volume.");
             AddSlider(content, ref y, "Env/Reverb Ray Length", "envreverbray", 5f, 1000f, 0, () => SettingsManager.Current.PlayerEnvRayLength, "Shared radius for wind occlusion and room reverb rays; higher samples farther openings and larger spaces.", true);
             AddSlider(content, ref y, "Env Structure Thickness", "envstructurethickness", 0.1f, 20f, 2, () => SettingsManager.Current.PlayerEnvStructureThicknessScale, "Wall thickness scale for env rays; higher lets thin cover leak more.");
+            AddSlider(content, ref y, "Env Seal Barrier Loss", "sealbarrierenv", 0f, 1f, 2, () => SettingsManager.Current.PlayerEnvSealedBarrierLoss, "Extra muffling of the outside world through a thin SEALED surface (glass roof/wall); 0 = off, ~0.7 = strong.");
             AddSlider(content, ref y, "Env Voxel Weight", "envvoxelweight", 0f, 10f, 2, () => SettingsManager.Current.PlayerFilterVoxelOcclusionWeight, "Terrain/asteroid weight for wind rays; higher more terrain muffling, 0 off.");
             AddSlider(content, ref y, "Env Aperture Curve", "envaperturecurve", 0.1f, 10f, 2, () => SettingsManager.Current.PlayerEnvApertureCurve, "Shapes open-sky fraction; higher makes small openings count less.");
+
+            AddSection(content, ref y, "Env Occlusion Map");
+            AddSlider(content, ref y, "Map Cell Count", "envmapcells", 32f, 192f, 0, () => SettingsManager.Current.PlayerEnvMapCellCount, "Persistent directional cells over the sphere; more = finer openness map, slightly more aggregation cost.");
+            AddSlider(content, ref y, "Map Cell Smoothing", "envmapalpha", 0.1f, 1f, 2, () => SettingsManager.Current.PlayerEnvMapCellAlpha, "Per-cell EMA on refresh; lower = steadier/slower, higher = snappier.");
+            AddSlider(content, ref y, "Map Move Decay", "envmapdecay", 0.25f, 8f, 2, () => SettingsManager.Current.PlayerEnvMapConfidenceDecayMeters, "Distance scale over which moving fades cell confidence; lower = re-samples sooner while walking.");
+            AddSlider(content, ref y, "Map Reset Move", "envmapreset", 1f, 16f, 1, () => SettingsManager.Current.PlayerEnvMapResetMoveMeters, "Hard-resets the map after moving this far (m) in one step (teleport-like jumps).");
+            AddSlider(content, ref y, "Map Rays/Update", "envmaprays", 4f, 32f, 0, () => SettingsManager.Current.PlayerEnvMapRaysPerUpdate, "Cells refreshed per update (ray budget); same cost regardless of cell count.");
+            AddToggle(content, ref y, "Env Map Cells", () => SettingsManager.Current.PlayerEnvMapDebugEnabled, value => SettingsManager.Current.PlayerEnvMapDebugEnabled = value, "Debug overlay: draws the persistent env cells (green open, red blocked, brightness = confidence).");
 
             AddSection(content, ref y, "Environment Bed");
             AddSlider(content, ref y, "Env Volume Muffle", "envvolmuffle", 0f, 4f, 2, () => SettingsManager.Current.PlayerFilterEnvironmentVolumeMuffleWeight, "Wind volume reduction from env muffle; higher fades harder, 0 tone only.");
@@ -231,6 +241,8 @@ namespace RealisticSoundPlus
             _currentAccent = BlockPanel;
             AddSection(content, ref y, "Block Emitters");
             AddSlider(content, ref y, "Block Structure Thickness", "blockstructurethickness", 0.1f, 20f, 2, () => SettingsManager.Current.PlayerFilterBlockStructureThicknessScale, "Wall thickness scale for block rays; higher reduces thin-obstacle muting.");
+            AddSlider(content, ref y, "Block Seal Barrier Loss", "sealbarrierblock", 0f, 1f, 2, () => SettingsManager.Current.PlayerFilterBlockSealedBarrierLoss, "Extra muffling for a thin SEALED block face (glass/plate) between a source and you; 0 = off, ~0.7 = strong. Thick walls/gratings unaffected.");
+            AddSlider(content, ref y, "Seal Barrier Thin Gate", "sealbarrierthin", 0.05f, 2f, 2, () => SettingsManager.Current.PlayerFilterSealedBarrierThinFactor, "How thin a sealed face must be (x thickness scale) to trigger the barrier loss; lower = only very thin seals qualify.");
             AddSlider(content, ref y, "Block Occlusion Curve", "blockocclusioncurve", 0.1f, 5f, 2, () => SettingsManager.Current.PlayerFilterBlockOcclusionCurve, "Shapes block ray occlusion; higher forgives light blockage.");
             AddSlider(content, ref y, "Block Occlusion Smoothing", "blockocclusionsmooth", 0f, 2000f, 0, () => SettingsManager.Current.PlayerFilterBlockOcclusionSmoothingMs, "Temporal smoothing of the single block ray; higher steadier and less flicker, lower more responsive.");
             AddSlider(content, ref y, "Block Voxel Weight", "blockvoxelweight", 0f, 10f, 2, () => SettingsManager.Current.PlayerFilterBlockVoxelOcclusionWeight, "Terrain/asteroid weight for block paths; higher more muffling through voxels, 0 off.");
@@ -257,6 +269,7 @@ namespace RealisticSoundPlus
             AddReadout(content, ref y, "Reverb Mix", FormatLiveReverbMix, "World follows in-game audio; Global follows the full game mix including UI.", 0.030f, 0.38f);
 
             AddSection(content, ref y, "Room Driven Modifiers");
+            AddSlider(content, ref y, "Sealed Room Geometry", "reverbsealedgeo", 0f, 1f, 2, () => SettingsManager.Current.ReverbSealedGeometryWeight, "Blend exact cell-set room geometry into reverb size in sealed rooms; 0 = ray-only (old), 1 = fully trust geometry (steadier).");
             AddAutoReverbSlider(content, ref y, "Reverb Room Size", "room", "reverbroommod", 0.25f, 2f, 2, () => SettingsManager.Current.GlobalReverbRoomSizeModifier, "Multiplier on ray-calculated room size; 1 uses the auto value.");
             AddAutoReverbSlider(content, ref y, "Reverb Diffusion", "diffusion", "reverbdiffmod", 0.25f, 2f, 2, () => SettingsManager.Current.GlobalReverbDiffusionModifier, "Multiplier on auto diffusion; higher smoother, lower more distinct.");
             AddAutoReverbSlider(content, ref y, "Decay Time", "decay", "reverbdecaymod", 0.25f, 2.5f, 2, () => SettingsManager.Current.GlobalReverbDecayModifier, "Multiplier on auto RT60 decay; higher longer tail.");
@@ -323,7 +336,7 @@ namespace RealisticSoundPlus
             stripe.OriginAlign = MyGuiDrawAlignEnum.HORISONTAL_LEFT_AND_VERTICAL_CENTER;
             Add(content.Controls, stripe);
 
-            Add(content.Controls, Label(title, new Vector2(-0.333f, y), 0.66f, "White"));
+            Add(content.Controls, Label(title, new Vector2(-0.34f, y), 0.66f, "White"));
             y += 0.031f;
         }
 
@@ -347,7 +360,7 @@ namespace RealisticSoundPlus
             stripe.OriginAlign = MyGuiDrawAlignEnum.HORISONTAL_LEFT_AND_VERTICAL_CENTER;
             Add(content.Controls, stripe);
 
-            Add(content.Controls, Label(title.ToUpperInvariant(), new Vector2(-0.333f, y), 0.72f, "White"));
+            Add(content.Controls, Label(title.ToUpperInvariant(), new Vector2(-0.34f, y), 0.72f, "White"));
             y += 0.034f;
         }
 

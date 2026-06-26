@@ -25,6 +25,8 @@ namespace RealisticSoundPlus
         public float Filter2Q { get; set; } = 0.1f;
         public string Filter2Type { get; set; } = "LowPass";
         public bool EngineFilterDynamic { get; set; } = true;
+        public float LiveFilterSmoothingMs { get; set; } = 45f;
+        public float ReverbSealedGeometryWeight { get; set; } = 0.75f;
         public bool V2AtmosphereOverrideEnabled { get; set; } = false;
         public float V2AtmosphereOverride { get; set; } = 0.971752346f;
         public float EngineFilterAirNearFrequency { get; set; } = 8000f;
@@ -44,6 +46,11 @@ namespace RealisticSoundPlus
         public float PlayerEnvRayLength { get; set; } = 27.8737087f;
         public float PlayerEnvApertureCurve { get; set; } = 0.751832f;
         public float PlayerEnvOcclusionCurve { get; set; } = 4.9959054f;
+        public int PlayerEnvMapCellCount { get; set; } = 96;
+        public float PlayerEnvMapCellAlpha { get; set; } = 0.5f;
+        public float PlayerEnvMapConfidenceDecayMeters { get; set; } = 1.5f;
+        public float PlayerEnvMapResetMoveMeters { get; set; } = 4.0f;
+        public int PlayerEnvMapRaysPerUpdate { get; set; } = 16;
         public float PlayerFilterStructureThicknessScale { get; set; } = 1.15048516f;
         public float PlayerEnvStructureThicknessScale { get; set; } = 2.838953f;
         public float PlayerFilterBlockStructureThicknessScale { get; set; } = 2.08563447f;
@@ -55,6 +62,10 @@ namespace RealisticSoundPlus
         public float PlayerEnvSealOpenThreshold { get; set; } = 0f;
         public float PlayerFilterEnvironmentSealedFactor { get; set; } = 0f;
         public float PlayerFilterBlockSealedFactor { get; set; } = 0f;
+        public float PlayerFilterBlockSealedBarrierLoss { get; set; } = 0f;
+        public float PlayerEnvSealedBarrierLoss { get; set; } = 0f;
+        public float PlayerFilterSealedBarrierThinFactor { get; set; } = 0.6f;
+        public bool PlayerEnvMapDebugEnabled { get; set; } = false;
         public bool PlayerFilterEnabled { get; set; } = true;
         public bool PlayerFilterEnvironmentEnabled { get; set; } = true;
         public bool PlayerFilterBlockEnabled { get; set; } = true;
@@ -400,6 +411,18 @@ namespace RealisticSoundPlus
                 case "blockstructurethickness":
                 case "blockthickness":
                 case "sourcepaththickness": value = settings.PlayerFilterBlockStructureThicknessScale; return true;
+                case "livefiltersmooth":
+                case "dezipper": value = settings.LiveFilterSmoothingMs; return true;
+                case "reverbsealedgeo":
+                case "reverbgeoweight": value = settings.ReverbSealedGeometryWeight; return true;
+                case "sealbarrierblock": value = settings.PlayerFilterBlockSealedBarrierLoss; return true;
+                case "sealbarrierenv": value = settings.PlayerEnvSealedBarrierLoss; return true;
+                case "sealbarrierthin": value = settings.PlayerFilterSealedBarrierThinFactor; return true;
+                case "envmapcells": value = settings.PlayerEnvMapCellCount; return true;
+                case "envmapalpha": value = settings.PlayerEnvMapCellAlpha; return true;
+                case "envmapdecay": value = settings.PlayerEnvMapConfidenceDecayMeters; return true;
+                case "envmapreset": value = settings.PlayerEnvMapResetMoveMeters; return true;
+                case "envmaprays": value = settings.PlayerEnvMapRaysPerUpdate; return true;
                 case "playerfiltervoxelocclusionweight":
                 case "envvoxelocclusionweight":
                 case "envvoxelweight":
@@ -755,6 +778,38 @@ namespace RealisticSoundPlus
                 case "blockthickness":
                 case "sourcepaththickness":
                     Current.PlayerFilterBlockStructureThicknessScale = value;
+                    break;
+                case "livefiltersmooth":
+                case "dezipper":
+                    Current.LiveFilterSmoothingMs = value;
+                    break;
+                case "reverbsealedgeo":
+                case "reverbgeoweight":
+                    Current.ReverbSealedGeometryWeight = value;
+                    break;
+                case "sealbarrierblock":
+                    Current.PlayerFilterBlockSealedBarrierLoss = value;
+                    break;
+                case "sealbarrierenv":
+                    Current.PlayerEnvSealedBarrierLoss = value;
+                    break;
+                case "sealbarrierthin":
+                    Current.PlayerFilterSealedBarrierThinFactor = value;
+                    break;
+                case "envmapcells":
+                    Current.PlayerEnvMapCellCount = (int)value;
+                    break;
+                case "envmapalpha":
+                    Current.PlayerEnvMapCellAlpha = value;
+                    break;
+                case "envmapdecay":
+                    Current.PlayerEnvMapConfidenceDecayMeters = value;
+                    break;
+                case "envmapreset":
+                    Current.PlayerEnvMapResetMoveMeters = value;
+                    break;
+                case "envmaprays":
+                    Current.PlayerEnvMapRaysPerUpdate = (int)value;
                     break;
                 case "playerfiltervoxelocclusionweight":
                 case "envvoxelocclusionweight":
@@ -1224,6 +1279,14 @@ namespace RealisticSoundPlus
             if (!TryParseBool(value, out bool enabled))
                 return false;
             Current.ReverbRayDebugEnabled = enabled;
+            return true;
+        }
+
+        public static bool TrySetEnvMapDebug(string value)
+        {
+            if (!TryParseBool(value, out bool enabled))
+                return false;
+            Current.PlayerEnvMapDebugEnabled = enabled;
             return true;
         }
 

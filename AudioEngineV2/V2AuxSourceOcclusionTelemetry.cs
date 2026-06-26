@@ -312,6 +312,8 @@ namespace RealisticSoundPlus.AudioEngineV2
             bool mainRayBlocked;
             Vector3D probeFrom = Vector3D.Zero;
             Vector3D probeTo = Vector3D.Zero;
+            bool airPathAvailable;
+            float airPathLength;
 
             // Only probe occlusion within audible range. Beyond it, casting a ray is meaningless and
             // can spuriously report a full block (e.g. a source with a stale/far position), which would
@@ -320,7 +322,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             if (distance <= maxProbeMeters)
             {
                 ResolveSourceClearance(source, sourceEntityId, out long _, out float sourceClearRadius);
-                ProbePath(cueName, source, listener, sourceEntityId, settings, now, sourceClearRadius, out open, out blocked, out openWeight, out totalWeight, out weightedBlockedMeters, out mainRayBlocked);
+                ProbePath(cueName, source, listener, sourceEntityId, settings, now, sourceClearRadius, out open, out blocked, out openWeight, out totalWeight, out weightedBlockedMeters, out mainRayBlocked, out airPathAvailable, out airPathLength);
                 if (settings.PlayerFilterPathDebugEnabled)
                 {
                     // Expose the exact probed sub-segment (after source-clearance and listener skips) so the
@@ -338,6 +340,8 @@ namespace RealisticSoundPlus.AudioEngineV2
                 totalWeight = 1f;
                 weightedBlockedMeters = 0f;
                 mainRayBlocked = false;
+                airPathAvailable = false;
+                airPathLength = 0f;
             }
             int rays = open + blocked;
             if (rays == 0)
@@ -390,6 +394,40 @@ namespace RealisticSoundPlus.AudioEngineV2
             float estimatedGain = CalculateEstimatedGain(continuous, sealedExtra, localAtmosphere, rangeCompensation);
             float estimatedCutoff = BlendCutoff(settings.Filter2Frequency, settings.PlayerFilterBlockMuffledFrequency, finalMuffling);
 
+            // ---- Around-the-corner (air-diffraction) leg merge ----
+            // When the straight ray is blocked but a bounded open-air detour reaches the listener (a doorway,
+            // a stair bend), the sound also arrives bright via that route. Blend the two arrival paths by their
+            // loudness: the structure-borne leg (muffled, straight distance) and the air leg (bright, longer
+            // detour). The air leg can only ever BRIGHTEN (Math.Min on the muffle), so unobstructed and fully
+            // sealed sources stay unchanged and the binary single-ray flip dissolves into a graded result.
+            bool mergedFromAirPath = false;
+            float preAirMuffling = finalMuffling;
+            if (mainRayBlocked && airPathAvailable)
+            {
+                float structMuffle = finalMuffling;
+                float structGainDist = EvaluateDistanceGain(distance, effectiveRange, settings.PlayerFilterBlockDistanceCurve);
+                float structTrans = V2PlayerEnvironmentTelemetry.CalculateThicknessTransmission(estimatedBlockedLength, blockThicknessScale);
+                float structGain = Clamp01(structGainDist * structTrans);
+
+                float airMuffle = 0.08f; // air leg stays bright (small floor); tuning knob, lower = brighter
+                float airGain = EvaluateDistanceGain(airPathLength, effectiveRange, settings.PlayerFilterBlockDistanceCurve);
+
+                float denom = airGain + structGain;
+                float mergedMuffle = denom <= 1e-3f
+                    ? structMuffle
+                    : (airGain * airMuffle + structGain * structMuffle) / denom;
+
+                float newContinuous = Math.Min(continuous, mergedMuffle);
+                if (newContinuous < continuous - 1e-4f)
+                {
+                    continuous = newContinuous;
+                    finalMuffling = Math.Min(finalMuffling, mergedMuffle);
+                    mergedFromAirPath = true;
+                    estimatedGain = CalculateEstimatedGain(continuous, sealedExtra, localAtmosphere, rangeCompensation);
+                    estimatedCutoff = BlendCutoff(settings.Filter2Frequency, settings.PlayerFilterBlockMuffledFrequency, finalMuffling);
+                }
+            }
+
             V2AuxSourceOcclusionSample sample = new V2AuxSourceOcclusionSample
             {
                 UpdatedUtc = now,
@@ -428,7 +466,11 @@ namespace RealisticSoundPlus.AudioEngineV2
                 EstimatedGain = estimatedGain,
                 EstimatedCutoff = estimatedCutoff,
                 EstimatedQ = settings.Filter2Q,
-                LocalAtmosphere = localAtmosphere
+                LocalAtmosphere = localAtmosphere,
+                AirPathAvailable = airPathAvailable,
+                AirPathLength = airPathLength,
+                MergedFromAirPath = mergedFromAirPath,
+                PreAirPathMuffling = preAirMuffling
             };
             return sample;
         }
@@ -633,7 +675,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             return Clamp01(1f - (float)Math.Pow(normalized, curve));
         }
 
-        private static void ProbePath(string cueName, Vector3D source, Vector3D listener, long sourceEntityId, RealisticSoundPlusSettings settings, DateTime now, float sourceClearRadius, out int open, out int blocked, out float openWeight, out float totalWeight, out float weightedBlockedMeters, out bool mainRayBlocked)
+        private static void ProbePath(string cueName, Vector3D source, Vector3D listener, long sourceEntityId, RealisticSoundPlusSettings settings, DateTime now, float sourceClearRadius, out int open, out int blocked, out float openWeight, out float totalWeight, out float weightedBlockedMeters, out bool mainRayBlocked, out bool airPathAvailable, out float airPathLength)
         {
             string key = BuildPathProbeKey(cueName, source, sourceEntityId, settings);
             if (!PathProbeCache.TryGetValue(key, out PathProbeState state))
@@ -645,6 +687,23 @@ namespace RealisticSoundPlus.AudioEngineV2
                 _pathProbeCacheMisses = SaturatingIncrement(_pathProbeCacheMisses);
                 PathProbeMeasurement measurement = ProbeSinglePath(source, listener, settings, settings.PlayerFilterBlockStructureThicknessScale, sourceClearRadius);
                 state = CreatePathProbeState(measurement, now);
+
+                // Around-the-corner air-diffraction leg: only worth a flood-fill when the straight ray is
+                // actually blocked. The result rides in this same 250 ms probe cache, so the bounded BFS fires
+                // at most once per source per interval (and never for far/unblocked sources).
+                state.AirPathProbed = true;
+                state.AirPathAvailable = false;
+                state.AirPathLength = 0f;
+                if (state.MainRayBlocked)
+                {
+                    VRage.Game.ModAPI.IMyCubeGrid sourceGrid = ResolveSourceGrid(sourceEntityId);
+                    if (sourceGrid != null && V2GridStructureProbe.TryFindAirPath(sourceGrid, source, listener, out float airLen))
+                    {
+                        state.AirPathAvailable = true;
+                        state.AirPathLength = airLen;
+                    }
+                }
+
                 state.LastProbeUtc = now;
                 state.UpdatedUtc = now;
                 StorePathProbe(key, state, now);
@@ -662,6 +721,28 @@ namespace RealisticSoundPlus.AudioEngineV2
             totalWeight = state.TotalWeight;
             weightedBlockedMeters = state.WeightedBlockedMeters;
             mainRayBlocked = state.MainRayBlocked;
+            airPathAvailable = state.AirPathAvailable;
+            airPathLength = state.AirPathLength;
+        }
+
+        // The source's owning grid, for the open-air flood-fill. Mirrors ResolveSourceClearance's entity
+        // lookup; returns null on the Vector3D-only path (sourceEntityId == 0) or any non-grid top parent.
+        private static VRage.Game.ModAPI.IMyCubeGrid ResolveSourceGrid(long sourceEntityId)
+        {
+            if (sourceEntityId == 0L)
+                return null;
+
+            try
+            {
+                if (!MyEntities.TryGetEntityById(sourceEntityId, out MyEntity entity) || entity == null)
+                    return null;
+
+                return entity.GetTopMostParent() as VRage.Game.ModAPI.IMyCubeGrid;
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         private static PathProbeState CreateDefaultPathProbe(DateTime now)
@@ -752,7 +833,21 @@ namespace RealisticSoundPlus.AudioEngineV2
                 measurement.Open = 0;
                 measurement.Blocked = 1;
                 measurement.WeightedBlockedMeters = blockedMeters;
-                measurement.OpenWeight = V2PlayerEnvironmentTelemetry.CalculateThicknessTransmission(blockedMeters, blockThicknessScale);
+
+                // Thin-seal barrier loss: a thin sealed face (glass canopy, single airtight plate) should
+                // muffle far more than its thickness implies. When the blocking grid face is an airtight cell
+                // AND the crossing is thin, cap transmission at a thickness-independent STC floor. Min() means
+                // thick sealed walls (already below the ceiling) and open gratings/voxel are unchanged.
+                float transA = V2PlayerEnvironmentTelemetry.CalculateThicknessTransmission(blockedMeters, blockThicknessScale);
+                float lossA = Clamp01(settings.PlayerFilterBlockSealedBarrierLoss);
+                if (lossA > 0f && hit && blockedMeters < blockThicknessScale * Math.Max(0.05f, settings.PlayerFilterSealedBarrierThinFactor)
+                    && V2PlayerEnvironmentTelemetry.TryGetFirstGridHitFace(from, to, out VRage.Game.ModAPI.IMyCubeGrid sealGrid, out Vector3I sealCell)
+                    && V2GridStructureProbe.IsCellAirtight(sealGrid, sealCell))
+                {
+                    transA = Math.Min(transA, 1f - lossA);
+                }
+
+                measurement.OpenWeight = transA;
                 return measurement;
             }
 
@@ -1004,6 +1099,9 @@ namespace RealisticSoundPlus.AudioEngineV2
             public float TotalWeight;
             public float WeightedBlockedMeters;
             public bool MainRayBlocked;
+            public bool AirPathAvailable;
+            public float AirPathLength;
+            public bool AirPathProbed;
             public bool Initialized;
         }
 

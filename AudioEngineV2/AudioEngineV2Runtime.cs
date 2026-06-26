@@ -101,6 +101,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             V2AuxSourceOcclusionTelemetry.Reset();
             V2PlayerFilterRuntime.Reset();
             V2BlockSoundSourceResolver.Reset();
+            V2GridStructureProbe.Reset();
             V2AudioListenerState.ResetStability();
             RspDynamicAudioFilters.ResetRuntimeState();
             V2GlobalReverbRuntime.ResetRuntimeState();

@@ -65,6 +65,10 @@ namespace RealisticSoundPlus.AudioEngineV2
         private static readonly HashSet<Type> VoiceDetailsSampleRateMisses = new HashSet<Type>();
         private static readonly HashSet<Type> SoundDataSoundFieldMisses = new HashSet<Type>();
         private static readonly HashSet<Type> SourceVoiceEmitterFieldMisses = new HashSet<Type>();
+        private const float DefaultLiveFilterSmoothingMs = 45f;
+        private const int MaxLiveFilterSmoothing = 512;
+        private static readonly TimeSpan LiveFilterSmoothingResetGap = TimeSpan.FromMilliseconds(500);
+        private static readonly Dictionary<IMySourceVoice, LiveFilterSmoothState> LiveFilterSmoothing = new Dictionary<IMySourceVoice, LiveFilterSmoothState>();
 
         private static string _lastRegisteredSignature;
         private static string _lastLiveEffectSignature;
@@ -142,6 +146,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             _emitterResolveMiss = 0L;
             _loggedNotReady = false;
             EmitterVoiceBindings.Clear();
+            LiveFilterSmoothing.Clear();
         }
 
         public static bool IsCustomFilterSubtype(string subtype)
@@ -160,24 +165,44 @@ namespace RealisticSoundPlus.AudioEngineV2
             if (voice == null)
                 return false;
 
-            if (!HasLiveFilterReflection())
-            {
-                LogLiveFilterReflectionFailure("missing SharpDX filter reflection");
-                return false;
-            }
-
             object sourceVoice = ResolveSourceVoice(voice);
             if (sourceVoice == null)
                 return false;
 
-            MethodInfo setFilter = ResolveSetFilterMethod(sourceVoice.GetType());
-            if (setFilter == null)
-                return false;
+            // Root-level de-zipper: smooth cutoff/Q toward target before the biquad write (see SmoothLiveFilter).
+            SmoothLiveFilter(voice, ref frequency, ref q);
 
             try
             {
-                object parameters = CreateSharpFilterParameters(filterType, frequency, q, sourceVoice);
-                setFilter.Invoke(sourceVoice, new[] { parameters, 0 });
+                // Fast path: SharpDX.XAudio2 is a compile-time reference, so the resolved native voice can be
+                // cast and called directly. This avoids a MethodInfo.Invoke plus a per-call object[] allocation
+                // and an int box on every voice every frame on the audio path. The reflection path below is kept
+                // as a defensive fallback in case the runtime voice is ever an unexpected type.
+                SharpDX.XAudio2.Voice sharpVoice = sourceVoice as SharpDX.XAudio2.Voice;
+                if (sharpVoice != null)
+                {
+                    SharpDX.XAudio2.FilterParameters parameters = new SharpDX.XAudio2.FilterParameters
+                    {
+                        Type = ToSharpFilterTypeDirect(filterType),
+                        Frequency = ToXAudioFrequency(frequency, ResolveSourceVoiceInputSampleRate(sourceVoice)),
+                        OneOverQ = ToXAudioOneOverQ(q)
+                    };
+                    sharpVoice.SetFilterParameters(parameters, 0);
+                    return true;
+                }
+
+                if (!HasLiveFilterReflection())
+                {
+                    LogLiveFilterReflectionFailure("missing SharpDX filter reflection");
+                    return false;
+                }
+
+                MethodInfo setFilter = ResolveSetFilterMethod(sourceVoice.GetType());
+                if (setFilter == null)
+                    return false;
+
+                object boxedParameters = CreateSharpFilterParameters(filterType, frequency, q, sourceVoice);
+                setFilter.Invoke(sourceVoice, new[] { boxedParameters, 0 });
                 return true;
             }
             catch (Exception ex)
@@ -1099,6 +1124,86 @@ namespace RealisticSoundPlus.AudioEngineV2
         {
             string normalized = NormalizeCustomFilterType(filterType);
             return Enum.Parse(SharpFilterType, normalized + "Filter");
+        }
+
+        // Direct-typed counterpart to ToSharpFilterType for the fast (non-reflection) apply path: maps the
+        // normalized filter name straight onto the SharpDX enum with no Enum.Parse/boxing per call.
+        private static SharpDX.XAudio2.FilterType ToSharpFilterTypeDirect(string filterType)
+        {
+            switch (NormalizeCustomFilterType(filterType))
+            {
+                case "HighPass": return SharpDX.XAudio2.FilterType.HighPassFilter;
+                case "BandPass": return SharpDX.XAudio2.FilterType.BandPassFilter;
+                case "Notch": return SharpDX.XAudio2.FilterType.NotchFilter;
+                default: return SharpDX.XAudio2.FilterType.LowPassFilter;
+            }
+        }
+
+        // Root-level de-zipper. Smooths the per-voice cutoff (in log-frequency) and Q toward the target before
+        // the biquad write, so discrete jumps (distance/pressure/classification changes, voice rebinds) glide
+        // instead of stepping the filter and clicking. Applies to every live filter write (engine and aux) at
+        // this single choke point. Tunable via LiveFilterSmoothingMs (0 = off). A stale entry (a pooled voice
+        // reused after a gap) snaps rather than smoothing across two unrelated sounds.
+        private static void SmoothLiveFilter(IMySourceVoice voice, ref float frequency, ref float q)
+        {
+            float timeConstantMs = SettingsManager.Current?.LiveFilterSmoothingMs ?? DefaultLiveFilterSmoothingMs;
+            if (timeConstantMs <= 0.001f)
+                return;
+
+            DateTime now = DateTime.UtcNow;
+            if (!LiveFilterSmoothing.TryGetValue(voice, out LiveFilterSmoothState state)
+                || now - state.UpdatedUtc > LiveFilterSmoothingResetGap)
+            {
+                if (LiveFilterSmoothing.Count > MaxLiveFilterSmoothing)
+                    PurgeLiveFilterSmoothing(now);
+
+                LiveFilterSmoothing[voice] = new LiveFilterSmoothState { Frequency = frequency, Q = q, UpdatedUtc = now };
+                return;
+            }
+
+            float elapsedMs = (float)Math.Max(0.0, (now - state.UpdatedUtc).TotalMilliseconds);
+            float alpha = elapsedMs / timeConstantMs;
+            if (alpha < 0f) alpha = 0f;
+            else if (alpha > 1f) alpha = 1f;
+
+            float fromLog = (float)Math.Log(Math.Max(1f, state.Frequency));
+            float toLog = (float)Math.Log(Math.Max(1f, frequency));
+            float smoothedFrequency = (float)Math.Exp(fromLog + (toLog - fromLog) * alpha);
+            float smoothedQ = state.Q + (q - state.Q) * alpha;
+
+            LiveFilterSmoothing[voice] = new LiveFilterSmoothState { Frequency = smoothedFrequency, Q = smoothedQ, UpdatedUtc = now };
+            frequency = smoothedFrequency;
+            q = smoothedQ;
+        }
+
+        private static void PurgeLiveFilterSmoothing(DateTime now)
+        {
+            List<IMySourceVoice> remove = null;
+            foreach (KeyValuePair<IMySourceVoice, LiveFilterSmoothState> pair in LiveFilterSmoothing)
+            {
+                if (now - pair.Value.UpdatedUtc <= LiveFilterSmoothingResetGap)
+                    continue;
+
+                if (remove == null)
+                    remove = new List<IMySourceVoice>();
+                remove.Add(pair.Key);
+            }
+
+            if (remove != null)
+            {
+                for (int i = 0; i < remove.Count; i++)
+                    LiveFilterSmoothing.Remove(remove[i]);
+            }
+
+            if (LiveFilterSmoothing.Count > MaxLiveFilterSmoothing)
+                LiveFilterSmoothing.Clear();
+        }
+
+        private struct LiveFilterSmoothState
+        {
+            public float Frequency;
+            public float Q;
+            public DateTime UpdatedUtc;
         }
 
         private static string DescribeEffect(IDictionary effects, string subtype)

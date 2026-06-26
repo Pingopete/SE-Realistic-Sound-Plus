@@ -136,6 +136,11 @@ namespace RealisticSoundPlus.AudioEngineV2
 
             DrawText(source, Trim(sample.CueName, 26), 0.5);
             DrawText(source, detail, 0.28);
+
+            // Air-diffraction leg: when a flood-fill open-air detour was found, show its length and whether it
+            // actually brightened the source (the cascade's around-the-corner path).
+            if (sample.AirPathAvailable)
+                DrawText(source, string.Format(CultureInfo.InvariantCulture, "air {0:0.0}m{1}", sample.AirPathLength, sample.MergedFromAirPath ? "  *merged*" : ""), 0.06);
         }
 
         private static CachedPath GetOrRefresh(string key, Vector3D from, Vector3D to, bool includeVoxels, DateTime now)

@@ -113,7 +113,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             else
                 _reverbRayDebugSamples.Clear();
             _lastReverbRayDebugUtc = DateTime.MinValue;
-            ResetRollingProbeAccumulator();
+            ResetEnvMapAccumulator();
         }
 
         public static void Update(V2AudioListenerState listener)
@@ -394,7 +394,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             {
                 Vector3D up = GetProbeUp(probePosition, naturalGravity, naturalGravityAvailable);
                 BuildStableBasis(up, out Vector3D right, out Vector3D forward);
-                ProbeRollingDirections(
+                ProbeEnvMapDirections(
                     listener,
                     settings,
                     now,
@@ -457,7 +457,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             float sealedExtra = sealedEstimate ? settings.PlayerFilterEnvironmentSealedFactor : 0f;
             float finalMuffling = ApplyOcclusionStrength(Clamp01(continuousMuffling + (1f - continuousMuffling) * sealedExtra), settings.PlayerFilterOcclusionStrength);
             float windExposure = Clamp01(1f - finalMuffling);
-            RoomAcousticEstimate roomAcoustics = CalculateRoomAcoustics(roomProbe, oxygenProbe, rayLength);
+            RoomAcousticEstimate roomAcoustics = CalculateRoomAcoustics(roomProbe, oxygenProbe, rayLength, settings);
 
             V2PlayerEnvironmentSample sample = new V2PlayerEnvironmentSample
             {
@@ -650,6 +650,11 @@ namespace RealisticSoundPlus.AudioEngineV2
             VRage.Game.ModAPI.IMyCubeGrid modGrid = grid as VRage.Game.ModAPI.IMyCubeGrid;
             if (modGrid == null)
                 return probe;
+
+            // Carry the winning grid + cell so the reverb geometry override can read this exact room.
+            probe.Grid = modGrid;
+            probe.Cell = cell;
+            probe.CellResolved = true;
 
             bool roomAtPositionAirtight = TryIsRoomAtPositionAirtight(modGrid, cell);
             probe.RoomAtPositionAirtight = roomAtPositionAirtight;
@@ -1161,6 +1166,328 @@ namespace RealisticSoundPlus.AudioEngineV2
                 ref weightedVoxelBlockedMeters);
         }
 
+        // ===================== Persistent directional environment occlusion map =====================
+        // Replaces the time-windowed random rolling-probe buffer (the methods above are now dead, kept until a
+        // cleanup pass) with a persistent listener-relative Fibonacci-lattice cell map. Each cell remembers its
+        // last openness/thickness; a deterministic golden-stride sweep refreshes raysPerUpdate cells per update
+        // (SAME ray budget). Stationary -> converges to a constant (no sway); a door updates one cell smoothly.
+        private static EnvMapCell[] _envMap;
+        private static Vector3D[] _envMapLocalDirs;
+        private static int _envMapCellCount;
+        private static int _envMapStride = 1;
+        private static int _envMapSweepIndex;
+        private static Vector3D _envMapAnchor;
+        private static long _envMapGridId;
+        private static long _envMapContactGridId;
+        private static bool _envMapInsideShip;
+        private static bool _envMapVanillaFallback;
+        private static string _envMapModeName;
+        private static float _envMapRayLength;
+        private static float _envMapThicknessScale;
+        private static float _envMapVoxelWeight;
+
+        private static void EnsureEnvMap(int cellCount)
+        {
+            cellCount = (int)Clamp(cellCount, 32f, 192f);
+            if (_envMap != null && _envMapCellCount == cellCount)
+                return;
+
+            _envMapCellCount = cellCount;
+            _envMap = new EnvMapCell[cellCount];
+            _envMapLocalDirs = new Vector3D[cellCount];
+            double golden = Math.PI * (3.0 - Math.Sqrt(5.0));
+            for (int i = 0; i < cellCount; i++)
+            {
+                double z = 1.0 - (2.0 * i + 1.0) / cellCount;
+                double r = Math.Sqrt(Math.Max(0.0, 1.0 - z * z));
+                double phi = i * golden;
+                _envMapLocalDirs[i] = new Vector3D(Math.Cos(phi) * r, Math.Sin(phi) * r, z);
+            }
+            _envMapStride = ChooseStride(cellCount);
+            _envMapSweepIndex = 0;
+        }
+
+        private static int ChooseStride(int n)
+        {
+            if (n <= 2)
+                return 1;
+            int stride = Math.Max(1, (int)Math.Round(n / 1.6180339887));
+            while (Gcd(stride, n) != 1)
+                stride++;
+            return stride % n == 0 ? 1 : stride;
+        }
+
+        private static int Gcd(int a, int b)
+        {
+            a = Math.Abs(a);
+            b = Math.Abs(b);
+            while (b != 0)
+            {
+                int t = b;
+                b = a % b;
+                a = t;
+            }
+            return a == 0 ? 1 : a;
+        }
+
+        private static void ProbeEnvMapDirections(
+            V2AudioListenerState listener,
+            RealisticSoundPlusSettings settings,
+            DateTime now,
+            Vector3D position,
+            Vector3D up,
+            Vector3D right,
+            Vector3D forward,
+            float rayLength,
+            float thicknessScale,
+            float voxelWeight,
+            RoomRayAccumulator roomProbe,
+            List<ReverbRayDebugSample> reverbRayDebug,
+            ref int open,
+            ref int blocked,
+            ref float openWeight,
+            ref float totalWeight,
+            ref float weightedBlockedMeters,
+            ref float weightedVoxelBlockedMeters)
+        {
+            EnsureEnvMap(settings.PlayerEnvMapCellCount);
+            PrepareEnvMapAccumulator(listener, position, rayLength, thicknessScale, voxelWeight, settings);
+
+            // Capture the basis/origin so the debug overlay can re-project the (listener-relative) cells.
+            _envMapDebugPosition = position;
+            _envMapDebugUp = up;
+            _envMapDebugRight = right;
+            _envMapDebugForward = forward;
+
+            int n = _envMapCellCount;
+            int stride = _envMapStride;
+            float alpha = Clamp(settings.PlayerEnvMapCellAlpha, 0.1f, 1.0f);
+            int rays = Math.Min(Math.Max(1, settings.PlayerEnvMapRaysPerUpdate), n);
+
+            for (int k = 0; k < rays; k++)
+            {
+                int idx = (int)(((long)(_envMapSweepIndex + k) * stride) % n);
+                Vector3D lp = _envMapLocalDirs[idx];
+                bool includeEnv = lp.Z >= 0.0;
+                Vector3D dir = right * lp.X + forward * lp.Y + up * lp.Z;
+                RollingRaySample s = TraceRollingDirection(position, dir, up, SphereRayWeight, rayLength, thicknessScale, voxelWeight, includeEnv, now);
+                MergeEnvCell(ref _envMap[idx], s, alpha, includeEnv);
+
+                // Reverb / debug feed from the freshly-traced rays only (raw distances, raysPerUpdate per
+                // update) to match the old per-ray cardinality, so the reverb percentile distribution is not
+                // skewed by feeding all N EMA-smoothed cells every update.
+                roomProbe?.Add(s.RayAvailable, s.RayHit, s.RayDistance);
+                if (reverbRayDebug != null)
+                {
+                    reverbRayDebug.Add(new ReverbRayDebugSample
+                    {
+                        From = s.DebugFrom,
+                        To = s.DebugTo,
+                        Available = s.RayAvailable,
+                        Hit = s.RayHit
+                    });
+                }
+            }
+            _envMapSweepIndex += rays;
+
+            AggregateEnvMap(ref open, ref blocked, ref openWeight, ref totalWeight, ref weightedBlockedMeters, ref weightedVoxelBlockedMeters);
+        }
+
+        private static void MergeEnvCell(ref EnvMapCell cell, RollingRaySample s, float alpha, bool includeEnv)
+        {
+            float a = cell.Sampled ? alpha : 1f; // first touch snaps (no warm-up smear)
+            float open01 = s.Weight > 0.0001f ? Clamp01(s.OpenWeight / s.Weight) : 1f;
+
+            cell.OpenWeight01 = Lerp(cell.OpenWeight01, open01, a);
+            cell.BlockedMeters = Lerp(cell.BlockedMeters, s.BlockedMeters, a);
+            cell.VoxelMeters = Lerp(cell.VoxelMeters, s.VoxelMeters, a);
+            cell.RayDistance = Lerp(cell.RayDistance, s.RayDistance, a);
+            cell.RayAvailable = s.RayAvailable;
+            cell.RayHit = s.RayHit;
+            cell.IncludeEnvironment = includeEnv;
+            cell.EnvironmentAvailable = s.EnvironmentAvailable;
+            cell.EnvironmentBlocked = s.EnvironmentBlocked;
+            cell.Confidence = 1f;
+            cell.Sampled = true;
+        }
+
+        private static void AggregateEnvMap(ref int open, ref int blocked, ref float openWeight, ref float totalWeight, ref float weightedBlockedMeters, ref float weightedVoxelBlockedMeters)
+        {
+            const float confidenceThreshold = 0.3f;
+            int n = _envMapCellCount;
+
+            int envIncluded = 0;
+            for (int i = 0; i < n; i++)
+            {
+                EnvMapCell c = _envMap[i];
+                if (c.Sampled && c.Confidence > confidenceThreshold && c.IncludeEnvironment && c.EnvironmentAvailable)
+                    envIncluded++;
+            }
+
+            // Coverage guard: until enough fresh directional cells exist, leave the accumulators at zero so the
+            // caller's empty-result fallback fires instead of trusting a partial hemisphere (no reset muffle sweep).
+            int minCoverage = Math.Max(8, n / 4);
+            if (envIncluded < minCoverage)
+                return;
+
+            for (int i = 0; i < n; i++)
+            {
+                EnvMapCell c = _envMap[i];
+                if (!c.Sampled || c.Confidence <= confidenceThreshold)
+                    continue;
+                if (!c.IncludeEnvironment || !c.EnvironmentAvailable)
+                    continue;
+
+                // Binary inclusion gate: weight = 1 (NOT Confidence) so the denominator stays integral and the
+                // OpenFraction ratio is stable while moving — a decayed cell drops out wholesale until re-sampled.
+                totalWeight += 1f;
+                if (c.EnvironmentBlocked)
+                {
+                    blocked++;
+                    weightedBlockedMeters += c.BlockedMeters;
+                    weightedVoxelBlockedMeters += c.VoxelMeters;
+                    openWeight += c.OpenWeight01;
+                }
+                else
+                {
+                    open++;
+                    openWeight += 1f;
+                }
+            }
+        }
+
+        private static void PrepareEnvMapAccumulator(V2AudioListenerState listener, Vector3D position, float rayLength, float thicknessScale, float voxelWeight, RealisticSoundPlusSettings settings)
+        {
+            float resetMeters = Math.Max(1f, settings.PlayerEnvMapResetMoveMeters);
+            float resetSq = resetMeters * resetMeters;
+            bool reset = !AnyCellSampled()
+                || _envMapAnchor == Vector3D.Zero
+                || Vector3D.DistanceSquared(position, _envMapAnchor) > resetSq
+                || listener.GridEntityId != _envMapGridId
+                || listener.ContactGridEntityId != _envMapContactGridId
+                || listener.InsideShip != _envMapInsideShip
+                || listener.VanillaFallback != _envMapVanillaFallback
+                || !string.Equals(listener.ModeName ?? string.Empty, _envMapModeName ?? string.Empty, StringComparison.Ordinal)
+                || Math.Abs(rayLength - _envMapRayLength) > 0.25f
+                || Math.Abs(thicknessScale - _envMapThicknessScale) > 0.05f
+                || Math.Abs(voxelWeight - _envMapVoxelWeight) > 0.01f;
+
+            if (reset)
+            {
+                ClearEnvMapCells();
+                _envMapAnchor = position;
+                _envMapSweepIndex = 0;
+            }
+            else
+            {
+                double moved = Vector3D.Distance(position, _envMapAnchor);
+                if (moved > 0.0001)
+                {
+                    float decay = (float)Math.Exp(-moved / Math.Max(0.01f, settings.PlayerEnvMapConfidenceDecayMeters));
+                    for (int i = 0; i < _envMapCellCount; i++)
+                        _envMap[i].Confidence *= decay;
+                    _envMapAnchor = position;
+                }
+            }
+
+            _envMapGridId = listener.GridEntityId;
+            _envMapContactGridId = listener.ContactGridEntityId;
+            _envMapInsideShip = listener.InsideShip;
+            _envMapVanillaFallback = listener.VanillaFallback;
+            _envMapModeName = listener.ModeName;
+            _envMapRayLength = rayLength;
+            _envMapThicknessScale = thicknessScale;
+            _envMapVoxelWeight = voxelWeight;
+        }
+
+        private static bool AnyCellSampled()
+        {
+            if (_envMap == null)
+                return false;
+            for (int i = 0; i < _envMapCellCount; i++)
+                if (_envMap[i].Sampled)
+                    return true;
+            return false;
+        }
+
+        private static void ClearEnvMapCells()
+        {
+            if (_envMap != null)
+                Array.Clear(_envMap, 0, _envMapCellCount);
+        }
+
+        private static void ResetEnvMapAccumulator()
+        {
+            if (_envMap != null)
+                Array.Clear(_envMap, 0, _envMap.Length);
+            _envMapSweepIndex = 0;
+            _envMapAnchor = Vector3D.Zero;
+            _envMapGridId = 0L;
+            _envMapContactGridId = 0L;
+            _envMapInsideShip = false;
+            _envMapVanillaFallback = false;
+            _envMapModeName = null;
+            _envMapRayLength = 0f;
+            _envMapThicknessScale = 0f;
+            _envMapVoxelWeight = 0f;
+        }
+
+        private struct EnvMapCell
+        {
+            public bool Sampled;
+            public bool IncludeEnvironment;
+            public bool EnvironmentAvailable;
+            public bool EnvironmentBlocked;
+            public float OpenWeight01;
+            public float BlockedMeters;
+            public float VoxelMeters;
+            public float RayDistance;
+            public bool RayAvailable;
+            public bool RayHit;
+            public float Confidence;
+        }
+
+        private static Vector3D _envMapDebugPosition;
+        private static Vector3D _envMapDebugUp;
+        private static Vector3D _envMapDebugRight;
+        private static Vector3D _envMapDebugForward;
+
+        // Debug overlay: draws each sampled env cell as a short ray from the listener in its current world
+        // direction, green=open -> red=blocked (by stored openness), alpha by confidence. Toggle: /rsp envmapdebug.
+        // With the listener stationary the map fills and holds steady (the sway-fix made visible).
+        public static void DrawEnvMapDebug()
+        {
+            RealisticSoundPlusSettings settings = SettingsManager.Current;
+            if (settings == null || !settings.PlayerEnvMapDebugEnabled)
+                return;
+            if (_envMap == null || _envMapCellCount == 0 || _envMapDebugPosition == Vector3D.Zero)
+                return;
+
+            Vector3D origin = _envMapDebugPosition;
+            Vector3D up = _envMapDebugUp;
+            Vector3D right = _envMapDebugRight;
+            Vector3D forward = _envMapDebugForward;
+            const double length = 2.5;
+
+            for (int i = 0; i < _envMapCellCount; i++)
+            {
+                EnvMapCell c = _envMap[i];
+                if (!c.Sampled || !c.IncludeEnvironment || !c.EnvironmentAvailable)
+                    continue;
+
+                Vector3D lp = _envMapLocalDirs[i];
+                Vector3D dir = right * lp.X + forward * lp.Y + up * lp.Z;
+                if (!dir.IsValid() || dir.LengthSquared() < 1e-6)
+                    continue;
+                dir.Normalize();
+
+                float open01 = Clamp01(c.OpenWeight01);
+                byte alpha = (byte)(50f + 180f * Clamp01(c.Confidence));
+                Color color = new Color((byte)(255f * (1f - open01)), (byte)(255f * open01), (byte)40, alpha);
+                MyRenderProxy.DebugDrawLine3D(origin, origin + dir * length, color, color, false, false);
+            }
+        }
+
         private static void PrepareRollingProbeAccumulator(V2AudioListenerState listener, Vector3D position, float rayLength, float thicknessScale, float voxelWeight)
         {
             bool reset = RollingProbeSamples.Count == 0
@@ -1259,7 +1586,16 @@ namespace RealisticSoundPlus.AudioEngineV2
                 blockedMeters = hit ? Math.Max(MinStructuralHitThicknessMeters, thicknessScale) : voxelMeters;
 
             sample.BlockedMeters = blockedMeters;
-            sample.OpenWeight = sample.Weight * CalculateThicknessTransmission(blockedMeters, thicknessScale);
+            float transRoll = CalculateThicknessTransmission(blockedMeters, thicknessScale);
+            RealisticSoundPlusSettings rollSettings = SettingsManager.Current;
+            if (rollSettings != null && rollSettings.PlayerEnvSealedBarrierLoss > 0f && hit
+                && blockedMeters < thicknessScale * Math.Max(0.05f, rollSettings.PlayerFilterSealedBarrierThinFactor)
+                && TryGetFirstGridHitFace(from, to, out VRage.Game.ModAPI.IMyCubeGrid sealRollGrid, out Vector3I sealRollCell)
+                && V2GridStructureProbe.IsCellAirtight(sealRollGrid, sealRollCell))
+            {
+                transRoll = Math.Min(transRoll, 1f - Clamp01(rollSettings.PlayerEnvSealedBarrierLoss));
+            }
+            sample.OpenWeight = sample.Weight * transRoll;
             return sample;
         }
 
@@ -1448,7 +1784,16 @@ namespace RealisticSoundPlus.AudioEngineV2
 
                 weightedBlockedMeters += safeWeight * blockedMeters;
                 weightedVoxelBlockedMeters += safeWeight * voxelMeters;
-                openWeight += safeWeight * CalculateThicknessTransmission(blockedMeters, thicknessScale);
+                float transDir = CalculateThicknessTransmission(blockedMeters, thicknessScale);
+                RealisticSoundPlusSettings dirSettings = SettingsManager.Current;
+                if (dirSettings != null && dirSettings.PlayerEnvSealedBarrierLoss > 0f && hit
+                    && blockedMeters < thicknessScale * Math.Max(0.05f, dirSettings.PlayerFilterSealedBarrierThinFactor)
+                    && TryGetFirstGridHitFace(from, to, out VRage.Game.ModAPI.IMyCubeGrid sealDirGrid, out Vector3I sealDirCell)
+                    && V2GridStructureProbe.IsCellAirtight(sealDirGrid, sealDirCell))
+                {
+                    transDir = Math.Min(transDir, 1f - Clamp01(dirSettings.PlayerEnvSealedBarrierLoss));
+                }
+                openWeight += safeWeight * transDir;
                 return;
             }
 
@@ -2264,6 +2609,20 @@ namespace RealisticSoundPlus.AudioEngineV2
             }
         }
 
+        // Resolves the first grid block a ray crosses (its grid + cell) for the thin-seal barrier test.
+        // Wraps TryFindFirstGridHit; fails open (returns false -> pure thickness) on any miss/null.
+        internal static bool TryGetFirstGridHitFace(Vector3D from, Vector3D to, out VRage.Game.ModAPI.IMyCubeGrid grid, out Vector3I cell)
+        {
+            grid = null;
+            cell = default(Vector3I);
+            if (!TryFindFirstGridHit(from, to, out double _, out MySlimBlock block) || block == null)
+                return false;
+
+            grid = block.CubeGrid as VRage.Game.ModAPI.IMyCubeGrid;
+            cell = block.Position;
+            return grid != null;
+        }
+
         private static bool TryFindDoorProbeGrid(Vector3D from, Vector3D to, out MyCubeGrid grid)
         {
             grid = null;
@@ -2470,7 +2829,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             }
         }
 
-        private static RoomAcousticEstimate CalculateRoomAcoustics(RoomRayAccumulator probe, OxygenProbe oxygenProbe, float rayLength)
+        private static RoomAcousticEstimate CalculateRoomAcoustics(RoomRayAccumulator probe, OxygenProbe oxygenProbe, float rayLength, RealisticSoundPlusSettings settings)
         {
             RoomAcousticEstimate estimate = new RoomAcousticEstimate
             {
@@ -2493,6 +2852,27 @@ namespace RealisticSoundPlus.AudioEngineV2
             float mean = probe.DistanceSum / Math.Max(1, probe.Rays);
             float closedFraction = probe.Hits / (float)Math.Max(1, probe.Rays);
             float radius = Clamp(p75 * 0.45f + p90 * 0.35f + median * 0.20f, 0.8f, Math.Max(1f, rayLength));
+
+            // Sealed-room geometry override (V2GridStructureProbe): where the gas system has an exact airtight
+            // room, blend its cell-set geometry into the ray-derived size/wall-distances — exact and jitter-free.
+            // The ray estimate still contributes at w<1 so the sealed/unsealed boundary ramps (further smoothed
+            // downstream by SmoothReverbRoomSample). Geometry is clamped to an ABSOLUTE ceiling, NOT rayLength,
+            // so a hangar larger than the ray horizon is not capped back down to it.
+            bool sealedGeoApplied = false;
+            if (sealedRoom && oxygenProbe.CellResolved && settings != null &&
+                V2GridStructureProbe.TryGetRoomGeometry(oxygenProbe.Grid, oxygenProbe.Cell, out V2RoomGeometry geo) &&
+                geo.Available && geo.Airtight)
+            {
+                const float geometryCeiling = 250f;
+                float w = Clamp01(settings.ReverbSealedGeometryWeight);
+                radius = Lerp(radius, Clamp(geo.EquivalentRadius, 0.8f, geometryCeiling), w);
+                near = Lerp(near, Clamp(geo.NearWallDistance, 0.35f, geometryCeiling), w);
+                median = Lerp(median, Clamp(geo.FarWallDistance, near, geometryCeiling), w);
+                if (near > median)
+                    near = median; // keep percentile ordering well-formed after the blend
+                sealedGeoApplied = true;
+            }
+
             float roomSize = NormalizeRoomRadius(radius, rayLength);
             bool usable = sealedRoom || probe.Hits >= Math.Max(8, probe.Rays / 3);
             if (!usable)
@@ -2525,7 +2905,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             float tailGain = 1f + rt60 * 1.15f + roomSize * 3.5f - openFraction * 14f;
 
             estimate.Available = true;
-            estimate.Source = sealedRoom ? "sealed-ray" : "ray";
+            estimate.Source = sealedGeoApplied ? "sealed-geo" : (sealedRoom ? "sealed-ray" : "ray");
             estimate.Rays = probe.Rays;
             estimate.Hits = probe.Hits;
             estimate.OpenRays = probe.OpenRays;
@@ -2732,6 +3112,9 @@ namespace RealisticSoundPlus.AudioEngineV2
             public long GridEntityId;
             public int CandidateGridCount;
             public object RoomKey;
+            public VRage.Game.ModAPI.IMyCubeGrid Grid;
+            public Vector3I Cell;
+            public bool CellResolved;
         }
 
         private enum CastRayMode

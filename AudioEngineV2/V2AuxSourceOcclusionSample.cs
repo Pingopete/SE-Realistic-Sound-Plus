@@ -14,6 +14,10 @@ namespace RealisticSoundPlus.AudioEngineV2
         public Vector3D ListenerPosition;
         public Vector3D ProbeFrom;
         public Vector3D ProbeTo;
+        public bool AirPathAvailable;     // an open-air detour to the listener was found (flood-fill)
+        public float AirPathLength;       // open-air detour length (m)
+        public bool MergedFromAirPath;    // the air leg actually reduced muffle/gain
+        public float PreAirPathMuffling;  // through-structure FinalMuffling before the air-path merge
         public float Distance;
         public float PathLength;
         public bool MainRayBlocked;

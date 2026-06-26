@@ -139,6 +139,10 @@ namespace RealisticSoundPlus
                     case "envreverbraydebug":
                         SetReverbRayDebug(parts);
                         break;
+                    case "envmapdebug":
+                    case "envcelldebug":
+                        SetEnvMapDebug(parts);
+                        break;
                     case "auxatmoverride":
                     case "auxpressureoverride":
                     case "playerfilteratmoverride":
@@ -659,6 +663,17 @@ namespace RealisticSoundPlus
             if (parts.Length < 2 || !SettingsManager.TrySetReverbRayDebug(parts[1]))
             {
                 Notify("Usage: /rsp reverbraydebug <on|off>");
+                return;
+            }
+
+            Notify(SettingsManager.Summary());
+        }
+
+        private static void SetEnvMapDebug(string[] parts)
+        {
+            if (parts.Length < 2 || !SettingsManager.TrySetEnvMapDebug(parts[1]))
+            {
+                Notify("Usage: /rsp envmapdebug <on|off>");
                 return;
             }
 
