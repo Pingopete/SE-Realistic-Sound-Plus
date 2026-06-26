@@ -71,7 +71,11 @@ namespace RealisticSoundPlus
         // Emitter repositioning: move a blocked block source to its doorway portal so it localises to the
         // opening (direction), with the detour attenuation carried by gain. OFF by default (experimental).
         public bool PlayerFilterBlockRepositionEnabled { get; set; } = false;
-        public float PlayerFilterBlockRepositionSlewMs { get; set; } = 120f;
+        public float PlayerFilterBlockRepositionSlewMs { get; set; } = 120f;       // per-frame glide toward target
+        public float PlayerFilterBlockRepositionPortalAvgMs { get; set; } = 200f;  // averages the grid-quantised portal jumps
+        // How far (grid cells) the air-path flood-fill may search beyond the source<->listener box. Larger finds
+        // longer detours (multi-flight switchback staircases, paths that swing wide) at more BFS cost.
+        public float PlayerFilterBlockAirPathReach { get; set; } = 3f;
         public bool PlayerEnvMapDebugEnabled { get; set; } = false;
         public bool PlayerFilterEnabled { get; set; } = true;
         public bool PlayerFilterEnvironmentEnabled { get; set; } = true;
@@ -433,6 +437,11 @@ namespace RealisticSoundPlus
                 case "airpathbrightness": value = settings.PlayerFilterBlockAirBrightness; return true;
                 case "blockreposeslew":
                 case "repositionslew": value = settings.PlayerFilterBlockRepositionSlewMs; return true;
+                case "blockportalavg":
+                case "portalavg": value = settings.PlayerFilterBlockRepositionPortalAvgMs; return true;
+                case "blockairpathreach":
+                case "airpathreach":
+                case "airreach": value = settings.PlayerFilterBlockAirPathReach; return true;
                 case "envmapcells": value = settings.PlayerEnvMapCellCount; return true;
                 case "envmapalpha": value = settings.PlayerEnvMapCellAlpha; return true;
                 case "envmapdecay": value = settings.PlayerEnvMapConfidenceDecayMeters; return true;
@@ -827,6 +836,15 @@ namespace RealisticSoundPlus
                 case "blockreposeslew":
                 case "repositionslew":
                     Current.PlayerFilterBlockRepositionSlewMs = value;
+                    break;
+                case "blockportalavg":
+                case "portalavg":
+                    Current.PlayerFilterBlockRepositionPortalAvgMs = value;
+                    break;
+                case "blockairpathreach":
+                case "airpathreach":
+                case "airreach":
+                    Current.PlayerFilterBlockAirPathReach = value;
                     break;
                 case "envmapcells":
                     Current.PlayerEnvMapCellCount = (int)value;
@@ -1608,7 +1626,9 @@ namespace RealisticSoundPlus
             Current.PlayerFilterBlockSealedBarrierLoss = Clamp(Current.PlayerFilterBlockSealedBarrierLoss, 0f, 1f);
             Current.PlayerEnvSealedBarrierLoss = Clamp(Current.PlayerEnvSealedBarrierLoss, 0f, 1f);
             Current.PlayerFilterBlockAirBrightness = Clamp(Current.PlayerFilterBlockAirBrightness, 0f, 1f);
-            Current.PlayerFilterBlockRepositionSlewMs = Clamp(Current.PlayerFilterBlockRepositionSlewMs, 1f, 1000f);
+            Current.PlayerFilterBlockRepositionSlewMs = Clamp(Current.PlayerFilterBlockRepositionSlewMs, 1f, 2000f);
+            Current.PlayerFilterBlockRepositionPortalAvgMs = Clamp(Current.PlayerFilterBlockRepositionPortalAvgMs, 1f, 2000f);
+            Current.PlayerFilterBlockAirPathReach = Clamp(Current.PlayerFilterBlockAirPathReach, 1f, 16f);
             Current.PlayerFilterAtmosphereOverride = Clamp(Current.PlayerFilterAtmosphereOverride, 0f, 1f);
             Current.PlayerFilterOcclusionStrength = Clamp(Current.PlayerFilterOcclusionStrength, 0f, 4f);
             Current.PlayerFilterEnvironmentVolumeMuffleWeight = Clamp(Current.PlayerFilterEnvironmentVolumeMuffleWeight, 0f, 4f);

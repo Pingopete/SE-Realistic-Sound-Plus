@@ -9,27 +9,39 @@ namespace RealisticSoundPlus.AudioEngineV2
     // Repositions a blocked block-sound emitter to the PORTAL (the doorway its sound diffracts through) so it
     // localises to the opening instead of straight through the wall. Direction comes from the portal; the
     // air-path distance attenuation is carried separately by the aux gain (VolumeMultiplier), so the emitter
-    // sits at the real doorway rather than a fictitious far point (Option B from the design discussion).
+    // sits at the real doorway (Option B from the design discussion), not a fictitious far point.
     //
-    // Mechanism: per-frame SetPosition re-assert (the proven path RSP already uses for thruster/connector
-    // emitters), slewed and zero-velocity for stability, with SetPosition(null) handing the emitter back to its
-    // own entity the moment a source is no longer repositioned or its loop stops. Default OFF, fully separate
-    // from thruster emitters (disjoint sets). MVP targets sustained sources on static grids; a source whose
-    // entity moves every frame is corrected by the engine on release.
+    // Movement is smoothed in TWO stages so it never snaps:
+    //   1. Portal AVERAGE - the raw portal jumps in whole grid cells (2.5 m on a large grid); an EMA turns those
+    //      quantised jumps into a continuous averaged target (PlayerFilterBlockRepositionPortalAvgMs).
+    //   2. Glide - the emitter eases toward that averaged target each frame (PlayerFilterBlockRepositionSlewMs).
+    // The emitter is tracked for the whole life of the voice, NOT just while a portal is active: when the air
+    // path briefly drops out the target eases back toward the real block instead of hard-releasing, so a one-
+    // frame flicker no longer snaps the source between the doorway and the block. SetPosition(null) hands the
+    // emitter back only once it has eased home and stayed inactive past a grace window (or the voice stops).
+    // Disjoint from thruster emitters; static-base sources for now.
     internal static class V2BlockEmitterReposition
     {
         private sealed class State
         {
-            public Vector3D Target;   // portal world position (direction anchor)
-            public Vector3D Current;  // slewed world position actually written
+            public Vector3D RealSource;   // live block position (slide-home target / restore reference)
+            public Vector3D RawPortal;    // last raw (grid-quantised) portal target
+            public Vector3D AvgPortal;    // EMA-averaged portal target
+            public bool HasAvg;
+            public Vector3D Current;      // slewed world position actually written
+            public bool Active;           // a portal was requested this refresh
+            public DateTime LastActiveUtc;
             public DateTime LastRequestUtc;
-            public bool Started;
         }
+
+        private const double FrameMs = 1000.0 / 60.0;
+        private const double ReleaseEpsilonSq = 0.05 * 0.05;          // 5 cm: "eased home" threshold
+        private static readonly TimeSpan StaleAfter = TimeSpan.FromMilliseconds(500);
+        private static readonly TimeSpan InactiveGrace = TimeSpan.FromMilliseconds(350);
 
         private static readonly Dictionary<MyEntity3DSoundEmitter, State> Tracked =
             new Dictionary<MyEntity3DSoundEmitter, State>();
         private static readonly List<MyEntity3DSoundEmitter> Scratch = new List<MyEntity3DSoundEmitter>(16);
-        private static readonly TimeSpan StaleAfter = TimeSpan.FromMilliseconds(400);
 
         private static int _activeCount;
         private static long _appliedFrames;
@@ -37,44 +49,34 @@ namespace RealisticSoundPlus.AudioEngineV2
 
         public static int ActiveCount => _activeCount;
 
-        // Called from the aux apply path whenever a block source is (re)evaluated. When active + the portal is
-        // valid it registers/refreshes the target; otherwise it releases any standing override on that emitter.
-        public static void Request(MyEntity3DSoundEmitter emitter, Vector3D portalWorld, bool active, DateTime now)
+        // Called from the aux apply path whenever a block source is (re)evaluated. realSource is the live block
+        // position (slide-home / restore reference); active+portalWorld register the doorway target.
+        public static void Request(MyEntity3DSoundEmitter emitter, Vector3D realSource, Vector3D portalWorld, bool active, DateTime now)
         {
             if (emitter == null)
                 return;
-
-            if (!active)
-            {
-                Release(emitter);
-                return;
-            }
 
             if (!Tracked.TryGetValue(emitter, out State state))
             {
-                state = new State { Target = portalWorld, Current = portalWorld, Started = false };
+                if (!active)
+                    return; // nothing to do for an untracked, inactive source
+
+                state = new State { Current = realSource };
                 Tracked[emitter] = state;
             }
 
-            state.Target = portalWorld;
+            state.RealSource = realSource;
             state.LastRequestUtc = now;
-        }
-
-        public static void Release(MyEntity3DSoundEmitter emitter)
-        {
-            if (emitter == null)
-                return;
-
-            if (Tracked.TryGetValue(emitter, out State _))
+            state.Active = active;
+            if (active)
             {
-                RestoreSafe(emitter);
-                Tracked.Remove(emitter);
-                _released++;
+                state.RawPortal = portalWorld;
+                state.LastActiveUtc = now;
             }
         }
 
-        // Per-frame: re-assert the slewed portal position on every live tracked emitter, and release any that
-        // went stale (no longer requested) or stopped playing.
+        // Per-frame: average the portal, ease the emitter toward it (or back home when inactive), and release
+        // any emitter that has eased home and stayed inactive, gone stale, or stopped playing.
         public static void Update()
         {
             if (Tracked.Count == 0)
@@ -84,8 +86,11 @@ namespace RealisticSoundPlus.AudioEngineV2
             }
 
             DateTime now = DateTime.UtcNow;
-            float slewMs = Math.Max(1f, SettingsManager.Current?.PlayerFilterBlockRepositionSlewMs ?? 120f);
-            float alpha = Clamp01(1f - (float)Math.Exp(-16.6 / slewMs)); // ~one 60fps step toward target
+            RealisticSoundPlusSettings settings = SettingsManager.Current;
+            float portalAvgMs = Math.Max(1f, settings?.PlayerFilterBlockRepositionPortalAvgMs ?? 200f);
+            float slewMs = Math.Max(1f, settings?.PlayerFilterBlockRepositionSlewMs ?? 120f);
+            float portalAlpha = Clamp01(1f - (float)Math.Exp(-FrameMs / portalAvgMs));
+            float slewAlpha = Clamp01(1f - (float)Math.Exp(-FrameMs / slewMs));
 
             Scratch.Clear();
             int active = 0;
@@ -101,21 +106,43 @@ namespace RealisticSoundPlus.AudioEngineV2
                     continue;
                 }
 
-                if (!state.Started)
+                Vector3D target;
+                if (state.Active)
                 {
-                    state.Current = state.Target; // snap on first frame: no audible swoop across the room
-                    state.Started = true;
+                    // Stage 1: average the quantised portal jumps into a continuous target.
+                    if (!state.HasAvg)
+                    {
+                        state.AvgPortal = state.RawPortal;
+                        state.HasAvg = true;
+                    }
+                    else
+                    {
+                        state.AvgPortal = Vector3D.Lerp(state.AvgPortal, state.RawPortal, portalAlpha);
+                    }
+                    target = state.AvgPortal;
+                    active++;
                 }
                 else
                 {
-                    state.Current = Vector3D.Lerp(state.Current, state.Target, alpha);
+                    // Eased back toward the real block; drop the average so the next activation re-seeds it.
+                    target = state.RealSource;
+                    state.HasAvg = false;
+
+                    if (now - state.LastActiveUtc > InactiveGrace
+                        && Vector3D.DistanceSquared(state.Current, state.RealSource) < ReleaseEpsilonSq)
+                    {
+                        Scratch.Add(emitter);
+                        continue;
+                    }
                 }
+
+                // Stage 2: ease the written position toward the target.
+                state.Current = Vector3D.Lerp(state.Current, target, slewAlpha);
 
                 try
                 {
                     emitter.SetPosition(state.Current);
                     emitter.SetVelocity(Vector3.Zero);
-                    active++;
                     _appliedFrames++;
                 }
                 catch
@@ -137,6 +164,17 @@ namespace RealisticSoundPlus.AudioEngineV2
             }
 
             _activeCount = active;
+        }
+
+        public static void Release(MyEntity3DSoundEmitter emitter)
+        {
+            if (emitter == null)
+                return;
+            if (Tracked.Remove(emitter))
+            {
+                RestoreSafe(emitter);
+                _released++;
+            }
         }
 
         public static void Reset()

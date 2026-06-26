@@ -93,9 +93,9 @@ namespace RealisticSoundPlus.AudioEngineV2
 
             StoreSample(sample, source);
 
-            // Move the live emitter to the doorway portal (or release it back to its block when not applied).
+            // Move the live emitter to the doorway portal (or ease it back to its block when not applied).
             // The air-path attenuation already lives in sample.EstimatedGain (applied via VolumeMultiplier).
-            V2BlockEmitterReposition.Request(emitter, sample.PortalWorld, sample.RepositionApplied, DateTime.UtcNow);
+            V2BlockEmitterReposition.Request(emitter, source, sample.PortalWorld, sample.RepositionApplied, DateTime.UtcNow);
         }
 
         public static string FormatSummary()
@@ -743,7 +743,9 @@ namespace RealisticSoundPlus.AudioEngineV2
                 if (state.MainRayBlocked)
                 {
                     VRage.Game.ModAPI.IMyCubeGrid sourceGrid = ResolveSourceGrid(sourceEntityId);
-                    if (sourceGrid != null && V2GridStructureProbe.TryFindAirPath(sourceGrid, source, listener, out float airLen, out Vector3D portal, out bool portalOk))
+                    int reach = (int)Math.Max(1f, settings.PlayerFilterBlockAirPathReach);
+                    int budget = Math.Min(32768, Math.Max(4096, reach * reach * reach * 32));
+                    if (sourceGrid != null && V2GridStructureProbe.TryFindAirPath(sourceGrid, source, listener, reach, budget, out float airLen, out Vector3D portal, out bool portalOk))
                     {
                         state.AirPathAvailable = true;
                         state.AirPathLength = airLen;

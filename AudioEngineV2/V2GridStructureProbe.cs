@@ -215,15 +215,23 @@ namespace RealisticSoundPlus.AudioEngineV2
             new Vector3I(0, 0, 1), new Vector3I(0, 0, -1)
         };
         private const int MaxAirPathCells = 4096;
-        // Pad the source<->listener search box by a few cells so a path can bend around an interior corner,
-        // but keep it tight: too large and the flood can escape into external open space and "reach" the
-        // listener around the outside of a genuinely sealing wall (a false-positive bright leg).
+        // Pad the source<->listener search box by a few cells so a path can bend around an interior corner.
+        // Larger = the flood can follow a longer detour (multi-flight switchback staircases, paths that swing
+        // wide of the direct line) at more BFS cost; too large risks escaping into exterior open space and
+        // "reaching" the listener around the outside of a genuinely sealing wall. Now a tunable: this default
+        // is the floor when no explicit reach is given.
         private const int AirPathBoundsPad = 3;
 
         // Length-only overload (back-compat): callers that only need the detour distance.
         public static bool TryFindAirPath(IMyCubeGrid grid, Vector3D sourceWorld, Vector3D listenerWorld, out float pathLengthMeters)
         {
-            return TryFindAirPath(grid, sourceWorld, listenerWorld, out pathLengthMeters, out _, out _);
+            return TryFindAirPath(grid, sourceWorld, listenerWorld, AirPathBoundsPad, MaxAirPathCells, out pathLengthMeters, out _, out _);
+        }
+
+        // Default-reach overload (back-compat for the portal callers).
+        public static bool TryFindAirPath(IMyCubeGrid grid, Vector3D sourceWorld, Vector3D listenerWorld, out float pathLengthMeters, out Vector3D portalWorld, out bool portalValid)
+        {
+            return TryFindAirPath(grid, sourceWorld, listenerWorld, AirPathBoundsPad, MaxAirPathCells, out pathLengthMeters, out portalWorld, out portalValid);
         }
 
         // Bounded 6-connected flood fill through traversable cells (empty air gaps + open doors) from the
@@ -236,13 +244,16 @@ namespace RealisticSoundPlus.AudioEngineV2
         // Also extracts the PORTAL: the last cell on the reconstructed path that the LISTENER still has a clear
         // line of sight to (the doorway the sound diffracts through on your side). This is the psychoacoustic
         // localisation point for emitter repositioning - direction comes from here, distance from pathLength.
-        public static bool TryFindAirPath(IMyCubeGrid grid, Vector3D sourceWorld, Vector3D listenerWorld, out float pathLengthMeters, out Vector3D portalWorld, out bool portalValid)
+        public static bool TryFindAirPath(IMyCubeGrid grid, Vector3D sourceWorld, Vector3D listenerWorld, int reachPad, int maxCells, out float pathLengthMeters, out Vector3D portalWorld, out bool portalValid)
         {
             pathLengthMeters = 0f;
             portalWorld = Vector3D.Zero;
             portalValid = false;
             if (grid == null)
                 return false;
+
+            reachPad = reachPad < 1 ? 1 : (reachPad > 64 ? 64 : reachPad);
+            maxCells = maxCells < 256 ? 256 : (maxCells > 131072 ? 131072 : maxCells);
 
             try
             {
@@ -255,7 +266,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                 if (sourceCell == listenerCell)
                     return true;
 
-                Vector3I pad = new Vector3I(AirPathBoundsPad);
+                Vector3I pad = new Vector3I(reachPad);
                 Vector3I lo = Vector3I.Min(sourceCell, listenerCell) - pad;
                 Vector3I hi = Vector3I.Max(sourceCell, listenerCell) + pad;
 
@@ -270,7 +281,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                 bool reached = false;
                 while (queue.Count > 0 && !reached)
                 {
-                    if (depthByCell.Count >= MaxAirPathCells)
+                    if (depthByCell.Count >= maxCells)
                         break;
 
                     Vector3I current = queue.Dequeue();
@@ -310,7 +321,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                 Vector3I portalCell = listenerCell;
                 Vector3I walk = listenerCell;
                 int guard = 0;
-                while (cameFrom.TryGetValue(walk, out Vector3I prev) && guard++ < MaxAirPathCells)
+                while (cameFrom.TryGetValue(walk, out Vector3I prev) && guard++ < maxCells)
                 {
                     Vector3D prevWorld = grid.GridIntegerToWorld(prev);
                     if (!HasLineOfSight(grid, listenerWorld, prevWorld, gridSize))
