@@ -422,7 +422,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                 float structTrans = V2PlayerEnvironmentTelemetry.CalculateThicknessTransmission(estimatedBlockedLength, blockThicknessScale);
                 float structGain = Clamp01(structGainDist * structTrans);
 
-                float airMuffle = 0.08f; // air leg stays bright (small floor); tuning knob, lower = brighter
+                float airMuffle = Clamp01(settings.PlayerFilterBlockAirBrightness); // air leg brightness floor (lower = brighter); tunable via Air Path Brightness
                 float airGain = EvaluateDistanceGain(airPathLength, effectiveRange, settings.PlayerFilterBlockDistanceCurve);
 
                 float denom = airGain + structGain;

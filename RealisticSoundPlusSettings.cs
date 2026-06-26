@@ -65,6 +65,9 @@ namespace RealisticSoundPlus
         public float PlayerFilterBlockSealedBarrierLoss { get; set; } = 0f;
         public float PlayerEnvSealedBarrierLoss { get; set; } = 0f;
         public float PlayerFilterSealedBarrierThinFactor { get; set; } = 0.6f;
+        // Air (around-corner) leg brightness floor for blocked block sources: the muffle the open detour
+        // collapses toward. Lower = brighter (more high end through the doorway). 0.08 = prior hardcoded value.
+        public float PlayerFilterBlockAirBrightness { get; set; } = 0.08f;
         public bool PlayerEnvMapDebugEnabled { get; set; } = false;
         public bool PlayerFilterEnabled { get; set; } = true;
         public bool PlayerFilterEnvironmentEnabled { get; set; } = true;
@@ -418,6 +421,12 @@ namespace RealisticSoundPlus
                 case "sealbarrierblock": value = settings.PlayerFilterBlockSealedBarrierLoss; return true;
                 case "sealbarrierenv": value = settings.PlayerEnvSealedBarrierLoss; return true;
                 case "sealbarrierthin": value = settings.PlayerFilterSealedBarrierThinFactor; return true;
+                // Coupled tester handle: one knob drives both block + env thin-seal loss (chat can still set each).
+                case "thinseal":
+                case "thinsealmuffle": value = settings.PlayerFilterBlockSealedBarrierLoss; return true;
+                case "blockairbright":
+                case "airbright":
+                case "airpathbrightness": value = settings.PlayerFilterBlockAirBrightness; return true;
                 case "envmapcells": value = settings.PlayerEnvMapCellCount; return true;
                 case "envmapalpha": value = settings.PlayerEnvMapCellAlpha; return true;
                 case "envmapdecay": value = settings.PlayerEnvMapConfidenceDecayMeters; return true;
@@ -431,6 +440,9 @@ namespace RealisticSoundPlus
                 case "voxelweight":
                 case "voxelocclusion":
                 case "voxelmuffle": value = settings.PlayerFilterVoxelOcclusionWeight; return true;
+                // Coupled tester handle: one knob drives env + block voxel weight together (chat can still set each).
+                case "voxelboth":
+                case "voxelall": value = settings.PlayerFilterVoxelOcclusionWeight; return true;
                 case "playerfilterblockvoxelocclusionweight":
                 case "blockvoxelocclusionweight":
                 case "blockvoxelweight":
@@ -796,6 +808,16 @@ namespace RealisticSoundPlus
                 case "sealbarrierthin":
                     Current.PlayerFilterSealedBarrierThinFactor = value;
                     break;
+                case "thinseal":
+                case "thinsealmuffle":
+                    Current.PlayerFilterBlockSealedBarrierLoss = value;
+                    Current.PlayerEnvSealedBarrierLoss = value;
+                    break;
+                case "blockairbright":
+                case "airbright":
+                case "airpathbrightness":
+                    Current.PlayerFilterBlockAirBrightness = value;
+                    break;
                 case "envmapcells":
                     Current.PlayerEnvMapCellCount = (int)value;
                     break;
@@ -820,6 +842,11 @@ namespace RealisticSoundPlus
                 case "voxelocclusion":
                 case "voxelmuffle":
                     Current.PlayerFilterVoxelOcclusionWeight = value;
+                    break;
+                case "voxelboth":
+                case "voxelall":
+                    Current.PlayerFilterVoxelOcclusionWeight = value;
+                    Current.PlayerFilterBlockVoxelOcclusionWeight = value;
                     break;
                 case "playerfilterblockvoxelocclusionweight":
                 case "blockvoxelocclusionweight":
@@ -1568,6 +1595,9 @@ namespace RealisticSoundPlus
                 Current.PlayerFilterBlockSealedFactor = Current.PlayerEnvSealedExtraMuffling;
             Current.PlayerFilterEnvironmentSealedFactor = Clamp(Current.PlayerFilterEnvironmentSealedFactor, 0f, 1f);
             Current.PlayerFilterBlockSealedFactor = Clamp(Current.PlayerFilterBlockSealedFactor, 0f, 1f);
+            Current.PlayerFilterBlockSealedBarrierLoss = Clamp(Current.PlayerFilterBlockSealedBarrierLoss, 0f, 1f);
+            Current.PlayerEnvSealedBarrierLoss = Clamp(Current.PlayerEnvSealedBarrierLoss, 0f, 1f);
+            Current.PlayerFilterBlockAirBrightness = Clamp(Current.PlayerFilterBlockAirBrightness, 0f, 1f);
             Current.PlayerFilterAtmosphereOverride = Clamp(Current.PlayerFilterAtmosphereOverride, 0f, 1f);
             Current.PlayerFilterOcclusionStrength = Clamp(Current.PlayerFilterOcclusionStrength, 0f, 4f);
             Current.PlayerFilterEnvironmentVolumeMuffleWeight = Clamp(Current.PlayerFilterEnvironmentVolumeMuffleWeight, 0f, 4f);

@@ -213,15 +213,15 @@ namespace RealisticSoundPlus
 
             AddSection(content, ref y, "Sealed Rooms");
             AddSlider(content, ref y, "Sealed Environment Factor", "sealedenv", 0f, 1f, 2, () => SettingsManager.Current.PlayerFilterEnvironmentSealedFactor, "Extra wind muffling in airtight rooms; higher quieter sealed interiors.");
-            AddSlider(content, ref y, "Sealed Blocks Factor", "sealedblock", 0f, 1f, 2, () => SettingsManager.Current.PlayerFilterBlockSealedFactor, "Extra block muffling outside sealed room; higher stronger door/wall contrast.");
+            AddSlider(content, ref y, "Sealed Blocks Factor", "sealedblock", 0f, 1f, 2, () => SettingsManager.Current.PlayerFilterBlockSealedFactor, "Extra block muffling when you are OUTSIDE the source's sealed room; higher = stronger door/wall contrast.");
+            AddSlider(content, ref y, "Thin Wall Muffle", "thinsealmuffle", 0f, 1f, 2, () => SettingsManager.Current.PlayerFilterBlockSealedBarrierLoss, "One knob for blocks AND wind: extra muffling through a THIN sealed face (glass/plate). 0 = off, ~0.7 = strong. Thick walls and open gratings are unaffected.");
 
             _currentAccent = EnvironmentPanel;
             AddSection(content, ref y, "Environment/Reverb Geometry");
             AddInlineReadout(content, ref y, V2PlayerFilterRuntime.FormatEnvironmentLiveReadout, "Live env output: covered sky, final muffling, and final volume.");
             AddSlider(content, ref y, "Env/Reverb Ray Length", "envreverbray", 5f, 1000f, 0, () => SettingsManager.Current.PlayerEnvRayLength, "Shared radius for wind occlusion and room reverb rays; higher samples farther openings and larger spaces.", true);
             AddSlider(content, ref y, "Env Structure Thickness", "envstructurethickness", 0.1f, 20f, 2, () => SettingsManager.Current.PlayerEnvStructureThicknessScale, "Wall thickness scale for env rays; higher lets thin cover leak more.");
-            AddSlider(content, ref y, "Env Seal Barrier Loss", "sealbarrierenv", 0f, 1f, 2, () => SettingsManager.Current.PlayerEnvSealedBarrierLoss, "Extra muffling of the outside world through a thin SEALED surface (glass roof/wall); 0 = off, ~0.7 = strong.");
-            AddSlider(content, ref y, "Env Voxel Weight", "envvoxelweight", 0f, 10f, 2, () => SettingsManager.Current.PlayerFilterVoxelOcclusionWeight, "Terrain/asteroid weight for wind rays; higher more terrain muffling, 0 off.");
+            AddSlider(content, ref y, "Voxel Occlusion Weight", "voxelboth", 0f, 10f, 2, () => SettingsManager.Current.PlayerFilterVoxelOcclusionWeight, "Terrain/asteroid voxel muffling for BOTH wind and block paths; higher = more muffling through terrain, 0 = off. (Thin Wall Muffle in Sealed Rooms covers thin sealed faces.)");
             AddSlider(content, ref y, "Env Aperture Curve", "envaperturecurve", 0.1f, 10f, 2, () => SettingsManager.Current.PlayerEnvApertureCurve, "Shapes open-sky fraction; higher makes small openings count less.");
 
             AddSection(content, ref y, "Env Occlusion Map");
@@ -239,20 +239,26 @@ namespace RealisticSoundPlus
             AddReadout(content, ref y, "Env/Reverb Probe", V2PlayerEnvironmentTelemetry.FormatSummary, "Summary of shared env/reverb rays, voxel, pressure, and sealed-room output.", 0.060f, 0.38f);
 
             _currentAccent = BlockPanel;
-            AddSection(content, ref y, "Block Emitters");
-            AddSlider(content, ref y, "Block Structure Thickness", "blockstructurethickness", 0.1f, 20f, 2, () => SettingsManager.Current.PlayerFilterBlockStructureThicknessScale, "Wall thickness scale for block rays; higher reduces thin-obstacle muting.");
-            AddSlider(content, ref y, "Block Seal Barrier Loss", "sealbarrierblock", 0f, 1f, 2, () => SettingsManager.Current.PlayerFilterBlockSealedBarrierLoss, "Extra muffling for a thin SEALED block face (glass/plate) between a source and you; 0 = off, ~0.7 = strong. Thick walls/gratings unaffected.");
-            AddSlider(content, ref y, "Seal Barrier Thin Gate", "sealbarrierthin", 0.05f, 2f, 2, () => SettingsManager.Current.PlayerFilterSealedBarrierThinFactor, "How thin a sealed face must be (x thickness scale) to trigger the barrier loss; lower = only very thin seals qualify.");
-            AddSlider(content, ref y, "Block Occlusion Curve", "blockocclusioncurve", 0.1f, 5f, 2, () => SettingsManager.Current.PlayerFilterBlockOcclusionCurve, "Shapes block ray occlusion; higher forgives light blockage.");
-            AddSlider(content, ref y, "Block Occlusion Smoothing", "blockocclusionsmooth", 0f, 2000f, 0, () => SettingsManager.Current.PlayerFilterBlockOcclusionSmoothingMs, "Temporal smoothing of the single block ray; higher steadier and less flicker, lower more responsive.");
-            AddSlider(content, ref y, "Block Voxel Weight", "blockvoxelweight", 0f, 10f, 2, () => SettingsManager.Current.PlayerFilterBlockVoxelOcclusionWeight, "Terrain/asteroid weight for block paths; higher more muffling through voxels, 0 off.");
+            // Block emitters now resolve along TWO legs: the DIRECT line straight through structure (muffled by
+            // thickness -> low cutoff) and the AIR detour around corners (stays bright -> high cutoff). They are
+            // energy-blended into one low-pass; the air leg can only ever brighten the direct result, and only
+            // when the direct line is blocked AND an open path exists.
+            AddSection(content, ref y, "Block - Direct Path (through walls)");
+            AddSlider(content, ref y, "Wall Thickness Muffle", "blockstructurethickness", 0.1f, 20f, 2, () => SettingsManager.Current.PlayerFilterBlockStructureThicknessScale, "DIRECT leg: how much solid grid thickness on the straight line to the source muffles it. The main through-wall knob; higher = thin walls muffle less.");
+            AddSlider(content, ref y, "Direct Occlusion Curve", "blockocclusioncurve", 0.1f, 5f, 2, () => SettingsManager.Current.PlayerFilterBlockOcclusionCurve, "DIRECT leg: shapes the straight-line occlusion response; higher forgives light blockage.");
+            AddSlider(content, ref y, "Direct Muffled Cutoff", "blockmufflefreq", RspDynamicAudioFilters.MinFilterFrequency, RspDynamicAudioFilters.MaxFilterFrequency, 0, () => SettingsManager.Current.PlayerFilterBlockMuffledFrequency, "DIRECT leg: the LOW cutoff a source collapses to through a thick wall (the low-frequency-only floor). The bright end is 'Aux Clear Cutoff'.", true);
+
+            AddSection(content, ref y, "Block - Air Path (around corners)");
+            AddSlider(content, ref y, "Air Path Brightness", "blockairbright", 0f, 1f, 2, () => SettingsManager.Current.PlayerFilterBlockAirBrightness, "AIR leg: how bright a source stays when it reaches you via an open detour instead of through the wall. Lower = brighter / more high end. Active only when the direct line is blocked AND a flood-fill path exists. Range/curve shared below.");
+
+            AddSection(content, ref y, "Block - Range & Output (both paths)");
             AddSlider(content, ref y, "Block Sound Range", "blockrange", 1f, 150f, 0, () => SettingsManager.Current.PlayerFilterBlockMaxRange, "Absolute block cue range for discovery and vanilla distance extension; lower reduces large-base voices.", true);
-            AddSlider(content, ref y, "Block Travel Curve", "blockcurve", 0.1f, 5f, 2, () => SettingsManager.Current.PlayerFilterBlockDistanceCurve, "Distance fade over scaled range; higher stays loud then drops.");
-            AddSlider(content, ref y, "Block Volume Muffle", "blockvolmuffle", 0f, 4f, 2, () => SettingsManager.Current.PlayerFilterBlockVolumeMuffleWeight, "Block volume cut from muffling; higher quieter through walls, 0 tone only.");
-            AddSlider(content, ref y, "Block Muffled Cutoff", "blockmufflefreq", RspDynamicAudioFilters.MinFilterFrequency, RspDynamicAudioFilters.MaxFilterFrequency, 0, () => SettingsManager.Current.PlayerFilterBlockMuffledFrequency, "Lowest block cutoff at heavy muffling; higher brighter.", true);
+            AddSlider(content, ref y, "Block Travel Curve", "blockcurve", 0.1f, 5f, 2, () => SettingsManager.Current.PlayerFilterBlockDistanceCurve, "Distance fade for BOTH legs (weights direct vs air by length); higher stays loud then drops.");
+            AddSlider(content, ref y, "Block Volume Muffle", "blockvolmuffle", 0f, 4f, 2, () => SettingsManager.Current.PlayerFilterBlockVolumeMuffleWeight, "Volume cut from muffling (applies to the blended result); higher quieter through walls, 0 tone only.");
+            AddSlider(content, ref y, "Block Occlusion Smoothing", "blockocclusionsmooth", 0f, 2000f, 0, () => SettingsManager.Current.PlayerFilterBlockOcclusionSmoothingMs, "Temporal smoothing of the block occlusion; higher steadier and less flicker, lower more responsive.");
             AddReadout(content, ref y, "Block Candidates", V2AuxSourceOcclusionTelemetry.FormatSummary, "Summary of recent non-engine block/world source candidates.", 0.058f, 0.38f);
-            AddReadout(content, ref y, "Block Source Detail", () => V2AuxSourceOcclusionTelemetry.FormatSources(6), "Per-source distance, room, seal, muffling, cutoff, and gain.", 0.150f, 0.34f);
-            AddToggle(content, ref y, "Block Occlusion Rays", () => SettingsManager.Current.PlayerFilterPathDebugEnabled, value => SettingsManager.Current.PlayerFilterPathDebugEnabled = value, "Debug overlay: draws the listener->block rays colour-coded by where thickness is gained (green open, orange structure, amber voxel, dim skipped).");
+            AddReadout(content, ref y, "Block Source Detail", () => V2AuxSourceOcclusionTelemetry.FormatSources(6), "Per-source distance, room, seal, muffling, cutoff, gain, and air-path length/merge.", 0.150f, 0.34f);
+            AddToggle(content, ref y, "Block Occlusion Rays", () => SettingsManager.Current.PlayerFilterPathDebugEnabled, value => SettingsManager.Current.PlayerFilterPathDebugEnabled = value, "Debug overlay: draws the listener->block rays colour-coded by where thickness is gained (green open, orange structure, amber voxel, dim skipped). Air-path length/merge shown as text per source.");
 
             _currentAccent = SharedPanel;
             AddSection(content, ref y, "Player Local");
