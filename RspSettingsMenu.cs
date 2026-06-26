@@ -489,17 +489,19 @@ namespace RealisticSoundPlus
 
         private void AddSlider(MyGuiControlParent content, ref float y, string label, string command, float min, float max, int decimals, Func<float> getValue, string tooltip, bool logarithmic = false, string labelFont = "White", Func<string> getDynamicLabel = null)
         {
+            // One aligned row: [name] .... [slider] [value], with the min/max range under the slider ends.
             string unit = GetSliderUnit(command, label);
             MyGuiControlLabel nameLabel = Label(getDynamicLabel != null ? getDynamicLabel() : label, new Vector2(-0.34f, y), 0.54f, labelFont);
-            MyGuiControlLabel valueLabel = Label(string.Empty, new Vector2(0.31f, y), 0.50f, "White");
+            MyGuiControlLabel valueLabel = Label(string.Empty, new Vector2(0.345f, y), 0.50f, "White");
             valueLabel.OriginAlign = MyGuiDrawAlignEnum.HORISONTAL_RIGHT_AND_VERTICAL_CENTER;
             SetHint(nameLabel, tooltip);
             SetHint(valueLabel, tooltip);
             Add(content.Controls, nameLabel);
             Add(content.Controls, valueLabel);
 
-            MyGuiControlLabel minLabel = Label(FormatWithUnit(min, decimals, unit), new Vector2(-0.055f, y + 0.019f), 0.38f, "White");
-            MyGuiControlLabel maxLabel = Label(FormatWithUnit(max, decimals, unit), new Vector2(0.315f, y + 0.019f), 0.38f, "White");
+            MyGuiControlLabel minLabel = Label(FormatWithUnit(min, decimals, unit), new Vector2(-0.02f, y + 0.020f), 0.36f, "White");
+            minLabel.OriginAlign = MyGuiDrawAlignEnum.HORISONTAL_LEFT_AND_VERTICAL_CENTER;
+            MyGuiControlLabel maxLabel = Label(FormatWithUnit(max, decimals, unit), new Vector2(0.28f, y + 0.020f), 0.36f, "White");
             maxLabel.OriginAlign = MyGuiDrawAlignEnum.HORISONTAL_RIGHT_AND_VERTICAL_CENTER;
             SetHint(minLabel, tooltip);
             SetHint(maxLabel, tooltip);
@@ -513,24 +515,20 @@ namespace RealisticSoundPlus
                 : Clamp(getValue(), min, max);
             float sliderDefault = logarithmic ? ToLogPosition(defaultValue, min, max) : defaultValue;
 
-            MyGuiControlSlider slider = new MyGuiControlSlider(
-                position: new Vector2(0.13f, y + 0.019f),
+            RspSlider slider = new RspSlider(
+                position: new Vector2(0.13f, y),
                 minValue: sliderMin,
                 maxValue: sliderMax,
                 width: 0.30f,
                 defaultValue: sliderDefault,
                 toolTip: tooltip,
-                originAlign: MyGuiDrawAlignEnum.HORISONTAL_CENTER_AND_VERTICAL_CENTER,
-                showLabel: false);
-            slider.BackgroundTexture = null;
-            slider.BorderEnabled = false;
-            slider.ColorMask = new Vector4(0.70f, 0.82f, 0.88f, 0.72f);
-            slider.Size = new Vector2(0.30f, 0.018f);
+                originAlign: MyGuiDrawAlignEnum.HORISONTAL_CENTER_AND_VERTICAL_CENTER);
+            slider.Size = new Vector2(0.30f, 0.020f);
             SetHint(slider, tooltip);
             Add(content.Controls, slider);
 
             _sliders.Add(new SliderBinding(slider, nameLabel, valueLabel, label, getDynamicLabel, command, decimals, unit, getValue, min, max, defaultValue, logarithmic));
-            y += 0.056f;
+            y += 0.052f;
         }
 
         private void PollControls()
@@ -977,6 +975,52 @@ namespace RealisticSoundPlus
             }
         }
 
+        // Slider with a clean, flat custom track instead of the engine's default grey rail box. Input handling
+        // is unchanged (HandleInput is separate from Draw); only the visual is overridden.
+        private sealed class RspSlider : MyGuiControlSlider
+        {
+            private static readonly Color TrackColor = new Color(120, 150, 165, 110);
+            private static readonly Color FillColor = new Color(150, 200, 222, 190);
+            private static readonly Color ThumbColor = new Color(214, 234, 242, 255);
+
+            public RspSlider(Vector2 position, float minValue, float maxValue, float width, float defaultValue, string toolTip, MyGuiDrawAlignEnum originAlign)
+                : base(position: position, minValue: minValue, maxValue: maxValue, width: width, defaultValue: defaultValue, toolTip: toolTip, originAlign: originAlign, showLabel: false)
+            {
+            }
+
+            public override void Draw(float transitionAlpha, float backgroundTransitionAlpha)
+            {
+                // Intentionally NOT calling base.Draw: that is what paints the grey rail box. Interaction still
+                // works (handled in HandleInput, not Draw).
+                if (!Visible)
+                    return;
+
+                Vector2 topLeft = GetPositionAbsoluteTopLeft();
+                Vector2 size = Size;
+                float midY = topLeft.Y + size.Y * 0.5f;
+                float trackH = 0.0016f;
+                float trackY = midY - trackH * 0.5f;
+
+                float range = MaxValue - MinValue;
+                float t = range > 1e-6f ? (Value - MinValue) / range : 0f;
+                if (t < 0f) t = 0f; else if (t > 1f) t = 1f;
+                float fillW = size.X * t;
+
+                MyGuiManager.DrawRectangle(new Vector2(topLeft.X, trackY), new Vector2(size.X, trackH), ApplyAlpha(TrackColor, transitionAlpha));
+                if (fillW > 0f)
+                    MyGuiManager.DrawRectangle(new Vector2(topLeft.X, trackY), new Vector2(fillW, trackH), ApplyAlpha(FillColor, transitionAlpha));
+
+                float thumbW = 0.006f;
+                MyGuiManager.DrawRectangle(new Vector2(topLeft.X + fillW - thumbW * 0.5f, topLeft.Y), new Vector2(thumbW, size.Y), ApplyAlpha(ThumbColor, transitionAlpha));
+            }
+
+            private static Color ApplyAlpha(Color color, float transitionAlpha)
+            {
+                float a = transitionAlpha < 0f ? 0f : (transitionAlpha > 1f ? 1f : transitionAlpha);
+                return new Color(color.R, color.G, color.B, (byte)(color.A * a));
+            }
+        }
+
         private sealed class RspFilterResponseChart : MyGuiControlBase
         {
             private const int Samples = 88;
@@ -1020,7 +1064,9 @@ namespace RealisticSoundPlus
                 Vector2 size = Size;
                 Vector2 bottomRight = topLeft + size;
 
-                MyGuiManager.DrawRectangle(topLeft, size, new Color(8, 12, 15, 150));
+                // Opaque backdrop so the grid mesh reads cleanly instead of being washed out by the
+                // semi-transparent menu panel showing through behind the chart.
+                MyGuiManager.DrawRectangle(topLeft, size, new Color(7, 10, 13, 255));
                 DrawRect(topLeft, bottomRight, FrameColor);
                 DrawGrid(topLeft, size);
                 DrawResponse(topLeft, size);

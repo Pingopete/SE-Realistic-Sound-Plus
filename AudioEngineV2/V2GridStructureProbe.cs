@@ -396,6 +396,47 @@ namespace RealisticSoundPlus.AudioEngineV2
             }
         }
 
+        // Strict straight-line clearance: every cell STRICTLY between source and listener (both endpoint cells
+        // skipped, so the source's own block and the listener's cell never self-block) is empty or an open door.
+        // Used to detect a genuinely unobstructed source even when the physics occlusion ray false-positives on
+        // the emitter's own block - so an in-room jukebox is not pushed onto a winding air path and muffled.
+        public static bool IsStraightPathOpen(IMyCubeGrid grid, Vector3D fromWorld, Vector3D toWorld)
+        {
+            if (grid == null)
+                return false;
+            try
+            {
+                float gridSize = grid.GridSize;
+                if (gridSize <= 0.001f)
+                    return false;
+
+                Vector3I fromCell = grid.WorldToGridInteger(fromWorld);
+                Vector3I toCell = grid.WorldToGridInteger(toWorld);
+                Vector3D delta = toWorld - fromWorld;
+                double dist = delta.Length();
+                if (dist < 0.001)
+                    return true;
+
+                Vector3D dir = delta / dist;
+                double step = Math.Max(0.25, gridSize * 0.5);
+                Vector3I last = new Vector3I(int.MinValue);
+                for (double t = step; t < dist - 0.001; t += step)
+                {
+                    Vector3I cell = grid.WorldToGridInteger(fromWorld + dir * t);
+                    if (cell == last || cell == fromCell || cell == toCell)
+                        continue;
+                    last = cell;
+                    if (StepCost(grid, cell, false, 0) < 0)
+                        return false; // a solid block strictly between -> genuinely obstructed
+                }
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         // Cheap voxel-free line-of-sight test across grid cells: marches the segment and fails on the first
         // non-traversable (solid, non-open-door) cell. Endpoints are excluded (start past the first step, stop
         // before the target) so the listener's own cell and the target cell never self-block.

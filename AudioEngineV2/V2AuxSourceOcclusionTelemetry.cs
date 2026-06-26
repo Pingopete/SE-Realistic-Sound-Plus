@@ -762,6 +762,36 @@ namespace RealisticSoundPlus.AudioEngineV2
                 if (state.MainRayBlocked)
                 {
                     VRage.Game.ModAPI.IMyCubeGrid sourceGrid = ResolveSourceGrid(sourceEntityId);
+
+                    // Guard against a false-positive straight ray (it can hit the emitter's own block): if the
+                    // direct line is genuinely clear of solid blocks, the source is unobstructed - drop the
+                    // occlusion to open and skip the air path entirely so an in-room source is not wound onto a
+                    // long detour and muffled, and the emitter is not repositioned.
+                    if (sourceGrid != null && V2GridStructureProbe.IsStraightPathOpen(sourceGrid, source, listener))
+                    {
+                        state.Open = 1;
+                        state.Blocked = 0;
+                        state.OpenWeight = 1f;
+                        state.TotalWeight = 1f;
+                        state.WeightedBlockedMeters = 0f;
+                        state.MainRayBlocked = false;
+                        state.LastProbeUtc = now;
+                        state.UpdatedUtc = now;
+                        StorePathProbe(key, state, now);
+                        open = state.Open;
+                        blocked = state.Blocked;
+                        openWeight = state.OpenWeight;
+                        totalWeight = state.TotalWeight;
+                        weightedBlockedMeters = state.WeightedBlockedMeters;
+                        mainRayBlocked = state.MainRayBlocked;
+                        airPathAvailable = state.AirPathAvailable;
+                        airPathLength = state.AirPathLength;
+                        portalWorld = state.PortalWorld;
+                        portalValid = state.PortalValid;
+                        airRoute = state.AirRoute;
+                        return;
+                    }
+
                     int reach = (int)Math.Max(1f, settings.PlayerFilterBlockAirPathReach);
                     int budget = Math.Min(32768, Math.Max(4096, reach * reach * reach * 32));
                     int openBias = (int)Math.Max(0f, settings.PlayerFilterBlockAirPathOpenBias);
