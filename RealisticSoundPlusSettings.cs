@@ -68,6 +68,10 @@ namespace RealisticSoundPlus
         // Air (around-corner) leg brightness floor for blocked block sources: the muffle the open detour
         // collapses toward. Lower = brighter (more high end through the doorway). 0.08 = prior hardcoded value.
         public float PlayerFilterBlockAirBrightness { get; set; } = 0.08f;
+        // Emitter repositioning: move a blocked block source to its doorway portal so it localises to the
+        // opening (direction), with the detour attenuation carried by gain. OFF by default (experimental).
+        public bool PlayerFilterBlockRepositionEnabled { get; set; } = false;
+        public float PlayerFilterBlockRepositionSlewMs { get; set; } = 120f;
         public bool PlayerEnvMapDebugEnabled { get; set; } = false;
         public bool PlayerFilterEnabled { get; set; } = true;
         public bool PlayerFilterEnvironmentEnabled { get; set; } = true;
@@ -427,6 +431,8 @@ namespace RealisticSoundPlus
                 case "blockairbright":
                 case "airbright":
                 case "airpathbrightness": value = settings.PlayerFilterBlockAirBrightness; return true;
+                case "blockreposeslew":
+                case "repositionslew": value = settings.PlayerFilterBlockRepositionSlewMs; return true;
                 case "envmapcells": value = settings.PlayerEnvMapCellCount; return true;
                 case "envmapalpha": value = settings.PlayerEnvMapCellAlpha; return true;
                 case "envmapdecay": value = settings.PlayerEnvMapConfidenceDecayMeters; return true;
@@ -817,6 +823,10 @@ namespace RealisticSoundPlus
                 case "airbright":
                 case "airpathbrightness":
                     Current.PlayerFilterBlockAirBrightness = value;
+                    break;
+                case "blockreposeslew":
+                case "repositionslew":
+                    Current.PlayerFilterBlockRepositionSlewMs = value;
                     break;
                 case "envmapcells":
                     Current.PlayerEnvMapCellCount = (int)value;
@@ -1598,6 +1608,7 @@ namespace RealisticSoundPlus
             Current.PlayerFilterBlockSealedBarrierLoss = Clamp(Current.PlayerFilterBlockSealedBarrierLoss, 0f, 1f);
             Current.PlayerEnvSealedBarrierLoss = Clamp(Current.PlayerEnvSealedBarrierLoss, 0f, 1f);
             Current.PlayerFilterBlockAirBrightness = Clamp(Current.PlayerFilterBlockAirBrightness, 0f, 1f);
+            Current.PlayerFilterBlockRepositionSlewMs = Clamp(Current.PlayerFilterBlockRepositionSlewMs, 1f, 1000f);
             Current.PlayerFilterAtmosphereOverride = Clamp(Current.PlayerFilterAtmosphereOverride, 0f, 1f);
             Current.PlayerFilterOcclusionStrength = Clamp(Current.PlayerFilterOcclusionStrength, 0f, 4f);
             Current.PlayerFilterEnvironmentVolumeMuffleWeight = Clamp(Current.PlayerFilterEnvironmentVolumeMuffleWeight, 0f, 4f);

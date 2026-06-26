@@ -250,6 +250,8 @@ namespace RealisticSoundPlus
 
             AddSection(content, ref y, "Block - Air Path (around corners)");
             AddSlider(content, ref y, "Air Path Brightness", "blockairbright", 0f, 1f, 2, () => SettingsManager.Current.PlayerFilterBlockAirBrightness, "AIR leg: how bright a source stays when it reaches you via an open detour instead of through the wall. Lower = brighter / more high end. Active only when the direct line is blocked AND a flood-fill path exists. Range/curve shared below.");
+            AddToggle(content, ref y, "Reposition To Doorway", () => SettingsManager.Current.PlayerFilterBlockRepositionEnabled, value => SettingsManager.Current.PlayerFilterBlockRepositionEnabled = value, "EXPERIMENTAL: when a source is blocked but an open detour exists, move its emitter to the doorway portal so it localises to the opening (direction). The detour attenuation is carried by gain. Static-base sources only for now.");
+            AddSlider(content, ref y, "Reposition Slew", "blockreposeslew", 1f, 1000f, 0, () => SettingsManager.Current.PlayerFilterBlockRepositionSlewMs, "How quickly the repositioned emitter follows a moving portal (ms). Lower = snappier, higher = smoother. Snaps on first placement either way.");
 
             AddSection(content, ref y, "Block - Range & Output (both paths)");
             AddSlider(content, ref y, "Block Sound Range", "blockrange", 1f, 150f, 0, () => SettingsManager.Current.PlayerFilterBlockMaxRange, "Absolute block cue range for discovery and vanilla distance extension; lower reduces large-base voices.", true);

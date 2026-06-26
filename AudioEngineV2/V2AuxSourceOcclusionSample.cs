@@ -18,6 +18,9 @@ namespace RealisticSoundPlus.AudioEngineV2
         public float AirPathLength;       // open-air detour length (m)
         public bool MergedFromAirPath;    // the air leg actually reduced muffle/gain
         public float PreAirPathMuffling;  // through-structure FinalMuffling before the air-path merge
+        public Vector3D PortalWorld;      // doorway the listener localises the air leg to (reposition anchor)
+        public bool PortalValid;          // a usable portal distinct from the listener was found
+        public bool RepositionApplied;    // the emitter is being moved to the portal this sample
         public float Distance;
         public float PathLength;
         public bool MainRayBlocked;

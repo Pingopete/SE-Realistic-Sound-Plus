@@ -25,6 +25,8 @@ namespace RealisticSoundPlus.AudioEngineV2
         private static readonly Color VoxelColor = new Color(240, 205, 60, 235);
         private static readonly Color SkippedColor = new Color(120, 120, 130, 110);
         private static readonly Color SourceMarkerColor = new Color(60, 220, 255, 235);
+        private static readonly Color PortalColor = new Color(90, 180, 255, 220);
+        private static readonly Color RepositionColor = new Color(255, 110, 230, 240);
         private static readonly Color TextColor = new Color(175, 235, 255, 255);
         private static readonly Color LegendHeaderColor = new Color(205, 240, 255, 255);
         private static readonly Color SkippedLegendColor = new Color(150, 150, 160, 255);
@@ -141,6 +143,18 @@ namespace RealisticSoundPlus.AudioEngineV2
             // actually brightened the source (the cascade's around-the-corner path).
             if (sample.AirPathAvailable)
                 DrawText(source, string.Format(CultureInfo.InvariantCulture, "air {0:0.0}m{1}", sample.AirPathLength, sample.MergedFromAirPath ? "  *merged*" : ""), 0.06);
+
+            // Portal + repositioned emitter (Option B): the doorway the air leg localises to. When repositioning
+            // is active, the magenta line is the heard direction (listener -> portal) and the emitter sits here.
+            if (sample.PortalValid && sample.PortalWorld != Vector3D.Zero)
+            {
+                bool active = sample.RepositionApplied;
+                Color portalColor = active ? RepositionColor : PortalColor;
+                MyRenderProxy.DebugDrawSphere(sample.PortalWorld, 0.22f, portalColor, 0.9f, false, false, false, false);
+                DrawText(sample.PortalWorld, active ? "portal (emitter here)" : "portal", 0.20);
+                if (active && sample.ListenerPosition != Vector3D.Zero)
+                    DrawLine(sample.ListenerPosition, sample.PortalWorld, RepositionColor);
+            }
         }
 
         private static CachedPath GetOrRefresh(string key, Vector3D from, Vector3D to, bool includeVoxels, DateTime now)

@@ -220,16 +220,27 @@ namespace RealisticSoundPlus.AudioEngineV2
         // listener around the outside of a genuinely sealing wall (a false-positive bright leg).
         private const int AirPathBoundsPad = 3;
 
+        // Length-only overload (back-compat): callers that only need the detour distance.
+        public static bool TryFindAirPath(IMyCubeGrid grid, Vector3D sourceWorld, Vector3D listenerWorld, out float pathLengthMeters)
+        {
+            return TryFindAirPath(grid, sourceWorld, listenerWorld, out pathLengthMeters, out _, out _);
+        }
+
         // Bounded 6-connected flood fill through traversable cells (empty air gaps + open doors) from the
         // source toward the listener, returning the shortest open-air PATH LENGTH (the detour distance) if one
         // exists within the cell budget. It never consults the airtight-room flag, so an open front door does
         // not collapse it and it works on unsealed/partially-covered structures too. Returns false when the
         // listener is unreachable through open cells within the bounds/budget (genuinely walled off here -> the
-        // caller falls back to straight-line through-structure occlusion). The length drives the air-path
-        // volume falloff; portal extraction for emitter repositioning is layered on top of this later.
-        public static bool TryFindAirPath(IMyCubeGrid grid, Vector3D sourceWorld, Vector3D listenerWorld, out float pathLengthMeters)
+        // caller falls back to straight-line through-structure occlusion).
+        //
+        // Also extracts the PORTAL: the last cell on the reconstructed path that the LISTENER still has a clear
+        // line of sight to (the doorway the sound diffracts through on your side). This is the psychoacoustic
+        // localisation point for emitter repositioning - direction comes from here, distance from pathLength.
+        public static bool TryFindAirPath(IMyCubeGrid grid, Vector3D sourceWorld, Vector3D listenerWorld, out float pathLengthMeters, out Vector3D portalWorld, out bool portalValid)
         {
             pathLengthMeters = 0f;
+            portalWorld = Vector3D.Zero;
+            portalValid = false;
             if (grid == null)
                 return false;
 
@@ -252,10 +263,12 @@ namespace RealisticSoundPlus.AudioEngineV2
                 // allocation is cheap because the flood-fill is gated to ~once / 250 ms / blocked source.
                 Queue<Vector3I> queue = new Queue<Vector3I>(256);
                 Dictionary<Vector3I, int> depthByCell = new Dictionary<Vector3I, int>(512);
+                Dictionary<Vector3I, Vector3I> cameFrom = new Dictionary<Vector3I, Vector3I>(512);
                 depthByCell[sourceCell] = 0;
                 queue.Enqueue(sourceCell);
 
-                while (queue.Count > 0)
+                bool reached = false;
+                while (queue.Count > 0 && !reached)
                 {
                     if (depthByCell.Count >= MaxAirPathCells)
                         break;
@@ -274,23 +287,77 @@ namespace RealisticSoundPlus.AudioEngineV2
                         if (next == listenerCell)
                         {
                             pathLengthMeters = (depth + 1) * gridSize;
-                            return true;
+                            cameFrom[listenerCell] = current;
+                            reached = true;
+                            break;
                         }
 
                         if (!IsCellTraversable(grid, next))
                             continue;
 
                         depthByCell[next] = depth + 1;
+                        cameFrom[next] = current;
                         queue.Enqueue(next);
                     }
                 }
 
-                return false;
+                if (!reached)
+                    return false;
+
+                // Portal = farthest cell on the listener->source chain still in clear line of sight from the
+                // listener. Walk cameFrom from the listener toward the source; stop at the first cell hidden
+                // behind structure (the bend). The cell before it is the aperture the sound emerges from.
+                Vector3I portalCell = listenerCell;
+                Vector3I walk = listenerCell;
+                int guard = 0;
+                while (cameFrom.TryGetValue(walk, out Vector3I prev) && guard++ < MaxAirPathCells)
+                {
+                    Vector3D prevWorld = grid.GridIntegerToWorld(prev);
+                    if (!HasLineOfSight(grid, listenerWorld, prevWorld, gridSize))
+                        break;
+
+                    portalCell = prev;
+                    walk = prev;
+                    if (prev == sourceCell)
+                        break;
+                }
+
+                portalWorld = grid.GridIntegerToWorld(portalCell);
+                portalValid = portalCell != listenerCell;
+                return true;
             }
             catch
             {
+                portalWorld = Vector3D.Zero;
+                portalValid = false;
                 return false;
             }
+        }
+
+        // Cheap voxel-free line-of-sight test across grid cells: marches the segment and fails on the first
+        // non-traversable (solid, non-open-door) cell. Endpoints are excluded (start past the first step, stop
+        // before the target) so the listener's own cell and the target cell never self-block.
+        private static bool HasLineOfSight(IMyCubeGrid grid, Vector3D fromWorld, Vector3D toWorld, float gridSize)
+        {
+            Vector3D delta = toWorld - fromWorld;
+            double dist = delta.Length();
+            if (dist < 0.001)
+                return true;
+
+            Vector3D dir = delta / dist;
+            double step = Math.Max(0.25, gridSize * 0.5);
+            Vector3I last = new Vector3I(int.MinValue);
+            for (double t = step; t < dist - 0.001; t += step)
+            {
+                Vector3I cell = grid.WorldToGridInteger(fromWorld + dir * t);
+                if (cell == last)
+                    continue;
+                last = cell;
+                if (!IsCellTraversable(grid, cell))
+                    return false;
+            }
+
+            return true;
         }
 
         // A cell sound can pass through: an empty cell (air gap) or an open/opening door. Solid (non-door)

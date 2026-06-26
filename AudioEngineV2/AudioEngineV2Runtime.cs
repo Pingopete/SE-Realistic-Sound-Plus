@@ -99,6 +99,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             V2EngineFilterTelemetry.Reset();
             V2PlayerEnvironmentTelemetry.Reset();
             V2AuxSourceOcclusionTelemetry.Reset();
+            V2BlockEmitterReposition.Reset();
             V2PlayerFilterRuntime.Reset();
             V2BlockSoundSourceResolver.Reset();
             V2GridStructureProbe.Reset();
