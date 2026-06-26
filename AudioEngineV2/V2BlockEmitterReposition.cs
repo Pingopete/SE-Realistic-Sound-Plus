@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using Sandbox.Game.Entities;
 using VRageMath;
+using VRageRender;
 
 namespace RealisticSoundPlus.AudioEngineV2
 {
@@ -190,6 +191,32 @@ namespace RealisticSoundPlus.AudioEngineV2
             _activeCount = 0;
             _appliedFrames = 0;
             _released = 0;
+        }
+
+        // Debug: draw where the emitter is ACTUALLY placed (the glided Current position) plus the averaged
+        // target it is easing toward, so the smoothing is visible rather than just the raw quantised portal.
+        // Magenta sphere = applied position; faint blue sphere = averaged target; line = the glide chasing it.
+        private static readonly Color AppliedActiveColor = new Color(255, 110, 230, 240);
+        private static readonly Color AppliedInactiveColor = new Color(150, 150, 160, 160);
+        private static readonly Color AveragedTargetColor = new Color(90, 180, 255, 160);
+
+        public static void DrawActive()
+        {
+            if (Tracked.Count == 0)
+                return;
+
+            foreach (KeyValuePair<MyEntity3DSoundEmitter, State> pair in Tracked)
+            {
+                State s = pair.Value;
+                Color applied = s.Active ? AppliedActiveColor : AppliedInactiveColor;
+                MyRenderProxy.DebugDrawSphere(s.Current, 0.16f, applied, 1f, false, false, false, false);
+
+                if (s.Active && s.HasAvg)
+                {
+                    MyRenderProxy.DebugDrawSphere(s.AvgPortal, 0.10f, AveragedTargetColor, 0.8f, false, false, false, false);
+                    MyRenderProxy.DebugDrawLine3D(s.AvgPortal, s.Current, AveragedTargetColor, applied, false, false);
+                }
+            }
         }
 
         public static string FormatSummary()

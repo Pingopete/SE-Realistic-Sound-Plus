@@ -225,13 +225,13 @@ namespace RealisticSoundPlus.AudioEngineV2
         // Length-only overload (back-compat): callers that only need the detour distance.
         public static bool TryFindAirPath(IMyCubeGrid grid, Vector3D sourceWorld, Vector3D listenerWorld, out float pathLengthMeters)
         {
-            return TryFindAirPath(grid, sourceWorld, listenerWorld, AirPathBoundsPad, MaxAirPathCells, out pathLengthMeters, out _, out _);
+            return TryFindAirPath(grid, sourceWorld, listenerWorld, AirPathBoundsPad, MaxAirPathCells, false, out pathLengthMeters, out _, out _);
         }
 
         // Default-reach overload (back-compat for the portal callers).
         public static bool TryFindAirPath(IMyCubeGrid grid, Vector3D sourceWorld, Vector3D listenerWorld, out float pathLengthMeters, out Vector3D portalWorld, out bool portalValid)
         {
-            return TryFindAirPath(grid, sourceWorld, listenerWorld, AirPathBoundsPad, MaxAirPathCells, out pathLengthMeters, out portalWorld, out portalValid);
+            return TryFindAirPath(grid, sourceWorld, listenerWorld, AirPathBoundsPad, MaxAirPathCells, false, out pathLengthMeters, out portalWorld, out portalValid);
         }
 
         // Bounded 6-connected flood fill through traversable cells (empty air gaps + open doors) from the
@@ -244,7 +244,7 @@ namespace RealisticSoundPlus.AudioEngineV2
         // Also extracts the PORTAL: the last cell on the reconstructed path that the LISTENER still has a clear
         // line of sight to (the doorway the sound diffracts through on your side). This is the psychoacoustic
         // localisation point for emitter repositioning - direction comes from here, distance from pathLength.
-        public static bool TryFindAirPath(IMyCubeGrid grid, Vector3D sourceWorld, Vector3D listenerWorld, int reachPad, int maxCells, out float pathLengthMeters, out Vector3D portalWorld, out bool portalValid)
+        public static bool TryFindAirPath(IMyCubeGrid grid, Vector3D sourceWorld, Vector3D listenerWorld, int reachPad, int maxCells, bool throughBlocks, out float pathLengthMeters, out Vector3D portalWorld, out bool portalValid)
         {
             pathLengthMeters = 0f;
             portalWorld = Vector3D.Zero;
@@ -303,7 +303,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                             break;
                         }
 
-                        if (!IsCellTraversable(grid, next))
+                        if (!IsCellTraversable(grid, next, throughBlocks))
                             continue;
 
                         depthByCell[next] = depth + 1;
@@ -319,13 +319,19 @@ namespace RealisticSoundPlus.AudioEngineV2
                 // listener. Walk cameFrom from the listener toward the source; stop at the first cell hidden
                 // behind structure (the bend). The cell before it is the aperture the sound emerges from.
                 Vector3I portalCell = listenerCell;
+                Vector3I firstHidden = listenerCell;
+                bool hasHidden = false;
                 Vector3I walk = listenerCell;
                 int guard = 0;
                 while (cameFrom.TryGetValue(walk, out Vector3I prev) && guard++ < maxCells)
                 {
                     Vector3D prevWorld = grid.GridIntegerToWorld(prev);
-                    if (!HasLineOfSight(grid, listenerWorld, prevWorld, gridSize))
+                    if (!HasLineOfSight(grid, listenerWorld, prevWorld, gridSize, throughBlocks))
+                    {
+                        firstHidden = prev;
+                        hasHidden = true;
                         break;
+                    }
 
                     portalCell = prev;
                     walk = prev;
@@ -333,8 +339,14 @@ namespace RealisticSoundPlus.AudioEngineV2
                         break;
                 }
 
-                portalWorld = grid.GridIntegerToWorld(portalCell);
                 portalValid = portalCell != listenerCell;
+                // Sub-cell resolution: rather than the quantised cell centre, place the portal at the continuous
+                // grazing point where the listener's sightline toward the first hidden cell clips the structure
+                // (the doorway edge). This slides smoothly as the listener/geometry move instead of snapping in
+                // whole grid cells. Fall back to the cell centre when the path is fully visible.
+                portalWorld = (hasHidden && portalValid)
+                    ? FindLosGrazePoint(grid, listenerWorld, grid.GridIntegerToWorld(firstHidden), gridSize, throughBlocks)
+                    : grid.GridIntegerToWorld(portalCell);
                 return true;
             }
             catch
@@ -348,7 +360,7 @@ namespace RealisticSoundPlus.AudioEngineV2
         // Cheap voxel-free line-of-sight test across grid cells: marches the segment and fails on the first
         // non-traversable (solid, non-open-door) cell. Endpoints are excluded (start past the first step, stop
         // before the target) so the listener's own cell and the target cell never self-block.
-        private static bool HasLineOfSight(IMyCubeGrid grid, Vector3D fromWorld, Vector3D toWorld, float gridSize)
+        private static bool HasLineOfSight(IMyCubeGrid grid, Vector3D fromWorld, Vector3D toWorld, float gridSize, bool throughBlocks)
         {
             Vector3D delta = toWorld - fromWorld;
             double dist = delta.Length();
@@ -364,17 +376,53 @@ namespace RealisticSoundPlus.AudioEngineV2
                 if (cell == last)
                     continue;
                 last = cell;
-                if (!IsCellTraversable(grid, cell))
+                if (!IsCellTraversable(grid, cell, throughBlocks))
                     return false;
             }
 
             return true;
         }
 
-        // A cell sound can pass through: an empty cell (air gap) or an open/opening door. Solid (non-door)
-        // blocks stop the fill. Mirrors RSP's existing open-door raycast semantics.
-        private static bool IsCellTraversable(IMyCubeGrid grid, Vector3I cell)
+        // Continuous (sub-cell) grazing point: march from the listener toward the first hidden cell and return
+        // the last world point still in traversable space - the doorway edge where the sightline clips the
+        // structure. Sliding this point (instead of snapping to a cell centre) is what makes the portal move
+        // smoothly as the listener walks.
+        private static Vector3D FindLosGrazePoint(IMyCubeGrid grid, Vector3D fromWorld, Vector3D towardWorld, float gridSize, bool throughBlocks)
         {
+            Vector3D delta = towardWorld - fromWorld;
+            double dist = delta.Length();
+            if (dist < 0.001)
+                return fromWorld;
+
+            Vector3D dir = delta / dist;
+            double step = Math.Max(0.15, gridSize * 0.2);
+            Vector3D lastClear = fromWorld;
+            Vector3I lastCell = new Vector3I(int.MinValue);
+            for (double t = step; t <= dist; t += step)
+            {
+                Vector3D p = fromWorld + dir * t;
+                Vector3I cell = grid.WorldToGridInteger(p);
+                if (cell != lastCell)
+                {
+                    lastCell = cell;
+                    if (!IsCellTraversable(grid, cell, throughBlocks))
+                        break; // entered solid: lastClear is the grazing point at the aperture edge
+                }
+                lastClear = p;
+            }
+
+            return lastClear;
+        }
+
+        // A cell sound can pass through. Default: an empty cell (air gap) or an open/opening door; solid blocks
+        // stop the fill. throughBlocks mode: any cell that is not airtight passes (stairs, catwalks, gratings,
+        // railings) - the "sound goes where air goes" model, which lets it travel a stairwell packed with stair
+        // blocks. Sealed faces (armour, closed doors) still block either way.
+        private static bool IsCellTraversable(IMyCubeGrid grid, Vector3I cell, bool throughBlocks)
+        {
+            if (throughBlocks)
+                return !IsCellAirtight(grid, cell);
+
             IMySlimBlock slim = grid.GetCubeBlock(cell);
             if (slim == null)
                 return true;

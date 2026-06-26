@@ -60,6 +60,10 @@ namespace RealisticSoundPlus.AudioEngineV2
             for (int i = 0; i < samples.Count; i++)
                 DrawSample(samples[i], includeVoxels, now);
 
+            // Actual repositioned emitter positions: the smoothed/glided point (magenta) chasing the averaged
+            // target (faint blue). The per-sample portal marker above is the raw target; this shows the motion.
+            V2BlockEmitterReposition.DrawActive();
+
             DrawLegend(includeVoxels);
         }
 

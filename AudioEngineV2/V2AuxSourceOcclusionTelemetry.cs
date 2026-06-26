@@ -745,7 +745,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                     VRage.Game.ModAPI.IMyCubeGrid sourceGrid = ResolveSourceGrid(sourceEntityId);
                     int reach = (int)Math.Max(1f, settings.PlayerFilterBlockAirPathReach);
                     int budget = Math.Min(32768, Math.Max(4096, reach * reach * reach * 32));
-                    if (sourceGrid != null && V2GridStructureProbe.TryFindAirPath(sourceGrid, source, listener, reach, budget, out float airLen, out Vector3D portal, out bool portalOk))
+                    if (sourceGrid != null && V2GridStructureProbe.TryFindAirPath(sourceGrid, source, listener, reach, budget, settings.PlayerFilterBlockAirPathThroughBlocks, out float airLen, out Vector3D portal, out bool portalOk))
                     {
                         state.AirPathAvailable = true;
                         state.AirPathLength = airLen;

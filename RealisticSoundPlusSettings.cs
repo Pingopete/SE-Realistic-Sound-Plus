@@ -76,6 +76,9 @@ namespace RealisticSoundPlus
         // How far (grid cells) the air-path flood-fill may search beyond the source<->listener box. Larger finds
         // longer detours (multi-flight switchback staircases, paths that swing wide) at more BFS cost.
         public float PlayerFilterBlockAirPathReach { get; set; } = 3f;
+        // "Sound goes where air goes": treat any non-airtight cell as passable (stairs, catwalks, gratings) so
+        // the air path can travel a stairwell packed with stair blocks. OFF = empty cells + open doors only.
+        public bool PlayerFilterBlockAirPathThroughBlocks { get; set; } = false;
         public bool PlayerEnvMapDebugEnabled { get; set; } = false;
         public bool PlayerFilterEnabled { get; set; } = true;
         public bool PlayerFilterEnvironmentEnabled { get; set; } = true;
