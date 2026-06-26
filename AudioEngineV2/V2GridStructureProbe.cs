@@ -225,13 +225,13 @@ namespace RealisticSoundPlus.AudioEngineV2
         // Length-only overload (back-compat): callers that only need the detour distance.
         public static bool TryFindAirPath(IMyCubeGrid grid, Vector3D sourceWorld, Vector3D listenerWorld, out float pathLengthMeters)
         {
-            return TryFindAirPath(grid, sourceWorld, listenerWorld, AirPathBoundsPad, MaxAirPathCells, false, out pathLengthMeters, out _, out _);
+            return TryFindAirPath(grid, sourceWorld, listenerWorld, AirPathBoundsPad, MaxAirPathCells, false, null, out pathLengthMeters, out _, out _);
         }
 
         // Default-reach overload (back-compat for the portal callers).
         public static bool TryFindAirPath(IMyCubeGrid grid, Vector3D sourceWorld, Vector3D listenerWorld, out float pathLengthMeters, out Vector3D portalWorld, out bool portalValid)
         {
-            return TryFindAirPath(grid, sourceWorld, listenerWorld, AirPathBoundsPad, MaxAirPathCells, false, out pathLengthMeters, out portalWorld, out portalValid);
+            return TryFindAirPath(grid, sourceWorld, listenerWorld, AirPathBoundsPad, MaxAirPathCells, false, null, out pathLengthMeters, out portalWorld, out portalValid);
         }
 
         // Bounded 6-connected flood fill through traversable cells (empty air gaps + open doors) from the
@@ -244,11 +244,12 @@ namespace RealisticSoundPlus.AudioEngineV2
         // Also extracts the PORTAL: the last cell on the reconstructed path that the LISTENER still has a clear
         // line of sight to (the doorway the sound diffracts through on your side). This is the psychoacoustic
         // localisation point for emitter repositioning - direction comes from here, distance from pathLength.
-        public static bool TryFindAirPath(IMyCubeGrid grid, Vector3D sourceWorld, Vector3D listenerWorld, int reachPad, int maxCells, bool throughBlocks, out float pathLengthMeters, out Vector3D portalWorld, out bool portalValid)
+        public static bool TryFindAirPath(IMyCubeGrid grid, Vector3D sourceWorld, Vector3D listenerWorld, int reachPad, int maxCells, bool throughBlocks, List<Vector3D> routeOut, out float pathLengthMeters, out Vector3D portalWorld, out bool portalValid)
         {
             pathLengthMeters = 0f;
             portalWorld = Vector3D.Zero;
             portalValid = false;
+            routeOut?.Clear();
             if (grid == null)
                 return false;
 
@@ -347,6 +348,22 @@ namespace RealisticSoundPlus.AudioEngineV2
                 portalWorld = (hasHidden && portalValid)
                     ? FindLosGrazePoint(grid, listenerWorld, grid.GridIntegerToWorld(firstHidden), gridSize, throughBlocks)
                     : grid.GridIntegerToWorld(portalCell);
+
+                // Debug route: the actual surface air path as world points, listener -> ... -> source (the line
+                // the overlay draws). Capped so a huge flood does not flood the renderer.
+                if (routeOut != null)
+                {
+                    routeOut.Add(listenerWorld);
+                    Vector3I trace = listenerCell;
+                    int steps = 0;
+                    while (cameFrom.TryGetValue(trace, out Vector3I prev) && steps++ < 256)
+                    {
+                        routeOut.Add(grid.GridIntegerToWorld(prev));
+                        trace = prev;
+                        if (prev == sourceCell)
+                            break;
+                    }
+                }
                 return true;
             }
             catch
@@ -415,25 +432,47 @@ namespace RealisticSoundPlus.AudioEngineV2
         }
 
         // A cell sound can pass through. Default: an empty cell (air gap) or an open/opening door; solid blocks
-        // stop the fill. throughBlocks mode: any cell that is not airtight passes (stairs, catwalks, gratings,
-        // railings) - the "sound goes where air goes" model, which lets it travel a stairwell packed with stair
-        // blocks. Sealed faces (armour, closed doors) still block either way.
+        // stop the fill. throughBlocks mode ("sound goes where air goes"): an OCCUPIED cell also passes if the
+        // gas system counts it as part of a breathable room (grated stairs/catwalks/railings sit inside the room
+        // volume) and it is not an airtight seal. This routes a path UP a stairwell packed with stair blocks
+        // while still being stopped by a solid floor/wall (not in any room) - so it does not leak straight up
+        // through the floor the way a bare !airtight test did.
         private static bool IsCellTraversable(IMyCubeGrid grid, Vector3I cell, bool throughBlocks)
         {
-            if (throughBlocks)
-                return !IsCellAirtight(grid, cell);
-
             IMySlimBlock slim = grid.GetCubeBlock(cell);
             if (slim == null)
-                return true;
+                return true; // empty cell: air gap
 
             Sandbox.ModAPI.Ingame.IMyDoor door = slim.FatBlock as Sandbox.ModAPI.Ingame.IMyDoor;
-            if (door == null)
-                return false;
+            if (door != null)
+            {
+                Sandbox.ModAPI.Ingame.DoorStatus status = door.Status;
+                return status == Sandbox.ModAPI.Ingame.DoorStatus.Open
+                    || status == Sandbox.ModAPI.Ingame.DoorStatus.Opening;
+            }
 
-            Sandbox.ModAPI.Ingame.DoorStatus status = door.Status;
-            return status == Sandbox.ModAPI.Ingame.DoorStatus.Open
-                || status == Sandbox.ModAPI.Ingame.DoorStatus.Opening;
+            if (throughBlocks)
+                return IsCellInGasRoom(grid, cell) && !IsCellAirtight(grid, cell);
+
+            return false;
+        }
+
+        // Whether a cell sits inside a breathable gas room (the game's own air-connectivity truth). True for the
+        // open volume of a stairwell even when grated stair blocks occupy the cells; false (null room) for solid
+        // walls/floors. This is what lets the air path follow the stairwell the gas system already connects.
+        private static bool IsCellInGasRoom(IMyCubeGrid grid, Vector3I cell)
+        {
+            try
+            {
+                IMyGridGasSystem gas = grid.GasSystem;
+                if (gas == null)
+                    return false;
+                return gas.GetOxygenRoomForCubeGridPosition(ref cell) != null;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private struct CachedRoomGeometry

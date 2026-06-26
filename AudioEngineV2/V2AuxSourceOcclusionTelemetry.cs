@@ -93,9 +93,9 @@ namespace RealisticSoundPlus.AudioEngineV2
 
             StoreSample(sample, source);
 
-            // Move the live emitter to the doorway portal (or ease it back to its block when not applied).
-            // The air-path attenuation already lives in sample.EstimatedGain (applied via VolumeMultiplier).
-            V2BlockEmitterReposition.Request(emitter, source, sample.PortalWorld, sample.RepositionApplied, DateTime.UtcNow);
+            // Move the live emitter to the weight-blended target (or ease it back to its block when not applied).
+            // The matching attenuation already lives in sample.EstimatedGain (applied via VolumeMultiplier).
+            V2BlockEmitterReposition.Request(emitter, source, sample.RepositionTarget, sample.RepositionApplied, DateTime.UtcNow);
         }
 
         public static string FormatSummary()
@@ -332,6 +332,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             float airPathLength;
             Vector3D portalWorld;
             bool portalValid;
+            List<Vector3D> airRoute;
 
             // Only probe occlusion within audible range. Beyond it, casting a ray is meaningless and
             // can spuriously report a full block (e.g. a source with a stale/far position), which would
@@ -340,7 +341,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             if (distance <= maxProbeMeters)
             {
                 ResolveSourceClearance(source, sourceEntityId, out long _, out float sourceClearRadius);
-                ProbePath(cueName, source, listener, sourceEntityId, settings, now, sourceClearRadius, out open, out blocked, out openWeight, out totalWeight, out weightedBlockedMeters, out mainRayBlocked, out airPathAvailable, out airPathLength, out portalWorld, out portalValid);
+                ProbePath(cueName, source, listener, sourceEntityId, settings, now, sourceClearRadius, out open, out blocked, out openWeight, out totalWeight, out weightedBlockedMeters, out mainRayBlocked, out airPathAvailable, out airPathLength, out portalWorld, out portalValid, out airRoute);
                 if (settings.PlayerFilterPathDebugEnabled)
                 {
                     // Expose the exact probed sub-segment (after source-clearance and listener skips) so the
@@ -362,6 +363,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                 airPathLength = 0f;
                 portalWorld = Vector3D.Zero;
                 portalValid = false;
+                airRoute = null;
             }
             int rays = open + blocked;
             if (rays == 0)
@@ -422,6 +424,8 @@ namespace RealisticSoundPlus.AudioEngineV2
             // sealed sources stay unchanged and the binary single-ray flip dissolves into a graded result.
             bool mergedFromAirPath = false;
             float preAirMuffling = finalMuffling;
+            float airWeight = 0f;    // air-leg loudness weight (shared with the position blend below)
+            float structWeight = 0f; // through-structure leg loudness weight
             if (mainRayBlocked && airPathAvailable)
             {
                 _airPathFound = SaturatingIncrement(_airPathFound);
@@ -432,6 +436,9 @@ namespace RealisticSoundPlus.AudioEngineV2
 
                 float airMuffle = Clamp01(settings.PlayerFilterBlockAirBrightness); // air leg brightness floor (lower = brighter); tunable via Air Path Brightness
                 float airGain = EvaluateDistanceGain(airPathLength, effectiveRange, settings.PlayerFilterBlockDistanceCurve);
+
+                airWeight = airGain;
+                structWeight = structGain;
 
                 float denom = airGain + structGain;
                 float mergedMuffle = denom <= 1e-3f
@@ -450,22 +457,30 @@ namespace RealisticSoundPlus.AudioEngineV2
                 }
             }
 
-            // ---- Emitter repositioning (Option B: position = portal, distance = software gain) ----
-            // When enabled and a doorway portal exists, the emitter is moved to that portal (direction anchor)
-            // by V2BlockEmitterReposition. Because it then sits NEAR the listener, the engine's own 3D curve no
-            // longer attenuates for the true detour distance, so we fold that falloff into the gain here: the
-            // ratio gAir/gPortal expresses "how much quieter the full air path is than the doorway" using our
-            // distance curve as a proxy for the engine's (the proxy cancels, leaving the air-length attenuation).
+            // ---- Emitter repositioning (Option B: position carries direction, gain carries distance) ----
+            // The emitter is moved toward the portal, but only as far as the air leg actually dominates: the
+            // target is lerp(realSource -> portal) weighted by airWeight/(airWeight+structWeight). A thick wall
+            // (little straight-through) pulls it to the doorway; a thin wall (lots of straight-through) leaves it
+            // near the block; partial blockage lands it in between - localisation tracks where the sound really
+            // comes from. The perceived distance is the matching blend of straight distance and air-path length;
+            // since the emitter now sits at the blended point the engine attenuates by that point's distance, so
+            // we net gain by gWant/gHave to land on the intended loudness.
             bool repositionApplied = false;
+            Vector3D repositionTarget = source;
+            float repositionBlend = 0f;
             if (settings.PlayerFilterBlockRepositionEnabled && mainRayBlocked && airPathAvailable && portalValid)
             {
                 repositionApplied = true;
-                float portalDist = (float)Vector3D.Distance(listener, portalWorld);
+                float wsum = airWeight + structWeight;
+                repositionBlend = wsum > 1e-4f ? Clamp01(airWeight / wsum) : 1f;
+                repositionTarget = Vector3D.Lerp(source, portalWorld, repositionBlend);
+
                 float repoCurve = Math.Max(0.1f, settings.PlayerFilterBlockDistanceCurve);
-                float gAir = EvaluateDistanceGain(airPathLength, effectiveRange, repoCurve);
-                float gPortal = EvaluateDistanceGain(portalDist, effectiveRange, repoCurve);
-                float distanceComp = Clamp01(gAir / Math.Max(0.05f, gPortal));
-                estimatedGain = Clamp01(estimatedGain * distanceComp);
+                float effectiveDist = distance + (airPathLength - distance) * repositionBlend;
+                float repoTargetDist = (float)Vector3D.Distance(listener, repositionTarget);
+                float gWant = EvaluateDistanceGain(effectiveDist, effectiveRange, repoCurve);
+                float gHave = EvaluateDistanceGain(repoTargetDist, effectiveRange, repoCurve);
+                estimatedGain = Clamp01(estimatedGain * Clamp01(gWant / Math.Max(0.05f, gHave)));
             }
 
             V2AuxSourceOcclusionSample sample = new V2AuxSourceOcclusionSample
@@ -513,7 +528,10 @@ namespace RealisticSoundPlus.AudioEngineV2
                 PreAirPathMuffling = preAirMuffling,
                 PortalWorld = portalWorld,
                 PortalValid = portalValid,
-                RepositionApplied = repositionApplied
+                RepositionApplied = repositionApplied,
+                RepositionTarget = repositionTarget,
+                RepositionBlend = repositionBlend,
+                AirRoute = airRoute
             };
             return sample;
         }
@@ -718,7 +736,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             return Clamp01(1f - (float)Math.Pow(normalized, curve));
         }
 
-        private static void ProbePath(string cueName, Vector3D source, Vector3D listener, long sourceEntityId, RealisticSoundPlusSettings settings, DateTime now, float sourceClearRadius, out int open, out int blocked, out float openWeight, out float totalWeight, out float weightedBlockedMeters, out bool mainRayBlocked, out bool airPathAvailable, out float airPathLength, out Vector3D portalWorld, out bool portalValid)
+        private static void ProbePath(string cueName, Vector3D source, Vector3D listener, long sourceEntityId, RealisticSoundPlusSettings settings, DateTime now, float sourceClearRadius, out int open, out int blocked, out float openWeight, out float totalWeight, out float weightedBlockedMeters, out bool mainRayBlocked, out bool airPathAvailable, out float airPathLength, out Vector3D portalWorld, out bool portalValid, out List<Vector3D> airRoute)
         {
             string key = BuildPathProbeKey(cueName, source, sourceEntityId, settings);
             if (!PathProbeCache.TryGetValue(key, out PathProbeState state))
@@ -740,17 +758,20 @@ namespace RealisticSoundPlus.AudioEngineV2
                 state.AirPathLength = 0f;
                 state.PortalWorld = Vector3D.Zero;
                 state.PortalValid = false;
+                state.AirRoute = null;
                 if (state.MainRayBlocked)
                 {
                     VRage.Game.ModAPI.IMyCubeGrid sourceGrid = ResolveSourceGrid(sourceEntityId);
                     int reach = (int)Math.Max(1f, settings.PlayerFilterBlockAirPathReach);
                     int budget = Math.Min(32768, Math.Max(4096, reach * reach * reach * 32));
-                    if (sourceGrid != null && V2GridStructureProbe.TryFindAirPath(sourceGrid, source, listener, reach, budget, settings.PlayerFilterBlockAirPathThroughBlocks, out float airLen, out Vector3D portal, out bool portalOk))
+                    List<Vector3D> route = settings.PlayerFilterPathDebugEnabled ? new List<Vector3D>(32) : null;
+                    if (sourceGrid != null && V2GridStructureProbe.TryFindAirPath(sourceGrid, source, listener, reach, budget, settings.PlayerFilterBlockAirPathThroughBlocks, route, out float airLen, out Vector3D portal, out bool portalOk))
                     {
                         state.AirPathAvailable = true;
                         state.AirPathLength = airLen;
                         state.PortalWorld = portal;
                         state.PortalValid = portalOk;
+                        state.AirRoute = route;
                     }
                 }
 
@@ -775,6 +796,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             airPathLength = state.AirPathLength;
             portalWorld = state.PortalWorld;
             portalValid = state.PortalValid;
+            airRoute = state.AirRoute;
         }
 
         // The source's owning grid, for the open-air flood-fill. Mirrors ResolveSourceClearance's entity
@@ -1157,6 +1179,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             public bool AirPathProbed;
             public Vector3D PortalWorld;
             public bool PortalValid;
+            public List<Vector3D> AirRoute;
             public bool Initialized;
         }
 

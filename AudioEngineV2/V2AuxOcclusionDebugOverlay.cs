@@ -25,8 +25,7 @@ namespace RealisticSoundPlus.AudioEngineV2
         private static readonly Color VoxelColor = new Color(240, 205, 60, 235);
         private static readonly Color SkippedColor = new Color(120, 120, 130, 110);
         private static readonly Color SourceMarkerColor = new Color(60, 220, 255, 235);
-        private static readonly Color PortalColor = new Color(90, 180, 255, 220);
-        private static readonly Color RepositionColor = new Color(255, 110, 230, 240);
+        private static readonly Color AirRouteColor = new Color(80, 200, 255, 230);
         private static readonly Color TextColor = new Color(175, 235, 255, 255);
         private static readonly Color LegendHeaderColor = new Color(205, 240, 255, 255);
         private static readonly Color SkippedLegendColor = new Color(150, 150, 160, 255);
@@ -60,8 +59,8 @@ namespace RealisticSoundPlus.AudioEngineV2
             for (int i = 0; i < samples.Count; i++)
                 DrawSample(samples[i], includeVoxels, now);
 
-            // Actual repositioned emitter positions: the smoothed/glided point (magenta) chasing the averaged
-            // target (faint blue). The per-sample portal marker above is the raw target; this shows the motion.
+            // Portal symbol at each repositioned emitter's actual smoothed position (magenta) - where you hear
+            // it. The air-path route line per sample ends near here; together they show the around-corner path.
             V2BlockEmitterReposition.DrawActive();
 
             DrawLegend(includeVoxels);
@@ -148,16 +147,18 @@ namespace RealisticSoundPlus.AudioEngineV2
             if (sample.AirPathAvailable)
                 DrawText(source, string.Format(CultureInfo.InvariantCulture, "air {0:0.0}m{1}", sample.AirPathLength, sample.MergedFromAirPath ? "  *merged*" : ""), 0.06);
 
-            // Portal + repositioned emitter (Option B): the doorway the air leg localises to. When repositioning
-            // is active, the magenta line is the heard direction (listener -> portal) and the emitter sits here.
-            if (sample.PortalValid && sample.PortalWorld != Vector3D.Zero)
+            // Surface air-path route: the actual line the sound travels around corners / up the stairwell, from
+            // the source to the listener side. The portal symbol (drawn by the reposition manager) sits at the
+            // smoothed emitter position - i.e. where you actually hear it - so the two together read as
+            // "straight line through blocks (the coloured ray above) + surface air path to the portal".
+            if (sample.AirRoute != null && sample.AirRoute.Count >= 2)
             {
-                bool active = sample.RepositionApplied;
-                Color portalColor = active ? RepositionColor : PortalColor;
-                MyRenderProxy.DebugDrawSphere(sample.PortalWorld, 0.22f, portalColor, 0.9f, false, false, false, false);
-                DrawText(sample.PortalWorld, active ? "portal (emitter here)" : "portal", 0.20);
-                if (active && sample.ListenerPosition != Vector3D.Zero)
-                    DrawLine(sample.ListenerPosition, sample.PortalWorld, RepositionColor);
+                for (int i = 0; i < sample.AirRoute.Count - 1; i++)
+                    DrawLine(sample.AirRoute[i], sample.AirRoute[i + 1], AirRouteColor);
+            }
+            else if (sample.PortalValid && sample.PortalWorld != Vector3D.Zero && sample.ListenerPosition != Vector3D.Zero)
+            {
+                DrawLine(sample.ListenerPosition, sample.PortalWorld, AirRouteColor);
             }
         }
 
