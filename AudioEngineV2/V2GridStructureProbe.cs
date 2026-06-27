@@ -346,9 +346,24 @@ namespace RealisticSoundPlus.AudioEngineV2
                 bool hasHidden = false;
                 Vector3I walk = listenerCell;
                 int guard = 0;
+                double vertSign = Math.Sign(listenerWorld.Y - sourceWorld.Y); // +1 source below, -1 above, 0 same level
                 while (cameFrom.TryGetValue(walk, out Vector3I prev) && guard++ < maxCells)
                 {
                     Vector3D prevWorld = grid.GridIntegerToWorld(prev);
+
+                    // Keep the portal on the LISTENER's side of the floor: once the route drops (or climbs) more
+                    // than ~a cell past the listener's own level toward the source, stop. The opening you localise
+                    // to is the stairwell MOUTH on your floor, not a point partway down the open shaft - otherwise
+                    // the portal sits below the floor and reads as "through the floor". (World up; assumes a Y-up
+                    // grid, the common case.) Disabled when source and listener are on the same level (vertSign 0).
+                    double vertPastListener = (listenerWorld.Y - prevWorld.Y) * vertSign;
+                    if (vertSign != 0 && vertPastListener > gridSize)
+                    {
+                        firstHidden = prev;
+                        hasHidden = true;
+                        break;
+                    }
+
                     // STRICT line of sight (empty cells only, NOT throughBlocks): you localise the sound to the
                     // last genuinely-open aperture you can see, not THROUGH the grated stairs. If this used the
                     // permissive throughBlocks test, the listener would "see" straight down the grated stairwell
