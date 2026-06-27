@@ -366,13 +366,14 @@ namespace RealisticSoundPlus.AudioEngineV2
                         break;
                 }
 
-                portalValid = portalCell != listenerCell;
-                // Sub-cell resolution: rather than the quantised cell centre, place the portal at the continuous
-                // grazing point where the listener's sightline toward the first hidden cell clips the structure
-                // (the doorway edge). This slides smoothly as the listener/geometry move instead of snapping in
-                // whole grid cells. Fall back to the cell centre when the path is fully visible. Strict (empty-
-                // only) clearance again, so the grazing point sits at the open stairwell mouth.
-                portalWorld = (hasHidden && portalValid)
+                // Valid whenever the route enters structure the listener can't see past (hasHidden), EVEN if
+                // that happens on the very first step (portalCell still == listener, e.g. standing right at the
+                // grated stairwell mouth) - otherwise the portal would collapse onto the listener and the source
+                // would not reposition at all. The grazing point toward the first hidden cell is the localisation
+                // point (the open stairwell mouth); only fall back to a cell centre when the route is fully
+                // visible to the source (no structure between - then no reposition is needed anyway).
+                portalValid = hasHidden || portalCell != listenerCell;
+                portalWorld = hasHidden
                     ? FindLosGrazePoint(grid, listenerWorld, grid.GridIntegerToWorld(firstHidden), gridSize, false)
                     : grid.GridIntegerToWorld(portalCell);
 

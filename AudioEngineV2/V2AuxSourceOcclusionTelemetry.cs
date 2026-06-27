@@ -44,6 +44,13 @@ namespace RealisticSoundPlus.AudioEngineV2
         private static long _airPathFound;
         private static long _airPathMerged;
         private static long _thinSealHits;
+        // Last air-path source's reposition decision, surfaced in the perf line for diagnosis.
+        private static string _dbgRepoCue = "-";
+        private static bool _dbgRepoPortalValid;
+        private static bool _dbgRepoApplied;
+        private static float _dbgRepoBlend;
+        private static float _dbgRepoMoveMeters;
+        private static float _dbgRepoAirLen;
 
         public static void Reset()
         {
@@ -136,7 +143,7 @@ namespace RealisticSoundPlus.AudioEngineV2
         {
             return string.Format(
                 CultureInfo.InvariantCulture,
-                "aux rayState={4}/{5} rangeFar={0} rays={1} voxel={2} thick={3} airPath={6}/{7} thinSeal={8}",
+                "aux rayState={4}/{5} rangeFar={0} rays={1} voxel={2} thick={3} airPath={6}/{7} thinSeal={8} repo[{9}:pv={10} R={11} b={12:0.00} mv={13:0.0}m air={14:0.0}m]",
                 _rangeRejects,
                 _pathRays,
                 _voxelEstimates,
@@ -145,7 +152,13 @@ namespace RealisticSoundPlus.AudioEngineV2
                 _pathProbeCacheMisses,
                 _airPathFound,
                 _airPathMerged,
-                _thinSealHits);
+                _thinSealHits,
+                Trim(_dbgRepoCue, 20),
+                _dbgRepoPortalValid ? "Y" : "N",
+                _dbgRepoApplied ? "Y" : "N",
+                _dbgRepoBlend,
+                _dbgRepoMoveMeters,
+                _dbgRepoAirLen);
         }
 
         public static string FormatSources(int maxLines)
@@ -481,6 +494,17 @@ namespace RealisticSoundPlus.AudioEngineV2
                 float gWant = EvaluateDistanceGain(effectiveDist, effectiveRange, repoCurve);
                 float gHave = EvaluateDistanceGain(repoTargetDist, effectiveRange, repoCurve);
                 estimatedGain = Clamp01(estimatedGain * Clamp01(gWant / Math.Max(0.05f, gHave)));
+            }
+
+            // Diagnostic capture (last blocked source with an air path): see why/whether it repositions.
+            if (mainRayBlocked && airPathAvailable)
+            {
+                _dbgRepoCue = cueName;
+                _dbgRepoPortalValid = portalValid;
+                _dbgRepoApplied = repositionApplied;
+                _dbgRepoBlend = repositionBlend;
+                _dbgRepoMoveMeters = (float)Vector3D.Distance(source, repositionTarget);
+                _dbgRepoAirLen = airPathLength;
             }
 
             V2AuxSourceOcclusionSample sample = new V2AuxSourceOcclusionSample
