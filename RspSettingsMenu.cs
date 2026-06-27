@@ -264,7 +264,7 @@ namespace RealisticSoundPlus
 
             AddSection(content, ref y, "Block - Range & Output (both paths)");
             AddSlider(content, ref y, "Block Sound Range", "blockrange", 1f, 150f, 0, () => SettingsManager.Current.PlayerFilterBlockMaxRange, "Absolute block cue range for discovery and vanilla distance extension; lower reduces large-base voices.", true);
-            AddSlider(content, ref y, "Block Travel Curve", "blockcurve", 0.1f, 5f, 2, () => SettingsManager.Current.PlayerFilterBlockDistanceCurve, "Distance fade for BOTH legs (weights direct vs air by length); higher stays loud then drops.");
+            AddSlider(content, ref y, "Block Travel Curve", "blockcurve", 0.1f, 5f, 2, () => SettingsManager.Current.PlayerFilterBlockDistanceCurve, "Block volume distance-falloff SHAPE: higher = holds volume then drops steeply near max range; lower = fades evenly with distance. (Both paths use it, so a steeper curve also makes a long air detour fade more than the short direct line - that's a side effect, not a separate control.)");
             AddSlider(content, ref y, "Block Volume Muffle", "blockvolmuffle", 0f, 4f, 2, () => SettingsManager.Current.PlayerFilterBlockVolumeMuffleWeight, "Volume cut from muffling (applies to the blended result); higher quieter through walls, 0 tone only.");
             AddSlider(content, ref y, "Block Occlusion Smoothing", "blockocclusionsmooth", 0f, 2000f, 0, () => SettingsManager.Current.PlayerFilterBlockOcclusionSmoothingMs, "Temporal smoothing of the block occlusion; higher steadier and less flicker, lower more responsive.");
             AddReadout(content, ref y, "Block Candidates", V2AuxSourceOcclusionTelemetry.FormatSummary, "Summary of recent non-engine block/world source candidates.", 0.058f, 0.38f);

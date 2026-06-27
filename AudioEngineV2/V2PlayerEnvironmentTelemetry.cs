@@ -31,7 +31,9 @@ namespace RealisticSoundPlus.AudioEngineV2
         private const double OxygenGridSearchRange = 6.0;
         private const float VoxelOcclusionEpsilon = 0.001f;
         private const float VoxelOcclusionMinUsefulWeight = 0.05f;
-        private const double EnvironmentVoxelMinSkyDot = 0.65;
+        // Lowest direction-vs-sky-up dot that still counts terrain occlusion: 0 = the full UPPER HEMISPHERE
+        // (horizontal "out" through straight "up"), never the ground below.
+        private const double EnvironmentVoxelMinSkyDot = 0.0;
         private const float EnvironmentVoxelMeterScale = 0.25f;
         private const float EnvironmentVoxelMinBlockedMeters = 0.35f;
         private const float SpeedOfSoundMetersPerSecond = 343.0f;
@@ -381,6 +383,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                 ? new List<ReverbRayDebugSample>(32)
                 : null;
 
+            _voxelSkyFromGravity = naturalGravityAvailable;
             if (raycastAvailable)
             {
                 Vector3D up = GetProbeUp(probePosition, naturalGravity, naturalGravityAvailable);
@@ -1414,10 +1417,15 @@ namespace RealisticSoundPlus.AudioEngineV2
         private static Vector3D _envMapDebugUp;
         private static Vector3D _envMapDebugRight;
         private static Vector3D _envMapDebugForward;
+        // True only when the sky-up is derived from real gravity (a planet) - gates voxel terrain occlusion so it
+        // never uses the view-tilting camera-up fallback (which would sweep the upper hemisphere into the ground).
+        private static bool _voxelSkyFromGravity;
 
-        // Debug overlay: draws each sampled env cell as a short ray from the listener in its current world
-        // direction, green=open -> red=blocked (by stored openness), alpha by confidence. Toggle: /rsp envmapdebug.
-        // With the listener stationary the map fills and holds steady (the sway-fix made visible).
+        // Debug overlay: draws each sampled env cell as a FLAT TILE on a dome around the listener, facing its
+        // sample direction, green=open -> red=blocked (by stored openness), alpha by confidence. This reads as a
+        // tessellated sky-dome of the structural-sealing map rather than a hedgehog of radial lines. The tiles
+        // touch (size scales with cell count), so a sealed-over region shows as a solid red patch overhead.
+        // Toggle: /rsp envmapdebug. Stationary -> fills and holds steady (the sway-fix made visible).
         public static void DrawEnvMapDebug()
         {
             RealisticSoundPlusSettings settings = SettingsManager.Current;
@@ -1430,7 +1438,10 @@ namespace RealisticSoundPlus.AudioEngineV2
             Vector3D up = _envMapDebugUp;
             Vector3D right = _envMapDebugRight;
             Vector3D forward = _envMapDebugForward;
-            const double length = 2.5;
+            const double domeRadius = 4.0;
+            // Half-tile size so neighbouring Fibonacci cells just meet: each cell ~ 4pi/N sr, angular radius
+            // ~ 2/sqrt(N); project onto the dome and halve a touch so they read as separate tiles.
+            double tileHalf = domeRadius * (1.7 / Math.Sqrt(Math.Max(1, _envMapCellCount)));
 
             for (int i = 0; i < _envMapCellCount; i++)
             {
@@ -1444,10 +1455,32 @@ namespace RealisticSoundPlus.AudioEngineV2
                     continue;
                 dir.Normalize();
 
+                // Tangent basis for a flat tile facing the sample direction.
+                Vector3D u = Vector3D.CalculatePerpendicularVector(dir);
+                if (!u.IsValid() || u.LengthSquared() < 1e-9)
+                    continue;
+                u.Normalize();
+                Vector3D w = Vector3D.Normalize(Vector3D.Cross(dir, u));
+
+                Vector3D center = origin + dir * domeRadius;
+                Vector3D eu = u * tileHalf;
+                Vector3D ew = w * tileHalf;
+                Vector3D a = center + eu + ew;
+                Vector3D b = center + eu - ew;
+                Vector3D cc = center - eu - ew;
+                Vector3D d = center - eu + ew;
+
                 float open01 = Clamp01(c.OpenWeight01);
-                byte alpha = (byte)(50f + 180f * Clamp01(c.Confidence));
-                Color color = new Color((byte)(255f * (1f - open01)), (byte)(255f * open01), (byte)40, alpha);
-                MyRenderProxy.DebugDrawLine3D(origin, origin + dir * length, color, color, false, false);
+                byte alpha = (byte)(70f + 150f * Clamp01(c.Confidence));
+                Color color = new Color((byte)(255f * (1f - open01)), (byte)(255f * open01), (byte)45, alpha);
+
+                // Tile edges + diagonals so it reads as a filled flat cell (DebugDrawLine3D only draws lines).
+                MyRenderProxy.DebugDrawLine3D(a, b, color, color, false, false);
+                MyRenderProxy.DebugDrawLine3D(b, cc, color, color, false, false);
+                MyRenderProxy.DebugDrawLine3D(cc, d, color, color, false, false);
+                MyRenderProxy.DebugDrawLine3D(d, a, color, color, false, false);
+                MyRenderProxy.DebugDrawLine3D(a, cc, color, color, false, false);
+                MyRenderProxy.DebugDrawLine3D(b, d, color, color, false, false);
             }
         }
 
@@ -1593,8 +1626,12 @@ namespace RealisticSoundPlus.AudioEngineV2
             if (voxelWeight <= VoxelOcclusionEpsilon)
                 return false;
 
-            if (!skyUp.IsValid() || skyUp.LengthSquared() <= 0.0001)
-                return true;
+            // Voxel (terrain) occlusion of the ambient bed only makes sense relative to a real planetary SKY:
+            // the wind/ambience comes from above, so only terrain in the UPPER hemisphere occludes it - never the
+            // ground you stand on. Requires a gravity-derived up (set in CalculateRoomAcoustics); off otherwise,
+            // because the camera-up fallback tilts with the view and would sweep the cone into the ground below.
+            if (!_voxelSkyFromGravity || !skyUp.IsValid() || skyUp.LengthSquared() <= 0.0001)
+                return false;
 
             skyUp.Normalize();
             return Vector3D.Dot(direction, skyUp) >= EnvironmentVoxelMinSkyDot;
