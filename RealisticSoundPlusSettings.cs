@@ -73,6 +73,10 @@ namespace RealisticSoundPlus
         public bool PlayerFilterBlockRepositionEnabled { get; set; } = false;
         public float PlayerFilterBlockRepositionSlewMs { get; set; } = 120f;       // per-frame glide toward target
         public float PlayerFilterBlockRepositionPortalAvgMs { get; set; } = 200f;  // averages the grid-quantised portal jumps
+        // How strongly the emitter localises to the AIR-PATH portal vs the direct (through-structure) line.
+        // 1 = physical loudness blend; higher pulls the position toward the doorway/stairwell even when the
+        // direct line still transmits some sound. (This is the blend weight - NOT the path-search Open Path Bias.)
+        public float PlayerFilterBlockRepositionAirBias { get; set; } = 1f;
         // How far (grid cells) the air-path flood-fill may search beyond the source<->listener box. Larger finds
         // longer detours (multi-flight switchback staircases, paths that swing wide) at more BFS cost.
         public float PlayerFilterBlockAirPathReach { get; set; } = 3f;
@@ -445,6 +449,9 @@ namespace RealisticSoundPlus
                 case "repositionslew": value = settings.PlayerFilterBlockRepositionSlewMs; return true;
                 case "blockportalavg":
                 case "portalavg": value = settings.PlayerFilterBlockRepositionPortalAvgMs; return true;
+                case "blockrepoairbias":
+                case "repoairbias":
+                case "airbias": value = settings.PlayerFilterBlockRepositionAirBias; return true;
                 case "blockairpathreach":
                 case "airpathreach":
                 case "airreach": value = settings.PlayerFilterBlockAirPathReach; return true;
@@ -849,6 +856,11 @@ namespace RealisticSoundPlus
                 case "blockportalavg":
                 case "portalavg":
                     Current.PlayerFilterBlockRepositionPortalAvgMs = value;
+                    break;
+                case "blockrepoairbias":
+                case "repoairbias":
+                case "airbias":
+                    Current.PlayerFilterBlockRepositionAirBias = value;
                     break;
                 case "blockairpathreach":
                 case "airpathreach":
@@ -1641,6 +1653,7 @@ namespace RealisticSoundPlus
             Current.PlayerEnvSealedBarrierLoss = Clamp(Current.PlayerEnvSealedBarrierLoss, 0f, 1f);
             Current.PlayerFilterBlockAirBrightness = Clamp(Current.PlayerFilterBlockAirBrightness, 0f, 1f);
             Current.PlayerFilterBlockRepositionSlewMs = Clamp(Current.PlayerFilterBlockRepositionSlewMs, 1f, 2000f);
+            Current.PlayerFilterBlockRepositionAirBias = Clamp(Current.PlayerFilterBlockRepositionAirBias, 0.1f, 10f);
             Current.PlayerFilterBlockRepositionPortalAvgMs = Clamp(Current.PlayerFilterBlockRepositionPortalAvgMs, 1f, 2000f);
             Current.PlayerFilterBlockAirPathReach = Clamp(Current.PlayerFilterBlockAirPathReach, 1f, 16f);
             Current.PlayerFilterBlockAirPathOpenBias = Clamp(Current.PlayerFilterBlockAirPathOpenBias, 0f, 30f);

@@ -484,8 +484,12 @@ namespace RealisticSoundPlus.AudioEngineV2
             if (settings.PlayerFilterBlockRepositionEnabled && mainRayBlocked && airPathAvailable && portalValid)
             {
                 repositionApplied = true;
-                float wsum = airWeight + structWeight;
-                repositionBlend = wsum > 1e-4f ? Clamp01(airWeight / wsum) : 1f;
+                // Bias the localisation toward the air-path portal. airBias > 1 weights the air leg up so the
+                // emitter sits closer to the doorway/stairwell even when the direct line still transmits.
+                float airBias = Math.Max(0.01f, settings.PlayerFilterBlockRepositionAirBias);
+                float biasedAir = airWeight * airBias;
+                float wsum = biasedAir + structWeight;
+                repositionBlend = wsum > 1e-4f ? Clamp01(biasedAir / wsum) : 1f;
                 repositionTarget = Vector3D.Lerp(source, portalWorld, repositionBlend);
 
                 float repoCurve = Math.Max(0.1f, settings.PlayerFilterBlockDistanceCurve);

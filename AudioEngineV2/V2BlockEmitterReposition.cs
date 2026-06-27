@@ -27,7 +27,8 @@ namespace RealisticSoundPlus.AudioEngineV2
         {
             public Vector3D RealSource;     // live block position (home / restore reference)
             public Vector3D Target;         // latest blended target requested while active
-            public Vector3D Current;        // smoothed world position actually written
+            public Vector3D SmoothedTarget; // 1st smoothing stage: filters the 250ms probe steps / per-frame jitter
+            public Vector3D Current;        // 2nd stage: smoothed world position actually written
             public bool Placed;             // Current has been seeded (snap-on-first)
             public DateTime LastTargetUtc;  // last active (valid-target) request
             public DateTime LastRequestUtc; // last time the voice was seen at all
@@ -106,12 +107,18 @@ namespace RealisticSoundPlus.AudioEngineV2
 
                 if (!state.Placed)
                 {
+                    state.SmoothedTarget = goal;
                     state.Current = goal; // snap to the first placement (no slide out from the block)
                     state.Placed = true;
                 }
                 else
                 {
-                    state.Current = Vector3D.Lerp(state.Current, goal, alpha); // temporal smoothing
+                    // Two-stage (2nd-order) smoothing: the raw target steps every 250ms (probe cache) and jitters
+                    // per-frame (distance recomputed each frame). Filtering the target first, then easing the
+                    // written position toward THAT, blends those steps into continuous motion instead of the
+                    // position rubberbanding to catch each one.
+                    state.SmoothedTarget = Vector3D.Lerp(state.SmoothedTarget, goal, alpha);
+                    state.Current = Vector3D.Lerp(state.Current, state.SmoothedTarget, alpha);
                 }
 
                 if (hasTarget)
