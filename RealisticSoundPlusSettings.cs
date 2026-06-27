@@ -65,9 +65,12 @@ namespace RealisticSoundPlus
         public float PlayerFilterBlockSealedBarrierLoss { get; set; } = 0f;
         public float PlayerEnvSealedBarrierLoss { get; set; } = 0f;
         public float PlayerFilterSealedBarrierThinFactor { get; set; } = 0.6f;
-        // Air (around-corner) leg brightness floor for blocked block sources: the muffle the open detour
-        // collapses toward. Lower = brighter (more high end through the doorway). 0.08 = prior hardcoded value.
+        // Air (around-corner) leg brightness FLOOR for blocked block sources: the muffle at zero detour length
+        // (brightest, short path). Lower = brighter. 0.08 = prior hardcoded value.
         public float PlayerFilterBlockAirBrightness { get; set; } = 0.08f;
+        // Extra muffle accumulated PER METRE of air-path length (high-frequency loss over distance): a longer
+        // detour arrives duller. 0 = flat (length ignored, old behaviour). ~0.015 = noticeable over 20-40 m.
+        public float PlayerFilterBlockAirLengthMuffle { get; set; } = 0.015f;
         // Emitter repositioning: move a blocked block source to its doorway portal so it localises to the
         // opening (direction), with the detour attenuation carried by gain. OFF by default (experimental).
         public bool PlayerFilterBlockRepositionEnabled { get; set; } = false;
@@ -445,6 +448,9 @@ namespace RealisticSoundPlus
                 case "blockairbright":
                 case "airbright":
                 case "airpathbrightness": value = settings.PlayerFilterBlockAirBrightness; return true;
+                case "blockairlengthmuffle":
+                case "airlengthmuffle":
+                case "airmuffleperm": value = settings.PlayerFilterBlockAirLengthMuffle; return true;
                 case "blockreposeslew":
                 case "repositionslew": value = settings.PlayerFilterBlockRepositionSlewMs; return true;
                 case "blockportalavg":
@@ -848,6 +854,11 @@ namespace RealisticSoundPlus
                 case "airbright":
                 case "airpathbrightness":
                     Current.PlayerFilterBlockAirBrightness = value;
+                    break;
+                case "blockairlengthmuffle":
+                case "airlengthmuffle":
+                case "airmuffleperm":
+                    Current.PlayerFilterBlockAirLengthMuffle = value;
                     break;
                 case "blockreposeslew":
                 case "repositionslew":
@@ -1652,6 +1663,7 @@ namespace RealisticSoundPlus
             Current.PlayerFilterBlockSealedBarrierLoss = Clamp(Current.PlayerFilterBlockSealedBarrierLoss, 0f, 1f);
             Current.PlayerEnvSealedBarrierLoss = Clamp(Current.PlayerEnvSealedBarrierLoss, 0f, 1f);
             Current.PlayerFilterBlockAirBrightness = Clamp(Current.PlayerFilterBlockAirBrightness, 0f, 1f);
+            Current.PlayerFilterBlockAirLengthMuffle = Clamp(Current.PlayerFilterBlockAirLengthMuffle, 0f, 0.1f);
             Current.PlayerFilterBlockRepositionSlewMs = Clamp(Current.PlayerFilterBlockRepositionSlewMs, 1f, 2000f);
             Current.PlayerFilterBlockRepositionAirBias = Clamp(Current.PlayerFilterBlockRepositionAirBias, 0.1f, 10f);
             Current.PlayerFilterBlockRepositionPortalAvgMs = Clamp(Current.PlayerFilterBlockRepositionPortalAvgMs, 1f, 2000f);
