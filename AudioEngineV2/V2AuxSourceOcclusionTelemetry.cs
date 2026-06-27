@@ -27,6 +27,10 @@ namespace RealisticSoundPlus.AudioEngineV2
         private const double PathProbeSourceCellMeters = 1.5;
         private static readonly TimeSpan SampleLifetime = TimeSpan.FromSeconds(2);
         private static readonly TimeSpan PathProbeInterval = TimeSpan.FromMilliseconds(250);
+        // Route hysteresis: re-run the flood-fill only when the listener has moved past this, or the route is
+        // this old. Stops the discrete grid route flip-flopping when sub-cell jitter flips the listener cell.
+        private const double AirPathRecomputeMovedSq = 0.4 * 0.4; // ~0.4 m
+        private static readonly TimeSpan AirPathRecomputeMaxAge = TimeSpan.FromMilliseconds(2500);
         private static readonly TimeSpan PathProbeLifetime = TimeSpan.FromSeconds(8);
         private static readonly TimeSpan OcclusionSmoothingResetGap = TimeSpan.FromSeconds(1.5);
         private const int MaxOcclusionSmoothing = 256;
@@ -774,6 +778,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             if (probeDue)
             {
                 _pathProbeCacheMisses = SaturatingIncrement(_pathProbeCacheMisses);
+                PathProbeState prevState = state; // keep the previous route so it can be reused (hysteresis)
                 PathProbeMeasurement measurement = ProbeSinglePath(source, listener, settings, settings.PlayerFilterBlockStructureThicknessScale, sourceClearRadius);
                 state = CreatePathProbeState(measurement, now);
 
@@ -820,31 +825,52 @@ namespace RealisticSoundPlus.AudioEngineV2
                         return;
                     }
 
-                    int baseReach = (int)Math.Max(1f, settings.PlayerFilterBlockAirPathReach);
-                    int openBias = (int)Math.Max(0f, settings.PlayerFilterBlockAirPathOpenBias);
-                    bool throughBlocks = settings.PlayerFilterBlockAirPathThroughBlocks;
-                    List<Vector3D> route = settings.PlayerFilterPathDebugEnabled ? new List<Vector3D>(32) : null;
-                    if (sourceGrid != null)
+                    // Route hysteresis (ROOT-CAUSE fix for the position rubberbanding): the flood-fill runs on a
+                    // discrete grid, so when sub-cell listener jitter flips WorldToGridInteger(listener) between
+                    // two cells it returns a different route/portal and the emitter snaps back and forth. Only
+                    // re-run the search when the listener has actually moved past a threshold (or the route is
+                    // stale); otherwise reuse the previous route/portal unchanged.
+                    bool listenerMoved = Vector3D.DistanceSquared(listener, prevState.AirPathListenerPos) > AirPathRecomputeMovedSq;
+                    bool routeStale = now - prevState.AirPathComputeUtc > AirPathRecomputeMaxAge;
+                    if (prevState.AirPathProbed && prevState.MainRayBlocked && !listenerMoved && !routeStale)
                     {
-                        // Adaptive reach: a sealed stairwell can sit outside the tight source<->listener box, so
-                        // if no path is found, expand the search a couple of times before giving up (removes
-                        // manual reach tuning as a failure point). Still gated by the 250 ms probe cache.
-                        for (int attempt = 0; attempt < 3; attempt++)
+                        state.AirPathAvailable = prevState.AirPathAvailable;
+                        state.AirPathLength = prevState.AirPathLength;
+                        state.PortalWorld = prevState.PortalWorld;
+                        state.PortalValid = prevState.PortalValid;
+                        state.AirRoute = prevState.AirRoute;
+                        state.AirPathListenerPos = prevState.AirPathListenerPos;
+                        state.AirPathComputeUtc = prevState.AirPathComputeUtc;
+                    }
+                    else
+                    {
+                        int baseReach = (int)Math.Max(1f, settings.PlayerFilterBlockAirPathReach);
+                        int openBias = (int)Math.Max(0f, settings.PlayerFilterBlockAirPathOpenBias);
+                        bool throughBlocks = settings.PlayerFilterBlockAirPathThroughBlocks;
+                        List<Vector3D> route = settings.PlayerFilterPathDebugEnabled ? new List<Vector3D>(32) : null;
+                        if (sourceGrid != null)
                         {
-                            int reach = Math.Min(16, baseReach << attempt);
-                            int budget = Math.Min(32768, Math.Max(4096, reach * reach * reach * 32));
-                            if (V2GridStructureProbe.TryFindAirPath(sourceGrid, source, listener, reach, budget, throughBlocks, openBias, route, out float airLen, out Vector3D portal, out bool portalOk))
+                            // Adaptive reach: a sealed stairwell can sit outside the tight source<->listener box,
+                            // so if no path is found, expand the search a couple of times before giving up.
+                            for (int attempt = 0; attempt < 3; attempt++)
                             {
-                                state.AirPathAvailable = true;
-                                state.AirPathLength = airLen;
-                                state.PortalWorld = portal;
-                                state.PortalValid = portalOk;
-                                state.AirRoute = route;
-                                break;
+                                int reach = Math.Min(16, baseReach << attempt);
+                                int budget = Math.Min(32768, Math.Max(4096, reach * reach * reach * 32));
+                                if (V2GridStructureProbe.TryFindAirPath(sourceGrid, source, listener, reach, budget, throughBlocks, openBias, route, out float airLen, out Vector3D portal, out bool portalOk))
+                                {
+                                    state.AirPathAvailable = true;
+                                    state.AirPathLength = airLen;
+                                    state.PortalWorld = portal;
+                                    state.PortalValid = portalOk;
+                                    state.AirRoute = route;
+                                    break;
+                                }
+                                if (reach >= 16)
+                                    break;
                             }
-                            if (reach >= 16)
-                                break;
                         }
+                        state.AirPathListenerPos = listener;
+                        state.AirPathComputeUtc = now;
                     }
                 }
 
@@ -1253,6 +1279,8 @@ namespace RealisticSoundPlus.AudioEngineV2
             public Vector3D PortalWorld;
             public bool PortalValid;
             public List<Vector3D> AirRoute;
+            public Vector3D AirPathListenerPos; // listener position when the route was last (re)computed
+            public DateTime AirPathComputeUtc;  // when the route was last (re)computed
             public bool Initialized;
         }
 
