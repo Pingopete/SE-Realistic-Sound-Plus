@@ -181,7 +181,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                     FormatRoomComparison(sample),
                     sample.NearFieldScale,
                     sample.AirPathAvailable
-                        ? string.Format(CultureInfo.InvariantCulture, "{0:0}m{1}{2}", sample.AirPathLength, sample.MergedFromAirPath ? "M" : "-", sample.RepositionApplied ? "R" : "")
+                        ? string.Format(CultureInfo.InvariantCulture, "{0:0}m{1}{2} b{3:0.00}", sample.AirPathLength, sample.MergedFromAirPath ? "M" : "-", sample.RepositionApplied ? "R" : "", sample.RepositionBlend)
                         : "-");
             }
 

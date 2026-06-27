@@ -349,7 +349,11 @@ namespace RealisticSoundPlus.AudioEngineV2
                 while (cameFrom.TryGetValue(walk, out Vector3I prev) && guard++ < maxCells)
                 {
                     Vector3D prevWorld = grid.GridIntegerToWorld(prev);
-                    if (!HasLineOfSight(grid, listenerWorld, prevWorld, gridSize, throughBlocks))
+                    // STRICT line of sight (empty cells only, NOT throughBlocks): you localise the sound to the
+                    // last genuinely-open aperture you can see, not THROUGH the grated stairs. If this used the
+                    // permissive throughBlocks test, the listener would "see" straight down the grated stairwell
+                    // to the source and the portal would land on the source itself (no reposition).
+                    if (!HasLineOfSight(grid, listenerWorld, prevWorld, gridSize, false))
                     {
                         firstHidden = prev;
                         hasHidden = true;
@@ -366,9 +370,10 @@ namespace RealisticSoundPlus.AudioEngineV2
                 // Sub-cell resolution: rather than the quantised cell centre, place the portal at the continuous
                 // grazing point where the listener's sightline toward the first hidden cell clips the structure
                 // (the doorway edge). This slides smoothly as the listener/geometry move instead of snapping in
-                // whole grid cells. Fall back to the cell centre when the path is fully visible.
+                // whole grid cells. Fall back to the cell centre when the path is fully visible. Strict (empty-
+                // only) clearance again, so the grazing point sits at the open stairwell mouth.
                 portalWorld = (hasHidden && portalValid)
-                    ? FindLosGrazePoint(grid, listenerWorld, grid.GridIntegerToWorld(firstHidden), gridSize, throughBlocks)
+                    ? FindLosGrazePoint(grid, listenerWorld, grid.GridIntegerToWorld(firstHidden), gridSize, false)
                     : grid.GridIntegerToWorld(portalCell);
 
                 // Debug route: the actual surface air path as world points, listener -> ... -> source (the line
