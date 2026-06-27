@@ -221,7 +221,7 @@ namespace RealisticSoundPlus
             AddInlineReadout(content, ref y, V2PlayerFilterRuntime.FormatEnvironmentLiveReadout, "Live env output: covered sky, final muffling, and final volume.");
             AddSlider(content, ref y, "Env/Reverb Ray Length", "envreverbray", 5f, 1000f, 0, () => SettingsManager.Current.PlayerEnvRayLength, "Shared radius for wind occlusion and room reverb rays; higher samples farther openings and larger spaces.", true);
             AddSlider(content, ref y, "Env Structure Thickness", "envstructurethickness", 0.1f, 20f, 2, () => SettingsManager.Current.PlayerEnvStructureThicknessScale, "Wall thickness scale for env rays; higher lets thin cover leak more.");
-            AddSlider(content, ref y, "Voxel Occlusion Weight", "voxelboth", 0f, 10f, 2, () => SettingsManager.Current.PlayerFilterVoxelOcclusionWeight, "Terrain/asteroid voxel muffling for BOTH wind and block paths; higher = more muffling through terrain, 0 = off. (Thin Wall Muffle in Sealed Rooms covers thin sealed faces.)");
+            AddSlider(content, ref y, "Env Voxel Weight", "voxelmuffle", 0f, 10f, 2, () => SettingsManager.Current.PlayerFilterVoxelOcclusionWeight, "ENVIRONMENT/wind occlusion only: how much terrain/asteroid voxels muffle the wind/ambient bed; higher = more muffling through terrain, 0 = off. (Block sounds have their own 'Block Voxel Weight'.)");
             AddSlider(content, ref y, "Env Aperture Curve", "envaperturecurve", 0.1f, 10f, 2, () => SettingsManager.Current.PlayerEnvApertureCurve, "Shapes open-sky fraction; higher makes small openings count less.");
 
             AddSection(content, ref y, "Env Occlusion Map");
@@ -246,6 +246,7 @@ namespace RealisticSoundPlus
             AddSection(content, ref y, "Block - Direct Path (through walls)");
             AddSlider(content, ref y, "Wall Thickness Muffle", "blockstructurethickness", 0.1f, 20f, 2, () => SettingsManager.Current.PlayerFilterBlockStructureThicknessScale, "DIRECT leg: how much solid grid thickness on the straight line to the source muffles it. The main through-wall knob; higher = thin walls muffle less.");
             AddSlider(content, ref y, "Direct Occlusion Curve", "blockocclusioncurve", 0.1f, 5f, 2, () => SettingsManager.Current.PlayerFilterBlockOcclusionCurve, "DIRECT leg: shapes the straight-line occlusion response; higher forgives light blockage.");
+            AddSlider(content, ref y, "Block Voxel Weight", "blockvoxelweight", 0f, 10f, 2, () => { float w = SettingsManager.Current.PlayerFilterBlockVoxelOcclusionWeight; return w < 0f ? SettingsManager.Current.PlayerFilterVoxelOcclusionWeight : w; }, "BLOCK occlusion only: how much terrain/asteroid voxels muffle a block source's direct line; higher = more muffling through terrain, 0 = off. Separate from the wind 'Env Voxel Weight'.");
             AddSlider(content, ref y, "Direct Muffled Cutoff", "blockmufflefreq", RspDynamicAudioFilters.MinFilterFrequency, RspDynamicAudioFilters.MaxFilterFrequency, 0, () => SettingsManager.Current.PlayerFilterBlockMuffledFrequency, "DIRECT leg: the LOW cutoff a source collapses to through a thick wall (the low-frequency-only floor). The bright end is 'Aux Clear Cutoff'.", true);
 
             AddSection(content, ref y, "Block - Air Path (around corners)");
