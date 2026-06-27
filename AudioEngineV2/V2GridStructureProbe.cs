@@ -516,10 +516,11 @@ namespace RealisticSoundPlus.AudioEngineV2
         }
 
         // Cost to ENTER a cell, or -1 if impassable. Empty/open-door = 1 (open air). In throughBlocks mode a
-        // non-airtight occupied cell (grated stairs/catwalks/floor) is passable but costs 1+openBias, so the
-        // search prefers open routes (the stairwell void) and only squeezes through grated structure when it
-        // must - and far less readily than a short straight-up hop through a grated floor. Airtight cells
-        // (solid walls/floors, closed doors) are impassable. Works on unsealed grids (no gas-room dependency).
+        // non-SEALING occupied block (grated stairs/catwalks/railings) is passable but costs 1+openBias, so the
+        // search prefers open routes; a SEALING block (full armour wall/floor, closed door) is impassable. The
+        // sealing test is the BLOCK DEFINITION's airtightness (IsBlockSealing) - NOT IsRoomAtPositionAirtight,
+        // which returns false for any occupied cell (solid or grated alike) and let the route punch through a
+        // solid floor.
         private static int StepCost(IMyCubeGrid grid, Vector3I cell, bool throughBlocks, int openBias)
         {
             IMySlimBlock slim = grid.GetCubeBlock(cell);
@@ -537,10 +538,30 @@ namespace RealisticSoundPlus.AudioEngineV2
             if (!throughBlocks)
                 return -1; // solid block stops the open-only fill
 
-            if (IsCellAirtight(grid, cell))
-                return -1; // sealed armour/wall: blocks even in through-blocks mode
+            if (IsBlockSealing(slim))
+                return -1; // full-armour wall/floor: seals air -> blocks the path
 
             return 1 + (openBias < 0 ? 0 : openBias); // grated/non-sealing block: passable but penalised
+        }
+
+        // Whether an occupied cell's block fully seals air (full armour cube, solid wall/floor). Uses the block
+        // DEFINITION's airtightness: IsAirTight == true means a fully sealing cube; false/null (grated stairs,
+        // catwalks, railings, slopes) lets air - and sound - through. Unknown definition -> treat as sealing so a
+        // stray route never leaks through something solid.
+        private static bool IsBlockSealing(IMySlimBlock slim)
+        {
+            try
+            {
+                Sandbox.Definitions.MyCubeBlockDefinition def = slim.BlockDefinition as Sandbox.Definitions.MyCubeBlockDefinition;
+                if (def == null)
+                    return true;
+                bool? airtight = def.IsAirTight;
+                return airtight.HasValue && airtight.Value;
+            }
+            catch
+            {
+                return true;
+            }
         }
 
         // For LOS / grazing only: a cell the sightline can pass (cost-free passability, no openBias).
