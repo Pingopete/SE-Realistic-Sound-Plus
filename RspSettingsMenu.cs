@@ -981,23 +981,55 @@ namespace RealisticSoundPlus
             }
         }
 
-        // Slider with a clean, flat custom track instead of the engine's default grey rail box. Input handling
-        // is unchanged (HandleInput is separate from Draw); only the visual is overridden.
+        // Slider with a clean, flat custom track instead of the engine's default grey rail box. Because the
+        // visual is fully custom, the VALUE is also mapped from our own geometry in HandleInput - otherwise the
+        // base maps clicks over its internal rail (offset from our full-width draw) and the grab point sits to
+        // the side of the drawn thumb.
         private sealed class RspSlider : MyGuiControlSlider
         {
             private static readonly Color TrackColor = new Color(120, 150, 165, 110);
             private static readonly Color FillColor = new Color(150, 200, 222, 190);
             private static readonly Color ThumbColor = new Color(214, 234, 242, 255);
+            private const float ThumbWidth = 0.006f;
+            private const float ThumbHeightFraction = 0.5f; // shorter than the full control height
+            private bool _dragging;
 
             public RspSlider(Vector2 position, float minValue, float maxValue, float width, float defaultValue, string toolTip, MyGuiDrawAlignEnum originAlign)
                 : base(position: position, minValue: minValue, maxValue: maxValue, width: width, defaultValue: defaultValue, toolTip: toolTip, originAlign: originAlign, showLabel: false)
             {
             }
 
+            public override MyGuiControlBase HandleInput()
+            {
+                MyGuiControlBase captured = base.HandleInput(); // keep base focus / hover / tooltip / keyboard
+                if (MyInput.Static == null)
+                    return captured;
+
+                if (IsMouseOver && MyInput.Static.IsNewLeftMousePressed())
+                    _dragging = true;
+                if (!MyInput.Static.IsLeftMousePressed())
+                    _dragging = false;
+
+                if (_dragging)
+                {
+                    Vector2 topLeft = GetPositionAbsoluteTopLeft();
+                    float w = Size.X;
+                    if (w > 1e-4f)
+                    {
+                        float t = (MyGuiManager.MouseCursorPosition.X - topLeft.X) / w; // OUR geometry == the drawn track
+                        if (t < 0f) t = 0f; else if (t > 1f) t = 1f;
+                        float v = MinValue + t * (MaxValue - MinValue);
+                        if (Math.Abs(v - Value) > 1e-6f)
+                            Value = v; // override the base's offset mapping
+                        captured = this;
+                    }
+                }
+                return captured;
+            }
+
             public override void Draw(float transitionAlpha, float backgroundTransitionAlpha)
             {
-                // Intentionally NOT calling base.Draw: that is what paints the grey rail box. Interaction still
-                // works (handled in HandleInput, not Draw).
+                // Intentionally NOT calling base.Draw: that is what paints the grey rail box.
                 if (!Visible)
                     return;
 
@@ -1016,8 +1048,9 @@ namespace RealisticSoundPlus
                 if (fillW > 0f)
                     MyGuiManager.DrawRectangle(new Vector2(topLeft.X, trackY), new Vector2(fillW, trackH), ApplyAlpha(FillColor, transitionAlpha));
 
-                float thumbW = 0.006f;
-                MyGuiManager.DrawRectangle(new Vector2(topLeft.X + fillW - thumbW * 0.5f, topLeft.Y), new Vector2(thumbW, size.Y), ApplyAlpha(ThumbColor, transitionAlpha));
+                float thumbH = size.Y * ThumbHeightFraction;
+                float thumbY = topLeft.Y + (size.Y - thumbH) * 0.5f; // centred -> shorter handle
+                MyGuiManager.DrawRectangle(new Vector2(topLeft.X + fillW - ThumbWidth * 0.5f, thumbY), new Vector2(ThumbWidth, thumbH), ApplyAlpha(ThumbColor, transitionAlpha));
             }
 
             private static Color ApplyAlpha(Color color, float transitionAlpha)
@@ -1034,13 +1067,13 @@ namespace RealisticSoundPlus
             private const float MaxHz = RspDynamicAudioFilters.MaxFilterFrequency;
             private const float MinDb = -48f;
             private const float MaxDb = 6f;
-            private static readonly Color FrameColor = new Color(92, 122, 132, 210);
-            private static readonly Color MajorGridColor = new Color(82, 104, 112, 145);
-            private static readonly Color MinorGridColor = new Color(52, 64, 70, 75);
-            private static readonly Color LabelColor = new Color(184, 204, 214, 225);
-            private static readonly Color ResponseColor = new Color(118, 220, 255, 255);
-            private static readonly Color ZeroDbColor = new Color(160, 176, 184, 185);
-            private static readonly Color FillColor = new Color(55, 135, 180, 36);
+            private static readonly Color FrameColor = new Color(130, 165, 182, 235);
+            private static readonly Color MajorGridColor = new Color(120, 152, 168, 210);
+            private static readonly Color MinorGridColor = new Color(78, 98, 110, 140);
+            private static readonly Color LabelColor = new Color(190, 210, 220, 235);
+            private static readonly Color ResponseColor = new Color(120, 222, 255, 255);
+            private static readonly Color ZeroDbColor = new Color(170, 188, 198, 210);
+            private static readonly Color FillColor = new Color(60, 140, 188, 48);
             private static readonly float[] MajorFrequencies = { 5f, 10f, 20f, 50f, 100f, 200f, 500f, 1000f, 2000f, 5000f, 8000f };
             private static readonly float[] MinorFrequencies = { 7.5f, 15f, 30f, 75f, 150f, 300f, 750f, 1500f, 3000f, 6500f };
             private static readonly float[] MajorDbTicks = { 0f, -6f, -12f, -18f, -24f, -36f, -48f };
