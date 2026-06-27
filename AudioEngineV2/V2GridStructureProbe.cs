@@ -40,8 +40,9 @@ namespace RealisticSoundPlus.AudioEngineV2
             RoomGeometryCache.Clear();
         }
 
-        // Per-position airtightness — the engine's own per-cell seal test, available on any grid regardless of
-        // whether the whole structure is sealed to vacuum (so it survives an open front door).
+        // Per-position airtightness — the engine's own per-cell seal test. NOTE: this reflects whether the cell
+        // currently holds a sealed (pressurised) room, so it is FALSE in an unsealed/depressurised base even on a
+        // solid wall. For "is this block a sealing surface" independent of room state, use IsSealingBlockAtCell.
         public static bool IsCellAirtight(IMyCubeGrid grid, Vector3I cell)
         {
             if (grid == null)
@@ -50,6 +51,24 @@ namespace RealisticSoundPlus.AudioEngineV2
             try
             {
                 return grid.IsRoomAtPositionAirtight(cell);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        // Whether the block occupying a cell is a sealing (airtight-by-definition) surface - full armour, glass/
+        // window, solid plate. Independent of whether the room is pressurised, so the thin-seal barrier loss
+        // works in an unsealed base too. Grated/open blocks (stairs, catwalks, railings) are not sealing.
+        public static bool IsSealingBlockAtCell(IMyCubeGrid grid, Vector3I cell)
+        {
+            if (grid == null)
+                return false;
+            try
+            {
+                IMySlimBlock slim = grid.GetCubeBlock(cell);
+                return slim != null && IsBlockSealing(slim);
             }
             catch
             {

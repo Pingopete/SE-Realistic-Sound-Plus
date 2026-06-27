@@ -1017,7 +1017,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                 float lossA = Clamp01(settings.PlayerFilterBlockSealedBarrierLoss);
                 if (lossA > 0f && hit && blockedMeters < blockThicknessScale * Math.Max(0.05f, settings.PlayerFilterSealedBarrierThinFactor)
                     && V2PlayerEnvironmentTelemetry.TryGetFirstGridHitFace(from, to, out VRage.Game.ModAPI.IMyCubeGrid sealGrid, out Vector3I sealCell)
-                    && V2GridStructureProbe.IsCellAirtight(sealGrid, sealCell))
+                    && V2GridStructureProbe.IsSealingBlockAtCell(sealGrid, sealCell))
                 {
                     transA = Math.Min(transA, 1f - lossA);
                     _thinSealHits = SaturatingIncrement(_thinSealHits);

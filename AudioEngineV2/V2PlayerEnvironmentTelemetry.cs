@@ -1541,7 +1541,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             if (rollSettings != null && rollSettings.PlayerEnvSealedBarrierLoss > 0f && hit
                 && blockedMeters < thicknessScale * Math.Max(0.05f, rollSettings.PlayerFilterSealedBarrierThinFactor)
                 && TryGetFirstGridHitFace(from, to, out VRage.Game.ModAPI.IMyCubeGrid sealRollGrid, out Vector3I sealRollCell)
-                && V2GridStructureProbe.IsCellAirtight(sealRollGrid, sealRollCell))
+                && V2GridStructureProbe.IsSealingBlockAtCell(sealRollGrid, sealRollCell))
             {
                 transRoll = Math.Min(transRoll, 1f - Clamp01(rollSettings.PlayerEnvSealedBarrierLoss));
                 if (_envThinSealHits < long.MaxValue) _envThinSealHits++;
@@ -1608,7 +1608,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                 if (dirSettings != null && dirSettings.PlayerEnvSealedBarrierLoss > 0f && hit
                     && blockedMeters < thicknessScale * Math.Max(0.05f, dirSettings.PlayerFilterSealedBarrierThinFactor)
                     && TryGetFirstGridHitFace(from, to, out VRage.Game.ModAPI.IMyCubeGrid sealDirGrid, out Vector3I sealDirCell)
-                    && V2GridStructureProbe.IsCellAirtight(sealDirGrid, sealDirCell))
+                    && V2GridStructureProbe.IsSealingBlockAtCell(sealDirGrid, sealDirCell))
                 {
                     transDir = Math.Min(transDir, 1f - Clamp01(dirSettings.PlayerEnvSealedBarrierLoss));
                     if (_envThinSealHits < long.MaxValue) _envThinSealHits++;
