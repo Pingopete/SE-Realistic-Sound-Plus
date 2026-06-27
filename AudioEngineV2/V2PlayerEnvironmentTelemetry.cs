@@ -1265,42 +1265,22 @@ namespace RealisticSoundPlus.AudioEngineV2
             cell.Sampled = true;
         }
 
+        // Aggregate EVERY sampled upper-hemisphere cell (weight 1 each). No confidence gate, no min-coverage
+        // guard: once the map has filled once it is always available, so the result never collapses to the crude
+        // empty-fallback and never flip-flops as you move. Each cell holds its last-probed openness (re-probed
+        // cyclically by the sweep), so the OpenFraction denominator is the steady sampled-cell count and the
+        // numerator drifts smoothly as cells refresh - a stable, predictable structural muffle.
         private static void AggregateEnvMap(ref int open, ref int blocked, ref float openWeight, ref float totalWeight, ref float weightedBlockedMeters, ref float weightedVoxelBlockedMeters)
         {
-            const float confidenceThreshold = 0.3f;
             int n = _envMapCellCount;
-
-            int envIncluded = 0;
             int sampledCells = 0;
             for (int i = 0; i < n; i++)
             {
                 EnvMapCell c = _envMap[i];
-                if (c.Sampled)
-                    sampledCells++;
-                if (c.Sampled && c.Confidence > confidenceThreshold && c.IncludeEnvironment && c.EnvironmentAvailable)
-                    envIncluded++;
-            }
-
-            // Coverage guard: until enough fresh directional cells exist, leave the accumulators at zero so the
-            // caller's empty-result fallback fires instead of trusting a partial hemisphere (no reset muffle sweep).
-            int minCoverage = Math.Max(8, n / 4);
-            _envMapDiagIncluded = envIncluded;
-            _envMapDiagSampled = sampledCells;
-            _envMapDiagMinCoverage = minCoverage;
-            _envMapDiagFallback = envIncluded < minCoverage;
-            if (envIncluded < minCoverage)
-                return;
-
-            for (int i = 0; i < n; i++)
-            {
-                EnvMapCell c = _envMap[i];
-                if (!c.Sampled || c.Confidence <= confidenceThreshold)
-                    continue;
-                if (!c.IncludeEnvironment || !c.EnvironmentAvailable)
+                if (!c.Sampled || !c.IncludeEnvironment || !c.EnvironmentAvailable)
                     continue;
 
-                // Binary inclusion gate: weight = 1 (NOT Confidence) so the denominator stays integral and the
-                // OpenFraction ratio is stable while moving — a decayed cell drops out wholesale until re-sampled.
+                sampledCells++;
                 totalWeight += 1f;
                 if (c.EnvironmentBlocked)
                 {
@@ -1315,20 +1295,24 @@ namespace RealisticSoundPlus.AudioEngineV2
                     openWeight += 1f;
                 }
             }
+
+            _envMapDiagIncluded = sampledCells;
+            _envMapDiagSampled = sampledCells;
+            _envMapDiagMinCoverage = 0;
+            _envMapDiagFallback = sampledCells == 0; // only true at cold start, before the first sweep fills cells
         }
 
+        // The map ONLY hard-resets on a genuine discontinuity that invalidates the cells outright: the first
+        // fill, a grid/contact change, or a probe-parameter change (ray length / thickness / voxel weight).
+        // Crucially it does NOT reset (or decay) on MOVEMENT, InsideShip, or mode changes - those keep the cells
+        // valid; the sweep just re-probes them in place. This is the core of the stability fix: walking around a
+        // sealed base no longer wipes the map or drops its coverage, so the muffle holds steady.
         private static void PrepareEnvMapAccumulator(V2AudioListenerState listener, Vector3D position, float rayLength, float thicknessScale, float voxelWeight, RealisticSoundPlusSettings settings)
         {
-            float resetMeters = Math.Max(1f, settings.PlayerEnvMapResetMoveMeters);
-            float resetSq = resetMeters * resetMeters;
             bool reset = !AnyCellSampled()
                 || _envMapAnchor == Vector3D.Zero
-                || Vector3D.DistanceSquared(position, _envMapAnchor) > resetSq
                 || listener.GridEntityId != _envMapGridId
                 || listener.ContactGridEntityId != _envMapContactGridId
-                || listener.InsideShip != _envMapInsideShip
-                || listener.VanillaFallback != _envMapVanillaFallback
-                || !string.Equals(listener.ModeName ?? string.Empty, _envMapModeName ?? string.Empty, StringComparison.Ordinal)
                 || Math.Abs(rayLength - _envMapRayLength) > 0.25f
                 || Math.Abs(thicknessScale - _envMapThicknessScale) > 0.05f
                 || Math.Abs(voxelWeight - _envMapVoxelWeight) > 0.01f;
@@ -1336,21 +1320,10 @@ namespace RealisticSoundPlus.AudioEngineV2
             if (reset)
             {
                 ClearEnvMapCells();
-                _envMapAnchor = position;
                 _envMapSweepIndex = 0;
             }
-            else
-            {
-                double moved = Vector3D.Distance(position, _envMapAnchor);
-                if (moved > 0.0001)
-                {
-                    float decay = (float)Math.Exp(-moved / Math.Max(0.01f, settings.PlayerEnvMapConfidenceDecayMeters));
-                    for (int i = 0; i < _envMapCellCount; i++)
-                        _envMap[i].Confidence *= decay;
-                    _envMapAnchor = position;
-                }
-            }
 
+            _envMapAnchor = position;
             _envMapGridId = listener.GridEntityId;
             _envMapContactGridId = listener.ContactGridEntityId;
             _envMapInsideShip = listener.InsideShip;

@@ -217,20 +217,22 @@ namespace RealisticSoundPlus
             AddSlider(content, ref y, "Thin Wall Muffle", "thinsealmuffle", 0f, 1f, 2, () => SettingsManager.Current.PlayerFilterBlockSealedBarrierLoss, "One knob for blocks AND wind: extra muffling through a THIN sealed face (glass/plate). 0 = off, ~0.7 = strong. Thick walls and open gratings are unaffected.");
 
             _currentAccent = EnvironmentPanel;
-            AddSection(content, ref y, "Environment/Reverb Geometry");
+            // ENV MUFFLE PIPELINE: rays are cast over the sky dome; each direction is open (sky) or blocked (by
+            // structure of a given thickness); the persistent directional map stores those open/blocked readings;
+            // the OPEN-SKY FRACTION (shaped by the aperture curve) becomes the ambient muffle. The map persists
+            // and re-probes in place as you move, so the muffle stays stable rather than re-evaluating from scratch.
+            AddSection(content, ref y, "Environment Sealing (ambient muffle)");
             AddInlineReadout(content, ref y, V2PlayerFilterRuntime.FormatEnvironmentLiveReadout, "Live env output: covered sky, final muffling, and final volume.");
-            AddSlider(content, ref y, "Env/Reverb Ray Length", "envreverbray", 5f, 1000f, 0, () => SettingsManager.Current.PlayerEnvRayLength, "Shared radius for wind occlusion and room reverb rays; higher samples farther openings and larger spaces.", true);
-            AddSlider(content, ref y, "Env Structure Thickness", "envstructurethickness", 0.1f, 20f, 2, () => SettingsManager.Current.PlayerEnvStructureThicknessScale, "Wall thickness scale for env rays; higher lets thin cover leak more.");
-            AddSlider(content, ref y, "Env Voxel Weight", "voxelmuffle", 0f, 10f, 2, () => SettingsManager.Current.PlayerFilterVoxelOcclusionWeight, "ENVIRONMENT/wind occlusion only: how much terrain/asteroid voxels muffle the wind/ambient bed; higher = more muffling through terrain, 0 = off. (Block sounds have their own 'Block Voxel Weight'.)");
-            AddSlider(content, ref y, "Env Aperture Curve", "envaperturecurve", 0.1f, 10f, 2, () => SettingsManager.Current.PlayerEnvApertureCurve, "Shapes open-sky fraction; higher makes small openings count less.");
+            AddSlider(content, ref y, "Sky Probe Range", "envreverbray", 5f, 1000f, 0, () => SettingsManager.Current.PlayerEnvRayLength, "How far the sky-sealing rays reach (m). Longer detects farther openings (a distant skylight still lets ambient in); shorter only checks nearby cover. Also sizes the reverb room.", true);
+            AddSlider(content, ref y, "Cover Thickness To Seal", "envstructurethickness", 0.1f, 20f, 2, () => SettingsManager.Current.PlayerEnvStructureThicknessScale, "How much structure between you and the sky is needed to fully muffle: HIGHER = thick cover required (thin roofs/walls leak ambient in); LOWER = even thin cover seals you off.");
+            AddSlider(content, ref y, "Opening Sensitivity", "envaperturecurve", 0.1f, 10f, 2, () => SettingsManager.Current.PlayerEnvApertureCurve, "How a PARTIAL opening maps to loudness: HIGHER = a small gap barely brightens (stays muffled until a big opening); LOWER = any gap lets ambient through quickly.");
+            AddSlider(content, ref y, "Env Voxel Weight", "voxelmuffle", 0f, 10f, 2, () => SettingsManager.Current.PlayerFilterVoxelOcclusionWeight, "Adds terrain/asteroid voxels (upper hemisphere, planets only) as sky-sealing alongside grid structure; higher = terrain overhead muffles more, 0 = grid only. (Block sounds have their own 'Block Voxel Weight'.)");
 
-            AddSection(content, ref y, "Env Occlusion Map");
-            AddSlider(content, ref y, "Map Cell Count", "envmapcells", 32f, 192f, 0, () => SettingsManager.Current.PlayerEnvMapCellCount, "Persistent directional cells over the sphere; more = finer openness map, slightly more aggregation cost.");
-            AddSlider(content, ref y, "Map Cell Smoothing", "envmapalpha", 0.1f, 1f, 2, () => SettingsManager.Current.PlayerEnvMapCellAlpha, "Per-cell EMA on refresh; lower = steadier/slower, higher = snappier.");
-            AddSlider(content, ref y, "Map Move Decay", "envmapdecay", 0.25f, 8f, 2, () => SettingsManager.Current.PlayerEnvMapConfidenceDecayMeters, "Distance scale over which moving fades cell confidence; lower = re-samples sooner while walking.");
-            AddSlider(content, ref y, "Map Reset Move", "envmapreset", 1f, 16f, 1, () => SettingsManager.Current.PlayerEnvMapResetMoveMeters, "Hard-resets the map after moving this far (m) in one step (teleport-like jumps).");
-            AddSlider(content, ref y, "Map Rays/Update", "envmaprays", 4f, 32f, 0, () => SettingsManager.Current.PlayerEnvMapRaysPerUpdate, "Cells refreshed per update (ray budget); same cost regardless of cell count.");
-            AddToggle(content, ref y, "Env Map Cells", () => SettingsManager.Current.PlayerEnvMapDebugEnabled, value => SettingsManager.Current.PlayerEnvMapDebugEnabled = value, "Debug overlay: draws the persistent env cells (green open, red blocked, brightness = confidence).");
+            AddSection(content, ref y, "Sealing Map (resolution & response)");
+            AddSlider(content, ref y, "Map Detail", "envmapcells", 32f, 192f, 0, () => SettingsManager.Current.PlayerEnvMapCellCount, "Number of directions in the persistent sealing map. MORE = finer detail (a narrow skylight registers), slightly more cost; fewer = coarser but cheaper.");
+            AddSlider(content, ref y, "Map Response", "envmapalpha", 0.1f, 1f, 2, () => SettingsManager.Current.PlayerEnvMapCellAlpha, "How fast a direction adopts a new reading when re-probed. LOWER = steadier/slower to change; HIGHER = snappier. This is how quickly the muffle reacts when geometry around you changes.");
+            AddSlider(content, ref y, "Map Refresh Rate", "envmaprays", 4f, 32f, 0, () => SettingsManager.Current.PlayerEnvMapRaysPerUpdate, "Directions re-probed per update. HIGHER = the map adapts faster after you walk to a new area (full sweep = Map Detail / this). Does not affect a stationary reading.");
+            AddToggle(content, ref y, "Show Sealing Map", () => SettingsManager.Current.PlayerEnvMapDebugEnabled, value => SettingsManager.Current.PlayerEnvMapDebugEnabled = value, "Debug overlay: draws the directional sealing map as flat tiles on a dome - green = open sky, red = sealed/blocked.");
 
             AddSection(content, ref y, "Environment Bed");
             AddSlider(content, ref y, "Env Volume Muffle", "envvolmuffle", 0f, 4f, 2, () => SettingsManager.Current.PlayerFilterEnvironmentVolumeMuffleWeight, "Wind volume reduction from env muffle; higher fades harder, 0 tone only.");
