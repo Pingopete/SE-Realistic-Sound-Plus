@@ -624,11 +624,11 @@ namespace RealisticSoundPlus.AudioEngineV2
         // rejected the send on the processing-stage rule), so block dry currently bypasses the inline reverb.
         // ===================================================================================================
         private static readonly Dictionary<IMySourceVoice, BlockSplitRoute> BlockSplitRoutes = new Dictionary<IMySourceVoice, BlockSplitRoute>();
-        private static object _blockSplitSubmix;   // block voices route here (1 hop) -> master; carries the dry/wet reverb XAPO
-        private static object _blockReverbEffect;  // V2LiveReverbPocProcessor on _blockSplitSubmix; dry/wet via SetBlockDryWet
-        private static int _blockSubmixChannels = 2;
-        private static int _blockSubmixRate = 48000;
-        private static int _blockLiveScans;        // scans with a source live on the submix before attaching the reverb
+        private static object _blockSplitSubmix;   // PLAIN submix the block voices route to (1 hop) -> reverb bus. A 3D source
+                                                   // delivers audio fine to a plain submix; it does NOT to a hand-created
+                                                   // EFFECT submix (rawIn=0). So the reverb lives one hop downstream instead.
+        private static object _blockReverbBus;     // effect submix (XAPO) fed by _blockSplitSubmix (submix->submix) -> master
+        private static object _blockReverbEffect;  // V2LiveReverbPocProcessor on _blockReverbBus; dry/wet via SetBlockDryWet
         private static string _blockSplitGraph = "?";
         private static bool _blockSplitDisabledForSession;
         private static string _blockSplitStatus = "blocksplit=off";
@@ -716,6 +716,7 @@ namespace RealisticSoundPlus.AudioEngineV2
 
             DateTime now = DateTime.UtcNow;
             int added = 0, active = 0, onSplit = 0, reheal = 0;
+            float srcVol = -1f;
             string lastFail = null;
 
             try
@@ -741,6 +742,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                         {
                             route.LastSeenUtc = now;
                             active++;
+                            try { float v = voice.Volume * voice.VolumeMultiplier; if (v > srcVol) srcVol = v; } catch { }
 
                             // Is the managed descriptor cache still pointed at our split submix?
                             bool stillSplit = descriptors != null && DescriptorsContainOutputVoice(descriptors, _blockSplitSubmix);
@@ -810,7 +812,6 @@ namespace RealisticSoundPlus.AudioEngineV2
                 }
 
                 PurgeStaleBlockSplitRoutes(now);
-                AttachBlockReverbIfReady(active);
                 _blockSplitReheals += reheal;
                 _blockSplitStatus = string.Format(
                     CultureInfo.InvariantCulture,
@@ -824,8 +825,8 @@ namespace RealisticSoundPlus.AudioEngineV2
                     lastFail == null ? string.Empty : " lastFail=" + lastFail);
 
                 RealisticSoundPlusSettings s = SettingsManager.Current;
-                _blockSplitStatus += string.Format(CultureInfo.InvariantCulture, " dry={0:0.00} wet={1:0.00}",
-                    s == null ? -1f : s.BlockDryLevel, s == null ? -1f : s.BlockWetLevel);
+                _blockSplitStatus += string.Format(CultureInfo.InvariantCulture, " dry={0:0.00} wet={1:0.00} srcVol={2:0.000}",
+                    s == null ? -1f : s.BlockDryLevel, s == null ? -1f : s.BlockWetLevel, srcVol);
                 V2LiveReverbPocProcessor bv = _blockReverbEffect as V2LiveReverbPocProcessor;
                 if (bv != null)
                     _blockSplitStatus += " | verb " + bv.DiagnosticStatus;
@@ -843,10 +844,10 @@ namespace RealisticSoundPlus.AudioEngineV2
             }
         }
 
-        // Build the block reverb submix once: block voices route here (1 hop) and it carries a dry/wet reverb XAPO,
-        // then -> master. The dry/wet split happens INSIDE the XAPO (SetBlockDryWet), so there's no fan-out. A source
-        // CAN feed an XAPO submix when it's the direct target (the inline reverb proves this); the earlier fan-out
-        // failed only because a *submix* feeding an XAPO child returned XAUDIO2_E_INVALID_CALL on source-connect.
+        // Linear chain: source -> PLAIN submix (stage 0, carries the 3D source audio) -> EFFECT submix (stage 1, the
+        // dry/wet reverb XAPO) -> master. A 3D source delivers audio fine to a PLAIN submix but NOT to a hand-created
+        // EFFECT submix (rawIn=0, proven). A submix->submix send is a different, simpler path, so the reverb lives one
+        // hop downstream of the source instead of directly on the source's target.
         private static bool EnsureBlockSplitSubmix(object device, object gameVoice, object masterVoice, out string status)
         {
             if (_blockSplitSubmix != null)
@@ -861,7 +862,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                 return false;
             }
 
-            object submix = null;
+            object plain = null, effect = null, reverbEffect = null;
             try
             {
                 int channels = Math.Max(1, ResolveSourceInputChannelCount(gameVoice));
@@ -872,80 +873,64 @@ namespace RealisticSoundPlus.AudioEngineV2
                     sampleRate = 48000;
                 sampleRate = Math.Max(8000, sampleRate);
 
-                submix = CreateSubmixAtStage(device, channels, sampleRate, 0);
-                if (submix == null)
+                effect = CreateSubmixAtStage(device, channels, sampleRate, 1); // higher stage so plain(0) can send to it
+                plain = CreateSubmixAtStage(device, channels, sampleRate, 0);
+                if (plain == null || effect == null)
                 {
+                    DisposeComObject(effect); DisposeComObject(plain);
                     status = "blocksplit=submix-create-failed";
                     V2DebugLog.WriteEvent("block-split", status);
                     return false;
                 }
 
-                bool toMaster = TrySetSubmixOutputs(submix, masterVoice);
+                // dry/wet reverb XAPO on the EFFECT submix (fed by a submix, not a 3D source).
+                string verbStatus = "verb=skip";
+                MethodInfo setChain = ResolveSourceSetEffectChainMethod(effect.GetType());
+                if (setChain != null && _effectDescriptorType != null)
+                {
+                    try
+                    {
+                        V2LiveReverbPocProcessor verb = new V2LiveReverbPocProcessor(channels, sampleRate, false);
+                        verb.UpdateFromSettings(SettingsManager.Current);
+                        object descriptor = CreateSourceReverbDescriptor(verb, channels);
+                        Array descriptors = Array.CreateInstance(_effectDescriptorType, 1);
+                        descriptors.SetValue(descriptor, 0);
+                        setChain.Invoke(effect, new object[] { descriptors });
+                        ResolveSourceEnableEffectMethod(effect.GetType())?.Invoke(effect, new object[] { SourceReverbEffectIndex });
+                        reverbEffect = verb;
+                        verbStatus = "verb=on";
+                    }
+                    catch (Exception ex)
+                    {
+                        Exception inner = (ex as TargetInvocationException)?.InnerException ?? ex;
+                        verbStatus = "verb=fail:" + inner.GetType().Name;
+                        V2DebugLog.WriteEvent("block-split", "reverb-attach-failed " + inner.GetType().Name + ": " + inner.Message);
+                        DisposeComObject(reverbEffect);
+                        reverbEffect = null;
+                    }
+                }
 
-                // The reverb XAPO is attached LATER (AttachBlockReverbIfReady), once a source is actually flowing on
-                // this submix. Attaching to an EMPTY submix delivered a zeroed input to the effect (rawIn=0). The
-                // inline reverb works because it attaches to the already-live game submix; mirror that.
-                _blockSplitSubmix = submix;
-                _blockReverbEffect = null;
-                _blockSubmixChannels = channels;
-                _blockSubmixRate = sampleRate;
-                _blockLiveScans = 0;
+                bool effectToMaster = TrySetSubmixOutputs(effect, masterVoice);
+                bool plainToEffect = TrySetSubmixOutputs(plain, effect);
+
+                _blockSplitSubmix = plain;
+                _blockReverbBus = effect;
+                _blockReverbEffect = reverbEffect;
                 _blockSplitGraph = string.Format(
                     CultureInfo.InvariantCulture,
-                    "{0}ch/{1}Hz submix->m={2} verb=deferred",
-                    channels, sampleRate, toMaster ? "Y" : "N");
+                    "{0}ch/{1}Hz plain->fx={2} fx->m={3} {4}",
+                    channels, sampleRate, plainToEffect ? "Y" : "N", effectToMaster ? "Y" : "N", verbStatus);
                 status = "blocksplit=graph-built [" + _blockSplitGraph + "]";
-                V2DebugLog.WriteEvent("block-split", status + " master=" + TypeName(masterVoice) + " submix=" + TypeName(submix));
+                V2DebugLog.WriteEvent("block-split", status + " master=" + TypeName(masterVoice));
                 return true;
             }
             catch (Exception ex)
             {
-                DisposeComObject(submix);
+                DisposeComObject(reverbEffect); DisposeComObject(effect); DisposeComObject(plain);
                 _blockSplitDisabledForSession = true;
                 status = "blocksplit=graph-failed:" + ex.GetType().Name;
                 V2DebugLog.WriteEvent("block-split", status + " " + ex.Message);
                 return false;
-            }
-        }
-
-        // Attach the dry/wet reverb XAPO to the block submix AFTER a source has been live on it for a few scans (so
-        // it's attached to a flowing submix, like the inline reverb). _blockLiveScans gates the small settle delay.
-        private static void AttachBlockReverbIfReady(int active)
-        {
-            if (_blockSplitSubmix == null || _blockReverbEffect != null)
-                return;
-            if (active <= 0)
-            {
-                _blockLiveScans = 0;
-                return;
-            }
-            if (++_blockLiveScans < 3)
-                return;
-
-            MethodInfo setChain = ResolveSourceSetEffectChainMethod(_blockSplitSubmix.GetType());
-            if (setChain == null || _effectDescriptorType == null)
-                return;
-
-            object processor = null;
-            try
-            {
-                V2LiveReverbPocProcessor verb = new V2LiveReverbPocProcessor(_blockSubmixChannels, _blockSubmixRate, false);
-                verb.UpdateFromSettings(SettingsManager.Current);
-                processor = verb;
-                object descriptor = CreateSourceReverbDescriptor(verb, _blockSubmixChannels);
-                Array descriptors = Array.CreateInstance(_effectDescriptorType, 1);
-                descriptors.SetValue(descriptor, 0);
-                setChain.Invoke(_blockSplitSubmix, new object[] { descriptors });
-                ResolveSourceEnableEffectMethod(_blockSplitSubmix.GetType())?.Invoke(_blockSplitSubmix, new object[] { SourceReverbEffectIndex });
-                _blockReverbEffect = verb;
-                _blockSplitGraph = _blockSplitGraph.Replace("verb=deferred", "verb=on-live");
-                V2DebugLog.WriteEvent("block-split", "reverb-attached-live [" + _blockSplitGraph + "]");
-            }
-            catch (Exception ex)
-            {
-                Exception inner = (ex as TargetInvocationException)?.InnerException ?? ex;
-                V2DebugLog.WriteEvent("block-split", "reverb-attach-live-failed " + inner.GetType().Name + ": " + inner.Message);
-                DisposeComObject(processor);
             }
         }
 
@@ -1049,10 +1034,12 @@ namespace RealisticSoundPlus.AudioEngineV2
                     RestoreBlockSplitVoice(voices[i], reason);
             }
 
-            // Voices are restored to the game submix above; now tear down the block reverb submix + its XAPO.
+            // Voices are restored to the game submix above; now tear down the chain (plain submix first, then effect).
             DisposeComObject(_blockSplitSubmix);
+            DisposeComObject(_blockReverbBus);
             DisposeComObject(_blockReverbEffect);
             _blockSplitSubmix = null;
+            _blockReverbBus = null;
             _blockReverbEffect = null;
             _blockSplitGraph = "?";
             _blockSplitStatus = "blocksplit=restored:" + reason;
