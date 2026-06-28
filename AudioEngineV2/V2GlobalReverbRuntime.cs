@@ -700,6 +700,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                 blockVerb.UpdateFromSettings(settings); // keep the room character matched to the global reverb
                 blockVerb.SetBlockDryWet(Clamp(settings.BlockDryLevel, 0f, 1f), Clamp(settings.BlockWetLevel, 0f, 2f));
             }
+            TrySetVoiceVolume(_blockSplitSubmix, 1f, out _);
 
             MaintainBlockSplitTargets(gameVoice);
         }
@@ -912,14 +913,19 @@ namespace RealisticSoundPlus.AudioEngineV2
 
                 bool effectToMaster = TrySetSubmixOutputs(effect, masterVoice);
                 bool plainToEffect = TrySetSubmixOutputs(plain, effect);
+                // Explicitly set the submix->submix send gains to UNITY. The effect submix reads zero input (rawIn=0)
+                // despite the route being set, which means the default plain->effect output matrix is NOT unity here.
+                bool plainMtx = TrySetUnityMatrix(plain, effect, channels);
+                bool effectMtx = TrySetUnityMatrix(effect, masterVoice, channels);
 
                 _blockSplitSubmix = plain;
                 _blockReverbBus = effect;
                 _blockReverbEffect = reverbEffect;
                 _blockSplitGraph = string.Format(
                     CultureInfo.InvariantCulture,
-                    "{0}ch/{1}Hz plain->fx={2} fx->m={3} {4}",
-                    channels, sampleRate, plainToEffect ? "Y" : "N", effectToMaster ? "Y" : "N", verbStatus);
+                    "{0}ch/{1}Hz plain->fx={2} fx->m={3} mtx={4}{5} {6}",
+                    channels, sampleRate, plainToEffect ? "Y" : "N", effectToMaster ? "Y" : "N",
+                    plainMtx ? "Y" : "N", effectMtx ? "Y" : "N", verbStatus);
                 status = "blocksplit=graph-built [" + _blockSplitGraph + "]";
                 V2DebugLog.WriteEvent("block-split", status + " master=" + TypeName(masterVoice));
                 return true;
@@ -953,6 +959,54 @@ namespace RealisticSoundPlus.AudioEngineV2
 
             try { return Activator.CreateInstance(_submixVoiceType, device, channels, sampleRate); }
             catch { return null; }
+        }
+
+        // Sets the output matrix from `fromVoice` to `toVoice` to a unity diagonal (each channel -> itself at gain 1),
+        // forcing a submix->submix send to actually carry audio when its default matrix isn't unity.
+        private static bool TrySetUnityMatrix(object fromVoice, object toVoice, int channels)
+        {
+            if (fromVoice == null || toVoice == null)
+                return false;
+
+            try
+            {
+                channels = Math.Max(1, channels);
+                MethodInfo setMatrix = null;
+                foreach (MethodInfo m in fromVoice.GetType().GetMethods(InstanceMembers))
+                {
+                    if (!string.Equals(m.Name, "SetOutputMatrix", StringComparison.Ordinal))
+                        continue;
+                    ParameterInfo[] ps = m.GetParameters();
+                    if (ps.Length >= 4
+                        && ps[1].ParameterType == typeof(int)
+                        && ps[2].ParameterType == typeof(int)
+                        && ps[3].ParameterType == typeof(float[]))
+                    {
+                        setMatrix = m;
+                        break;
+                    }
+                }
+
+                if (setMatrix == null)
+                    return false;
+
+                float[] matrix = new float[channels * channels];
+                for (int i = 0; i < channels; i++)
+                    matrix[i * channels + i] = 1f;
+
+                ParameterInfo[] parameters = setMatrix.GetParameters();
+                object[] args = parameters.Length == 5
+                    ? new object[] { toVoice, channels, channels, matrix, 0 }
+                    : new object[] { toVoice, channels, channels, matrix };
+                setMatrix.Invoke(fromVoice, args);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Exception inner = (ex as TargetInvocationException)?.InnerException ?? ex;
+                V2DebugLog.WriteEvent("block-split", "unity-matrix-failed " + inner.GetType().Name + ": " + inner.Message);
+                return false;
+            }
         }
 
         private static bool TrySetSubmixOutputs(object submix, params object[] targets)
