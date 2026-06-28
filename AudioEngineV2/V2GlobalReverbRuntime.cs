@@ -604,19 +604,23 @@ namespace RealisticSoundPlus.AudioEngineV2
         }
 
         // ===================================================================================================
-        // Block dry/wet split PROBE (experimental, default OFF — gated on settings.BlockDryWetSplitEnabled)
+        // Block dry/wet split (experimental, default OFF — gated on settings.BlockDryWetSplitEnabled)
         // ---------------------------------------------------------------------------------------------------
         // Goal: pull a block sound's DRY path onto an RSP-owned submix so we can attenuate it independently of
-        // the reverb (so an occluded jukebox upstairs reads mostly as its reverb tail). The load-bearing unknown
-        // is whether REPLACING a live 3D voice's single output send (game submix -> our submix) is stable. The
-        // per-source APPEND the old global-bus route used crashed because the engine's per-frame Apply3D calls
-        // SetOutputMatrix(null,..) assuming exactly ONE destination; a 2nd send makes null ambiguous. A single-
-        // destination REPLACE preserves that one-destination invariant, so this probe tests it empirically with
-        // heavy logging + a hard panic-restore, scoped to SoundBlock/jukebox cues only for the first pass.
-        //   - Enabling at BlockDryLevel = 1 should be INAUDIBLE (the split submix forwards transparently).
-        //   - Lowering BlockDryLevel should drop only block sounds (proves independent dry control).
-        //   - The log channel "block-split" records routed/reverted counts: if "reverted" climbs every frame the
-        //     engine is re-asserting the destination in Apply3D and replace does NOT stick.
+        // the reverb (so an occluded jukebox upstairs reads mostly as its reverb tail).
+        //
+        // What two probes taught us about the engine:
+        //   * A single-destination REPLACE does NOT crash (the old APPEND did) — crash-safe.
+        //   * The engine re-asserts a 3D voice's output every frame from the MANAGED descriptor cache
+        //     (MySourceVoice.m_currentDescriptor), directly — NOT by calling SetOutputVoices (a postfix on that
+        //     method never fired). So routing via the NATIVE SourceVoice left m_currentDescriptor=game and the
+        //     engine kept overriding us back (continuous native re-routing fought it = the toggle glitch; a one-
+        //     time native route lost outright = no effect).
+        //   * Fix: route via the MANAGED MySourceVoice.SetOutputVoices, which updates m_currentDescriptor itself.
+        //     Then the engine re-asserts SPLIT every frame for free — no fight, no glitch — and we can READ
+        //     m_currentDescriptor (CurrentOutputVoices) to verify it stuck and only re-assert if it ever reverts.
+        // Scoped to SoundBlock/jukebox cues for now; still routes the split submix to master (the game submix
+        // rejected the send on the processing-stage rule), so block dry currently bypasses the inline reverb.
         // ===================================================================================================
         private static readonly Dictionary<IMySourceVoice, BlockSplitRoute> BlockSplitRoutes = new Dictionary<IMySourceVoice, BlockSplitRoute>();
         private static object _blockSplitSubmix;
@@ -625,16 +629,15 @@ namespace RealisticSoundPlus.AudioEngineV2
         private static bool _blockSplitDisabledForSession;
         private static string _blockSplitStatus = "blocksplit=off";
         private static DateTime _lastBlockSplitLogUtc = DateTime.MinValue;
-        private static long _blockSplitMaintained;   // times the Harmony postfix re-asserted our route (proves the seam)
+        private static long _blockSplitReheals;   // total times we had to re-assert after the engine reset m_currentDescriptor
 
         private sealed class BlockSplitRoute
         {
-            public object NativeSourceVoice;
-            public object OriginalOutputVoices;   // saved VoiceSendDescriptor[] to restore the voice's dry route
-            public object SplitDescriptors;       // pre-built VoiceSendDescriptor[] -> split submix (re-applied each call)
-            public object[] SplitInvokeArgs;      // cached { SplitDescriptors } to avoid per-call allocation in the patch
-            public MethodInfo SetOutputVoices;    // cached native SetOutputVoices method for this voice type
+            public MethodInfo ManagedSetOutput;   // MySourceVoice.SetOutputVoices(VoiceSendDescriptor[]) — updates m_currentDescriptor
+            public object[] SplitArgs;            // cached { split VoiceSendDescriptor[] } -> routes the dry to the split submix
+            public object[] OriginalArgs;         // cached { original VoiceSendDescriptor[] } -> restores the game route on stop/disable
             public DateTime LastSeenUtc;
+            public int Reheals;
             public string CueName;
         }
 
@@ -687,45 +690,18 @@ namespace RealisticSoundPlus.AudioEngineV2
             MaintainBlockSplitTargets(gameVoice);
         }
 
-        // Called from the Harmony postfix on MySourceVoice.SetOutputVoices for EVERY voice the engine routes. The
-        // engine re-asserts a 3D voice's output to the game submix each frame; here we immediately re-point our
-        // tracked block voices to the split submix in the SAME call stack (RSP wins before the buffer renders, the
-        // way the live-filter postfix does) so the destination stays stable and the old game<->split toggle glitch
-        // disappears. MUST be cheap: the membership lookup runs for every routed voice in the game.
-        public static void OnEngineSetOutputVoices(object managedVoice)
-        {
-            if (_blockSplitSubmix == null || BlockSplitRoutes.Count == 0)
-                return;
-
-            IMySourceVoice voice = managedVoice as IMySourceVoice;
-            if (voice == null || !BlockSplitRoutes.TryGetValue(voice, out BlockSplitRoute route))
-                return;
-
-            if (route.SetOutputVoices == null || route.NativeSourceVoice == null || route.SplitInvokeArgs == null)
-                return;
-
-            try
-            {
-                route.SetOutputVoices.Invoke(route.NativeSourceVoice, route.SplitInvokeArgs);
-                _blockSplitMaintained++;
-            }
-            catch
-            {
-                // Voice was recycled out from under us — drop it; the scan will re-acquire a live one.
-                BlockSplitRoutes.Remove(voice);
-            }
-        }
-
-        // Scan keeps the TARGET SET current (which block voices should be redirected) and caches what the postfix
-        // needs. It deliberately does NOT call SetOutputVoices itself any more — the postfix owns the actual routing,
-        // so there is no external per-frame mutation to fight the engine and no toggle glitch.
+        // Scan: adopt SoundBlock voices and route their DRY to the split submix via the MANAGED SetOutputVoices
+        // (the only call that updates m_currentDescriptor, which the engine re-asserts from each frame). For voices
+        // already adopted, READ m_currentDescriptor and re-assert ONLY if it has drifted back to the game submix —
+        // so there is no per-frame mutation when the route is holding (the expected case), and "reheal" measures
+        // whether the engine ever resets it.
         private static void MaintainBlockSplitTargets(object gameVoice)
         {
             if (_blockSplitSubmix == null || MyAudio.Static == null)
                 return;
 
             DateTime now = DateTime.UtcNow;
-            int added = 0, active = 0;
+            int added = 0, active = 0, onSplit = 0, reheal = 0;
             string lastFail = null;
 
             try
@@ -745,27 +721,43 @@ namespace RealisticSoundPlus.AudioEngineV2
                         if (!V2AuxCueClassifier.IsSoundBlockCue(cue))
                             continue;
 
-                        if (BlockSplitRoutes.TryGetValue(voice, out BlockSplitRoute existing))
+                        object[] descriptors = ResolveOutputVoiceDescriptors(voice);
+
+                        if (BlockSplitRoutes.TryGetValue(voice, out BlockSplitRoute route))
                         {
-                            existing.LastSeenUtc = now;
+                            route.LastSeenUtc = now;
                             active++;
+
+                            // Is the managed descriptor cache still pointed at our split submix?
+                            bool stillSplit = descriptors != null && DescriptorsContainOutputVoice(descriptors, _blockSplitSubmix);
+                            if (stillSplit)
+                            {
+                                onSplit++;
+                            }
+                            else if (route.ManagedSetOutput != null)
+                            {
+                                // Engine drifted it back to the game submix — re-assert (rare if the hypothesis holds).
+                                try { route.ManagedSetOutput.Invoke(voice, route.SplitArgs); route.Reheals++; reheal++; }
+                                catch { BlockSplitRoutes.Remove(voice); }
+                            }
                             continue;
                         }
 
-                        object[] descriptors = ResolveOutputVoiceDescriptors(voice);
                         if (descriptors == null)
                             continue;
 
-                        // Only adopt voices that are (still) on the game submix; leave HUD/music/foreign routes alone.
+                        // Only adopt voices currently on the game submix; leave HUD/music/foreign routes alone.
                         if (!DescriptorsContainOutputVoice(descriptors, gameVoice))
                             continue;
 
-                        if (!RspDynamicAudioFilters.TryResolveNativeSourceVoice(voice, out object sourceVoice) || sourceVoice == null)
+                        // Resolve the MANAGED SetOutputVoices on the wrapper itself (voice.GetType() == MySourceVoice),
+                        // NOT on the native SourceVoice — only the managed call updates m_currentDescriptor.
+                        MethodInfo managedSetOutput = ResolveSourceSetOutputVoicesMethod(voice.GetType());
+                        if (managedSetOutput == null)
+                        {
+                            lastFail = "no-managed-setoutput";
                             continue;
-
-                        MethodInfo setOutput = ResolveSourceSetOutputVoicesMethod(sourceVoice.GetType());
-                        if (setOutput == null)
-                            continue;
+                        }
 
                         object original = CreateVoiceSendDescriptorArrayFromDescriptors(descriptors);
                         object split = CreateVoiceSendDescriptorArray(_blockSplitSubmix);
@@ -775,32 +767,47 @@ namespace RealisticSoundPlus.AudioEngineV2
                             continue;
                         }
 
+                        object[] splitArgs = new[] { split };
+                        try
+                        {
+                            managedSetOutput.Invoke(voice, splitArgs);
+                        }
+                        catch (Exception ex)
+                        {
+                            lastFail = "route:" + ex.GetType().Name;
+                            V2DebugLog.WriteEvent("block-split", "initial-route-failed " + Trim(cue, 28) + " " + ex.GetType().Name + ": " + ex.Message);
+                            continue;
+                        }
+
                         BlockSplitRoutes[voice] = new BlockSplitRoute
                         {
-                            NativeSourceVoice = sourceVoice,
-                            OriginalOutputVoices = original,
-                            SplitDescriptors = split,
-                            SplitInvokeArgs = new[] { split },
-                            SetOutputVoices = setOutput,
+                            ManagedSetOutput = managedSetOutput,
+                            SplitArgs = splitArgs,
+                            OriginalArgs = new[] { original },
                             LastSeenUtc = now,
                             CueName = cue
                         };
                         added++;
                         active++;
+                        onSplit++;
+                        V2DebugLog.WriteEvent("block-split", "initial-route " + Trim(cue, 28) + " -> split/" + _blockSplitTargetName);
                     }
                 }
 
                 PurgeStaleBlockSplitRoutes(now);
+                _blockSplitReheals += reheal;
                 _blockSplitStatus = string.Format(
                     CultureInfo.InvariantCulture,
-                    "blocksplit=on/{0} active={1} added={2} maintained={3}{4}",
+                    "blocksplit=on/{0} active={1} onSplit={2} added={3} reheal={4} totalReheal={5}{6}",
                     _blockSplitTargetName,
                     active,
+                    onSplit,
                     added,
-                    _blockSplitMaintained,
+                    reheal,
+                    _blockSplitReheals,
                     lastFail == null ? string.Empty : " lastFail=" + lastFail);
 
-                if (added > 0 || now - _lastBlockSplitLogUtc > TimeSpan.FromSeconds(2))
+                if (added > 0 || reheal > 0 || now - _lastBlockSplitLogUtc > TimeSpan.FromSeconds(2))
                 {
                     _lastBlockSplitLogUtc = now;
                     V2DebugLog.WriteEvent("block-split", _blockSplitStatus);
@@ -920,12 +927,11 @@ namespace RealisticSoundPlus.AudioEngineV2
             BlockSplitRoutes.Remove(voice);
 
             // Only touch the live voice while it is still valid; a stopped voice has already been recycled.
-            if (voice.IsValid && route.NativeSourceVoice != null && route.OriginalOutputVoices != null)
+            if (voice.IsValid && route.ManagedSetOutput != null && route.OriginalArgs != null)
             {
                 try
                 {
-                    MethodInfo setOutput = ResolveSourceSetOutputVoicesMethod(route.NativeSourceVoice.GetType());
-                    setOutput?.Invoke(route.NativeSourceVoice, new[] { route.OriginalOutputVoices });
+                    route.ManagedSetOutput.Invoke(voice, route.OriginalArgs);
                 }
                 catch (Exception ex)
                 {
