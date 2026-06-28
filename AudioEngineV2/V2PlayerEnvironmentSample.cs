@@ -29,6 +29,8 @@ namespace RealisticSoundPlus.AudioEngineV2
         public float WindExposure;
         public float WindAudibility;
         public float LocalAtmosphere;
+        public bool PlanetEnvironmentAvailable;
+        public float NaturalGravityStrength;
         public bool OxygenProbeAvailable;
         public bool OxygenRoomPresent;
         public bool OxygenRoomAirtight;
@@ -41,5 +43,27 @@ namespace RealisticSoundPlus.AudioEngineV2
         public long OxygenGridEntityId;
         public string RoomName;
         public string ListenerMode;
+        public bool ReverbRoomAvailable;
+        public string ReverbRoomSource;
+        public int ReverbRoomRays;
+        public int ReverbRoomHits;
+        public int ReverbRoomOpenRays;
+        public float ReverbRoomNearDistance;
+        public float ReverbRoomMedianDistance;
+        public float ReverbRoomP75Distance;
+        public float ReverbRoomP90Distance;
+        public float ReverbRoomMeanDistance;
+        public float ReverbRoomClosedFraction;
+        public float ReverbRoomEquivalentRadius;
+        public float ReverbAutoRoomSize;
+        public float ReverbAutoDiffusion;
+        public float ReverbAutoDecaySeconds;
+        public float ReverbAutoEarlyGainDb;
+        public float ReverbAutoTailGainDb;
+        public float ReverbAutoPredelayMs;
+        public float ReverbAutoLateDelayMs;
+        public float ReverbAutoDensity;
+        public float ReverbAutoToneHz;
+        public float ReverbAutoHighFrequencyDb;
     }
 }

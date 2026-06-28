@@ -106,7 +106,8 @@ namespace RealisticSoundPlus.Patches
             if (KnownEngineCueEmitters.Contains(emitter))
                 return true;
 
-            return false;
+            return EngineAudioClassifier.IsKnownEngineCue(DescribeCue(emitter))
+                || EngineAudioClassifier.IsKnownEngineCue(DescribeSecondaryCue(emitter));
         }
 
         public static bool IsThrusterAudioEmitter(MyEntity3DSoundEmitter emitter)
@@ -156,6 +157,21 @@ namespace RealisticSoundPlus.Patches
                 string soundId = emitter.SoundId.ToString();
                 if (!string.IsNullOrWhiteSpace(soundId) && soundId != "NullOrEmpty")
                     return soundId;
+            }
+            catch
+            {
+            }
+
+            return "?";
+        }
+
+        private static string DescribeSecondaryCue(MyEntity3DSoundEmitter emitter)
+        {
+            try
+            {
+                string sound = emitter.SecondarySound?.CueEnum.ToString();
+                if (!string.IsNullOrWhiteSpace(sound) && sound != "NullOrEmpty")
+                    return sound;
             }
             catch
             {

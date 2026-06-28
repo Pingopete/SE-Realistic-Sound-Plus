@@ -6,6 +6,7 @@
     <LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>
     <ImplicitUsings>false</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
     <GameBin>C:\Program Files (x86)\Steam\steamapps\common\SpaceEngineers\Bin64</GameBin>
     <PulsarLocal>C:\Users\Pete\Desktop\pulsar\Legacy\Local\RealisticSoundPlus</PulsarLocal>
@@ -35,6 +36,14 @@
     </Reference>
     <Reference Include="SpaceEngineers.Game">
       <HintPath>$(GameBin)\SpaceEngineers.Game.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="SharpDX">
+      <HintPath>$(GameBin)\SharpDX.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="SharpDX.XAudio2">
+      <HintPath>$(GameBin)\SharpDX.XAudio2.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="VRage">

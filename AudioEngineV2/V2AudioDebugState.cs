@@ -132,14 +132,15 @@ namespace RealisticSoundPlus.AudioEngineV2
                     move),
                 string.Format(
                     CultureInfo.InvariantCulture,
-                    "Engine sources: grids={0} groups={1} thrusters={2} scan={3}/{4} emit={5}/{6}",
+                    "Engine sources: grids={0} groups={1} thrusters={2} scan={3}/{4} emit={5}/{6} remote={7}",
                     snapshot.GridStates,
                     snapshot.KnownSourceGroups,
                     snapshot.KnownThrusters,
                     snapshot.CensusProcessed,
                     snapshot.CensusRemoved,
                     snapshot.Thrusters.RegisteredEmitters,
-                    snapshot.Thrusters.UnfilteredEmitters),
+                    snapshot.Thrusters.UnfilteredEmitters,
+                    snapshot.Thrusters.RemoteCollapsedReports),
                 string.Format(
                     CultureInfo.InvariantCulture,
                     "Detail: {0} gain={1:0.00} active={2} idle={3}/{4:0.00} d2pos={5}",
@@ -232,6 +233,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             public int CensusReports;
             public int FallbackRejectedReports;
             public int GridMismatchReports;
+            public int RemoteCollapsedReports;
             public int RegisteredEmitters;
             public int UnfilteredEmitters;
             public int FilterHits;

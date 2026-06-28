@@ -75,7 +75,7 @@ namespace RealisticSoundPlus.AudioEngineV2
 
             return string.Format(
                 CultureInfo.InvariantCulture,
-                "route={0} inside={1} contact={2} fallback={3} listenerAtm={4:0.00} sourceAtm={5:0.00} pathPressure={6:0.00} path={7} override={8}",
+                "route={0} inside={1} contact={2} fallback={3} listenerAtm={4:0.00} sourceAtm={5:0.00} pathPressure={6:0.00} path={7} envOcc={9:0.00} override={8}",
                 sample.Route ?? "?",
                 sample.Inside ? "Y" : "N",
                 sample.Contact ? "Y" : "N",
@@ -86,7 +86,8 @@ namespace RealisticSoundPlus.AudioEngineV2
                 sample.DominantPath ?? "?",
                 SettingsManager.Current.V2AtmosphereOverrideEnabled
                     ? SettingsManager.Current.V2AtmosphereOverride.ToString("0.00", CultureInfo.InvariantCulture)
-                    : "off");
+                    : "off",
+                sample.AirEnvironmentOcclusion);
         }
 
         public static string FormatSummary()
@@ -100,10 +101,10 @@ namespace RealisticSoundPlus.AudioEngineV2
         public static string FormatEmitters(int maxLines)
         {
             if (Order.Count == 0)
-                return "dir/layer  dist  pressure  airW hullW airCut hullCut final Q gain airD hullD";
+                return "dir/layer  dist  pressure  airW hullW tr env airCut hullCut final Q gain airD hullD";
 
             StringBuilder builder = new StringBuilder();
-            builder.Append("dir/layer  dist  pressure  airW hullW airCut hullCut final Q gain airD hullD");
+            builder.Append("dir/layer  dist  pressure  airW hullW tr env airCut hullCut final Q gain airD hullD");
             int count = 0;
             for (int i = Order.Count - 1; i >= 0 && count < maxLines; i--)
             {
@@ -113,7 +114,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                 builder.AppendLine();
                 builder.AppendFormat(
                     CultureInfo.InvariantCulture,
-                    "{0,-10} {1,4:0}m {2,5:0.00} {3,4:0.00} {4,4:0.00} {5,5:0} {6,5:0} {7,5:0} {8,4:0.00} {9,4:0.00} {10,4:0.00} {11,4:0.00}",
+                    "{0,-10} {1,4:0}m {2,5:0.00} {3,4:0.00} {4,4:0.00} {12,4:0.00} {13,3:0.00} {5,5:0} {6,5:0} {7,5:0} {8,4:0.00} {9,4:0.00} {10,4:0.00} {11,4:0.00}",
                     Trim(sample.Label, 10),
                     sample.Distance,
                     sample.AirPressure,
@@ -125,7 +126,9 @@ namespace RealisticSoundPlus.AudioEngineV2
                     sample.FinalQ,
                     sample.DistanceGain,
                     sample.AirDistanceGain,
-                    sample.HullDistanceGain);
+                    sample.HullDistanceGain,
+                    sample.AirTransmission,
+                    sample.AirEnvironmentOcclusionActive ? sample.AirEnvironmentOcclusion : 0f);
                 count++;
             }
 

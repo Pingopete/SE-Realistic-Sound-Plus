@@ -1,13 +1,18 @@
 using System;
+using System.Reflection;
 using RealisticSoundPlus.Patches;
 using Sandbox.Game.Entities;
 using Sandbox.ModAPI;
+using VRage.Game.Entity;
 using VRageMath;
 
 namespace RealisticSoundPlus.AudioEngineV2
 {
     internal static class V2EngineFilterModel
     {
+        private static readonly BindingFlags InstanceMembers = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+        private static DateTime _lastFallbackAirRecoveryLogUtc = DateTime.MinValue;
+
         public static bool TryCalculate(MyEntity3DSoundEmitter emitter, RealisticSoundPlusSettings settings, out V2EngineFilterSample sample)
         {
             sample = default(V2EngineFilterSample);
@@ -17,17 +22,16 @@ namespace RealisticSoundPlus.AudioEngineV2
             if (!TryResolveListenerAndSource(emitter, out V2AudioListenerState listener, out Vector3D listenerPosition, out Vector3D sourcePosition))
                 return false;
 
+            ResolveEmitterSourceIds(emitter, out long sourceGridId, out _);
+
             float distance = (float)Vector3D.Distance(listenerPosition, sourcePosition);
             bool inside = listener.InsideShip;
-            bool contact = listener.SeatedInShip || listener.ContactGridEntityId != 0L || inside;
+            bool contact = IsHullPathViable(listener, sourceGridId);
             bool fallback = listener.VanillaFallback;
-            float externalListenerAtmosphere = listener.Atmosphere;
-            if (externalListenerAtmosphere <= 0f)
-                externalListenerAtmosphere = ExteriorSoundTransmission.GetAtmosphericPressure(listenerPosition);
-
-            float listenerAtmosphere = ResolveListenerAtmosphere(externalListenerAtmosphere, inside || contact);
+            float listenerAtmosphere = ResolveCameraAtmosphere(listenerPosition);
             float sourceAtmosphere = ExteriorSoundTransmission.GetAtmosphericPressure(sourcePosition);
-            float airPressure = Clamp01(Math.Max(listenerAtmosphere, sourceAtmosphere));
+            float airPressure = Clamp01(Math.Min(listenerAtmosphere, sourceAtmosphere));
+            float airTransmission = ResolveEnvironmentAirTransmission(settings, sourceAtmosphere, airPressure, out float airEnvironmentOcclusion, out bool airEnvironmentOcclusionActive);
 
             float airCutoff = DistanceCutoff(
                 settings.EngineFilterAirNearFrequency,
@@ -42,36 +46,18 @@ namespace RealisticSoundPlus.AudioEngineV2
                 settings.EngineFilterHullDistanceCurve,
                 distance);
 
-            if (inside)
-                airCutoff = Math.Min(airCutoff, settings.EngineFilterInteriorMaxFrequency);
-
             if (airPressure <= 0.01f)
                 airCutoff = settings.EngineFilterVacuumContactFrequency;
 
-            float airWeight = fallback ? 0f : airPressure;
-            if (inside)
-                airWeight *= settings.EngineFilterInteriorAirWeight;
-
-            float hullWeight = 0f;
-            if (!fallback && contact)
-            {
-                if (inside)
-                    hullWeight = 1f;
-                else if (airPressure <= 0.05f)
-                    hullWeight = 1f;
-                else
-                    hullWeight = 0.35f;
-            }
-
-            if (airWeight <= 0.001f && hullWeight <= 0.001f)
-                hullWeight = contact && !fallback ? 1f : 0f;
+            CalculatePathWeights(airPressure, airTransmission, contact, out float airWeight, out float hullWeight);
+            bool fallbackAirRecovered = fallback && airWeight > 0.001f;
 
             float finalCutoff = BlendCutoffs(airCutoff, airWeight, hullCutoff, hullWeight, settings.EngineFilterVacuumContactFrequency);
             float hullShare = (airWeight + hullWeight) <= 0.001f ? 1f : hullWeight / (airWeight + hullWeight);
             float finalQ = Lerp(settings.EngineFilterAirQ, settings.EngineFilterHullQ, Clamp01(hullShare));
             float airDistanceGain = SixDirectionSourceModel.EvaluateDistanceGain(distance, settings.EngineFilterAirRange, settings.EngineFilterAirDistanceCurve);
             float hullDistanceGain = SixDirectionSourceModel.EvaluateDistanceGain(distance, settings.EngineFilterHullRange, settings.EngineFilterHullDistanceCurve);
-            float distanceGain = BlendPathDistanceGain(airDistanceGain, airWeight, hullDistanceGain, hullWeight, contact, fallback);
+            float distanceGain = BlendPathDistanceGain(airDistanceGain, airWeight, hullDistanceGain, hullWeight, contact, fallback && !fallbackAirRecovered);
 
             sample = new V2EngineFilterSample
             {
@@ -84,6 +70,9 @@ namespace RealisticSoundPlus.AudioEngineV2
                 AirPressure = airPressure,
                 AirWeight = airWeight,
                 HullWeight = hullWeight,
+                AirTransmission = airTransmission,
+                AirEnvironmentOcclusion = airEnvironmentOcclusion,
+                AirEnvironmentOcclusionActive = airEnvironmentOcclusionActive,
                 AirCutoff = airCutoff,
                 HullCutoff = hullCutoff,
                 FinalCutoff = finalCutoff,
@@ -95,6 +84,9 @@ namespace RealisticSoundPlus.AudioEngineV2
                 Contact = contact,
                 Fallback = fallback
             };
+
+            if (fallbackAirRecovered)
+                LogFallbackAirRecovery(sample);
 
             return true;
         }
@@ -108,15 +100,13 @@ namespace RealisticSoundPlus.AudioEngineV2
             if (!TryResolveListenerAndSource(emitter, out V2AudioListenerState listener, out Vector3D listenerPosition, out Vector3D sourcePosition))
                 return false;
 
+            ResolveEmitterSourceIds(emitter, out long sourceGridId, out _);
+
             float distance = (float)Vector3D.Distance(listenerPosition, sourcePosition);
             bool inside = listener.InsideShip;
-            bool contact = listener.SeatedInShip || listener.ContactGridEntityId != 0L || inside;
+            bool contact = IsHullPathViable(listener, sourceGridId);
             bool fallback = listener.VanillaFallback;
-            float externalListenerAtmosphere = listener.Atmosphere;
-            if (externalListenerAtmosphere <= 0f)
-                externalListenerAtmosphere = ExteriorSoundTransmission.GetAtmosphericPressure(listenerPosition);
-
-            float listenerAtmosphere = ResolveListenerAtmosphere(externalListenerAtmosphere, inside || contact);
+            float listenerAtmosphere = ResolveCameraAtmosphere(listenerPosition);
             float sourceAtmosphere = ExteriorSoundTransmission.GetAtmosphericPressure(sourcePosition);
             float hullCutoff = DistanceCutoff(
                 settings.EngineFilterHullNearFrequency,
@@ -125,7 +115,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                 settings.EngineFilterHullDistanceCurve,
                 distance);
             float hullDistanceGain = SixDirectionSourceModel.EvaluateDistanceGain(distance, settings.EngineFilterHullRange, settings.EngineFilterHullDistanceCurve);
-            float hullWeight = !fallback && contact ? 1f : 0f;
+            float hullWeight = contact ? 1f : 0f;
 
             sample = new V2EngineFilterSample
             {
@@ -135,9 +125,12 @@ namespace RealisticSoundPlus.AudioEngineV2
                 Distance = distance,
                 ListenerAtmosphere = listenerAtmosphere,
                 SourceAtmosphere = sourceAtmosphere,
-                AirPressure = Clamp01(Math.Max(listenerAtmosphere, sourceAtmosphere)),
+                AirPressure = Clamp01(listenerAtmosphere),
                 AirWeight = 0f,
                 HullWeight = hullWeight,
+                AirTransmission = 0f,
+                AirEnvironmentOcclusion = 0f,
+                AirEnvironmentOcclusionActive = false,
                 AirCutoff = 0f,
                 HullCutoff = hullCutoff,
                 FinalCutoff = hullCutoff,
@@ -153,7 +146,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             return true;
         }
 
-        public static float CalculateDistanceGain(V2AudioListenerState listener, Vector3D sourcePosition, RealisticSoundPlusSettings settings)
+        public static float CalculateDistanceGain(V2AudioListenerState listener, Vector3D sourcePosition, RealisticSoundPlusSettings settings, long sourceGridId = 0L, long sourceEntityId = 0L)
         {
             if (settings == null)
                 return 1f;
@@ -166,21 +159,18 @@ namespace RealisticSoundPlus.AudioEngineV2
                 return 1f;
 
             float distance = (float)Vector3D.Distance(listenerPosition, sourcePosition);
-            bool inside = listener.InsideShip;
-            bool contact = listener.SeatedInShip || listener.ContactGridEntityId != 0L || inside;
+            bool contact = IsHullPathViable(listener, sourceGridId);
             bool fallback = listener.VanillaFallback;
-            float externalListenerAtmosphere = listener.Atmosphere;
-            if (externalListenerAtmosphere <= 0f)
-                externalListenerAtmosphere = ExteriorSoundTransmission.GetAtmosphericPressure(listenerPosition);
-
-            float listenerAtmosphere = ResolveListenerAtmosphere(externalListenerAtmosphere, inside || contact);
+            float listenerAtmosphere = ResolveCameraAtmosphere(listenerPosition);
             float sourceAtmosphere = ExteriorSoundTransmission.GetAtmosphericPressure(sourcePosition);
-            float airPressure = Clamp01(Math.Max(listenerAtmosphere, sourceAtmosphere));
+            float airPressure = Clamp01(Math.Min(listenerAtmosphere, sourceAtmosphere));
+            float airTransmission = ResolveEnvironmentAirTransmission(settings, sourceAtmosphere, airPressure, out _, out _);
 
-            CalculatePathWeights(settings, airPressure, inside, contact, fallback, out float airWeight, out float hullWeight);
+            CalculatePathWeights(airPressure, airTransmission, contact, out float airWeight, out float hullWeight);
             float airDistanceGain = SixDirectionSourceModel.EvaluateDistanceGain(distance, settings.EngineFilterAirRange, settings.EngineFilterAirDistanceCurve);
             float hullDistanceGain = SixDirectionSourceModel.EvaluateDistanceGain(distance, settings.EngineFilterHullRange, settings.EngineFilterHullDistanceCurve);
-            return BlendPathDistanceGain(airDistanceGain, airWeight, hullDistanceGain, hullWeight, contact, fallback);
+            bool fallbackAirRecovered = fallback && airWeight > 0.001f;
+            return BlendPathDistanceGain(airDistanceGain, airWeight, hullDistanceGain, hullWeight, contact, fallback && !fallbackAirRecovered);
         }
 
         public static float CalculateHullDistanceGain(Vector3D sourcePosition, RealisticSoundPlusSettings settings)
@@ -214,6 +204,174 @@ namespace RealisticSoundPlus.AudioEngineV2
             return listenerPosition != Vector3D.Zero && sourcePosition != Vector3D.Zero;
         }
 
+        private static void ResolveEmitterSourceIds(MyEntity3DSoundEmitter emitter, out long sourceGridId, out long sourceEntityId)
+        {
+            sourceGridId = 0L;
+            sourceEntityId = 0L;
+            if (emitter == null)
+                return;
+
+            if (AudioEngineV2Runtime.TryGetEmitterSourceIds(emitter, out sourceGridId, out sourceEntityId) && (sourceGridId != 0L || sourceEntityId != 0L))
+                return;
+
+            object entity = TryReadMember(emitter, "Entity")
+                ?? TryReadMember(emitter, "m_entity")
+                ?? TryReadMember(emitter, "m_sourceEntity")
+                ?? TryReadMember(emitter, "SourceEntity");
+            TryResolveEntityIds(entity, 0, ref sourceGridId, ref sourceEntityId);
+        }
+
+        private static bool TryResolveEntityIds(object candidate, int depth, ref long sourceGridId, ref long sourceEntityId)
+        {
+            if (candidate == null || depth > 4)
+                return false;
+
+            if (candidate is MyCubeGrid grid)
+            {
+                sourceGridId = grid.EntityId;
+                if (sourceEntityId == 0L)
+                    sourceEntityId = grid.EntityId;
+                return sourceGridId != 0L;
+            }
+
+            if (candidate is MyCubeBlock block)
+            {
+                sourceEntityId = block.EntityId;
+                sourceGridId = block.CubeGrid != null ? block.CubeGrid.EntityId : 0L;
+                return sourceEntityId != 0L || sourceGridId != 0L;
+            }
+
+            if (candidate is MyEntity entity)
+            {
+                sourceEntityId = entity.EntityId;
+                object cubeGrid = TryReadMember(entity, "CubeGrid");
+                if (TryResolveEntityIds(cubeGrid, depth + 1, ref sourceGridId, ref sourceEntityId))
+                    return true;
+            }
+
+            object cubeGridMember = TryReadMember(candidate, "CubeGrid");
+            if (TryResolveEntityIds(cubeGridMember, depth + 1, ref sourceGridId, ref sourceEntityId))
+                return true;
+
+            object nestedEntity = TryReadMember(candidate, "Entity");
+            if (nestedEntity != null && !ReferenceEquals(nestedEntity, candidate) && TryResolveEntityIds(nestedEntity, depth + 1, ref sourceGridId, ref sourceEntityId))
+                return true;
+
+            object parent = TryReadMember(candidate, "Parent");
+            return parent != null && !ReferenceEquals(parent, candidate) && TryResolveEntityIds(parent, depth + 1, ref sourceGridId, ref sourceEntityId);
+        }
+
+        private static bool IsHullPathViable(V2AudioListenerState listener, long sourceGridId)
+        {
+            if (sourceGridId == 0L)
+                return false;
+
+            if (IsOutsideSeatCamera(listener))
+                return false;
+
+            if (listener.ContactGridEntityId != 0L && AreGridsAudioCoupled(sourceGridId, listener.ContactGridEntityId))
+                return true;
+
+            return listener.SeatedInShip
+                && listener.InsideShip
+                && listener.GridEntityId != 0L
+                && AreGridsAudioCoupled(sourceGridId, listener.GridEntityId);
+        }
+
+        private static bool IsOutsideSeatCamera(V2AudioListenerState listener)
+        {
+            return listener.SeatedInShip
+                && !listener.InsideShip
+                && (listener.ModeName ?? string.Empty).IndexOf("outside-seat-camera", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static bool AreGridsAudioCoupled(long sourceGridId, long listenerGridId)
+        {
+            if (sourceGridId == 0L || listenerGridId == 0L)
+                return false;
+
+            if (sourceGridId == listenerGridId)
+                return true;
+
+            if (!AudioEngineV2Runtime.TryGetGridById(sourceGridId, out MyCubeGrid sourceGrid)
+                || !AudioEngineV2Runtime.TryGetGridById(listenerGridId, out MyCubeGrid listenerGrid))
+                return false;
+
+            return TryInvokeGridCoupling(sourceGrid, listenerGrid)
+                || TryInvokeGridCoupling(listenerGrid, sourceGrid);
+        }
+
+        private static bool TryInvokeGridCoupling(MyCubeGrid left, MyCubeGrid right)
+        {
+            if (left == null || right == null)
+                return false;
+
+            string[] names = { "IsSameConstructAs", "IsInSameLogicalGroupAs", "IsInSamePhysicalGroupAs" };
+            Type type = left.GetType();
+            for (int i = 0; i < names.Length; i++)
+            {
+                try
+                {
+                    MethodInfo method = FindCompatibleGridMethod(type, names[i], right);
+                    if (method == null)
+                        continue;
+
+                    object result = method.Invoke(left, new object[] { right });
+                    if (result is bool coupled && coupled)
+                        return true;
+                }
+                catch
+                {
+                }
+            }
+
+            return false;
+        }
+
+        private static MethodInfo FindCompatibleGridMethod(Type type, string name, MyCubeGrid argument)
+        {
+            if (type == null || argument == null)
+                return null;
+
+            MethodInfo[] methods = type.GetMethods(InstanceMembers);
+            Type argumentType = argument.GetType();
+            for (int i = 0; i < methods.Length; i++)
+            {
+                MethodInfo method = methods[i];
+                if (!string.Equals(method.Name, name, StringComparison.Ordinal))
+                    continue;
+
+                ParameterInfo[] parameters = method.GetParameters();
+                if (parameters.Length != 1)
+                    continue;
+
+                if (parameters[0].ParameterType.IsAssignableFrom(argumentType))
+                    return method;
+            }
+
+            return null;
+        }
+
+        private static object TryReadMember(object instance, string name)
+        {
+            if (instance == null || string.IsNullOrWhiteSpace(name))
+                return null;
+
+            try
+            {
+                PropertyInfo property = instance.GetType().GetProperty(name, InstanceMembers);
+                if (property != null)
+                    return property.GetValue(instance, null);
+
+                FieldInfo field = instance.GetType().GetField(name, InstanceMembers);
+                return field?.GetValue(instance);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
         private static float DistanceCutoff(float nearFrequency, float farFrequency, float range, float curve, float distance)
         {
             float normalized = Clamp01(distance / Math.Max(1f, range));
@@ -221,34 +379,60 @@ namespace RealisticSoundPlus.AudioEngineV2
             return Lerp(nearFrequency, farFrequency, shaped);
         }
 
-        private static void CalculatePathWeights(RealisticSoundPlusSettings settings, float airPressure, bool inside, bool contact, bool fallback, out float airWeight, out float hullWeight)
+        private static void CalculatePathWeights(float airPressure, float airTransmission, bool hullContact, out float airWeight, out float hullWeight)
         {
-            airWeight = fallback ? 0f : airPressure;
-            if (inside)
-                airWeight *= settings.EngineFilterInteriorAirWeight;
-
-            hullWeight = 0f;
-            if (!fallback && contact)
-            {
-                if (inside)
-                    hullWeight = 1f;
-                else if (airPressure <= 0.05f)
-                    hullWeight = 1f;
-                else
-                    hullWeight = 0.35f;
-            }
-
-            if (airWeight <= 0.001f && hullWeight <= 0.001f)
-                hullWeight = contact && !fallback ? 1f : 0f;
+            airWeight = Clamp01(airPressure) * Clamp01(airTransmission);
+            hullWeight = hullContact ? 1f : 0f;
         }
 
-        private static float ResolveListenerAtmosphere(float externalAtmosphere, bool allowLocalRoomPressure)
+        private static float ResolveEnvironmentAirTransmission(RealisticSoundPlusSettings settings, float sourceAtmosphere, float airPressure, out float airEnvironmentOcclusion, out bool active)
         {
-            float pressure = Clamp01(externalAtmosphere);
-            if (allowLocalRoomPressure && V2PlayerEnvironmentTelemetry.TryGetLatest(out V2PlayerEnvironmentSample sample))
-                pressure = Math.Max(pressure, Clamp01(sample.LocalAtmosphere));
+            airEnvironmentOcclusion = 0f;
+            active = false;
+            if (settings == null || settings.EngineFilterAirEnvironmentOcclusionContribution <= 0f)
+                return 1f;
 
-            return pressure;
+            if (sourceAtmosphere <= 0.01f || airPressure <= 0.01f)
+                return 1f;
+
+            if (!V2PlayerEnvironmentTelemetry.TryGetLatest(out V2PlayerEnvironmentSample env))
+                return 1f;
+
+            float apertureOcclusion = Clamp01(1f - env.ApertureFraction);
+            float finalOcclusion = Clamp01(env.FinalMuffling);
+            float environmentOcclusion = Math.Max(finalOcclusion, apertureOcclusion);
+            airEnvironmentOcclusion = Clamp01(environmentOcclusion * settings.EngineFilterAirEnvironmentOcclusionContribution);
+            active = airEnvironmentOcclusion > 0.001f;
+            return Clamp01(1f - airEnvironmentOcclusion);
+        }
+
+        private static void LogFallbackAirRecovery(V2EngineFilterSample sample)
+        {
+            DateTime now = DateTime.UtcNow;
+            if (now - _lastFallbackAirRecoveryLogUtc < TimeSpan.FromSeconds(1))
+                return;
+
+            _lastFallbackAirRecoveryLogUtc = now;
+            V2DebugLog.WriteEvent("engine-filter-fallback-air", string.Format(
+                System.Globalization.CultureInfo.InvariantCulture,
+                "route={0} label={1} d={2:0}m pressure={3:0.00} airW={4:0.00} hullW={5:0.00} final={6:0}Hz gain={7:0.00}",
+                sample.Route ?? "?",
+                sample.Label ?? "?",
+                sample.Distance,
+                sample.AirPressure,
+                sample.AirWeight,
+                sample.HullWeight,
+                sample.FinalCutoff,
+                sample.DistanceGain));
+        }
+
+        private static float ResolveCameraAtmosphere(Vector3D listenerPosition)
+        {
+            RealisticSoundPlusSettings settings = SettingsManager.Current;
+            if (settings != null && settings.V2AtmosphereOverrideEnabled)
+                return Clamp01(settings.V2AtmosphereOverride);
+
+            return Clamp01(ExteriorSoundTransmission.GetAtmosphericPressure(listenerPosition));
         }
 
         private static float BlendPathDistanceGain(float airDistanceGain, float airWeight, float hullDistanceGain, float hullWeight, bool contact, bool fallback)
@@ -258,15 +442,12 @@ namespace RealisticSoundPlus.AudioEngineV2
 
             airWeight = Math.Max(0f, airWeight);
             hullWeight = Math.Max(0f, hullWeight);
-            float total = airWeight + hullWeight;
-            if (total <= 0.001f && contact)
+            float airContribution = Clamp01(airDistanceGain * airWeight);
+            float hullContribution = Clamp01(hullDistanceGain * hullWeight);
+            if (airContribution <= 0.001f && hullContribution <= 0.001f && contact)
                 return hullDistanceGain;
 
-            if (total <= 0.001f)
-                return 0f;
-
-            float gain = (airDistanceGain * airWeight + hullDistanceGain * hullWeight) / total;
-            return Clamp01(gain);
+            return Clamp01(1f - (1f - airContribution) * (1f - hullContribution));
         }
 
         private static float BlendCutoffs(float airCutoff, float airWeight, float hullCutoff, float hullWeight, float fallbackCutoff)

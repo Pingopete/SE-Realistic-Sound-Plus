@@ -152,65 +152,48 @@ namespace RealisticSoundPlus
         {
             float y = -ContentHeight * 0.5f + 0.035f;
 
-            AddMajorSection(content, ref y, "Engine Audio", EngineAudioPanel);
-            AddSection(content, ref y, "Routes");
-            AddToggle(content, ref y, "Engine Detail", () => SettingsManager.Current.V2DetailEnabled, value => SettingsManager.Current.V2DetailEnabled = value, "Adds positional thruster detail emitters to the V2 engine mix.");
-            AddToggle(content, ref y, "Detail Idle", () => SettingsManager.Current.V2DetailIdleEnabled, value => SettingsManager.Current.V2DetailIdleEnabled = value, "Keeps low-thrust idle detail audible; off quiets inactive engines faster.");
-            AddToggle(content, ref y, "Detail 2D Positional", () => SettingsManager.Current.V2Detail2DPositionalTest, value => SettingsManager.Current.V2Detail2DPositionalTest = value, "Uses vanilla 2D detail cues from 3D emitters for route testing.");
-            AddToggle(content, ref y, "Engine State", () => SettingsManager.Current.V2StateEnabled, value => SettingsManager.Current.V2StateEnabled = value, "Adds grouped ship-state layer; on thickens the engine bed.");
-            AddToggle(content, ref y, "State 2D Positional", () => SettingsManager.Current.V2State2DPositionalTest, value => SettingsManager.Current.V2State2DPositionalTest = value, "Uses 2D state cues positionally for state-layer testing.");
-            AddToggle(content, ref y, "Audio Overlay", () => AudioDebugOverlay.Enabled, AudioDebugOverlay.SetEnabled, "Shows live audio voices, routes, and gains on screen.");
-            AddToggle(content, ref y, "Debug Log", () => SettingsManager.Current.V2DebugLogEnabled, value => SettingsManager.Current.V2DebugLogEnabled = value, "Writes V2 snapshots and events to the RSP debug log.");
+            AddMajorSection(content, ref y, "Thruster Audio", EngineAudioPanel);
+            AddSection(content, ref y, "Source Layers");
+            AddToggle(content, ref y, "Thruster Detail", () => SettingsManager.Current.V2DetailEnabled, value => SettingsManager.Current.V2DetailEnabled = value, "Adds positional thruster texture to the engine mix.");
+            AddToggle(content, ref y, "Idle Layer", () => SettingsManager.Current.V2DetailIdleEnabled, value => SettingsManager.Current.V2DetailIdleEnabled = value, "Keeps low-thrust standby texture audible.");
+            AddToggle(content, ref y, "State Layer", () => SettingsManager.Current.V2StateEnabled, value => SettingsManager.Current.V2StateEnabled = value, "Adds grouped ship-state body to the engine bed.");
 
-            AddSection(content, ref y, "Gains And Curves");
+            AddSection(content, ref y, "Level And Motion");
             AddSlider(content, ref y, "Overall Gain", "gain", 0f, 4f, 2, () => SettingsManager.Current.EngineGain, "Master V2 engine gain; higher louder, lower more headroom.");
             AddSlider(content, ref y, "Detail Gain", "detailgain", 0f, 4f, 2, () => SettingsManager.Current.V2DetailGain, "Volume for thrust detail; higher more mechanical texture.");
             AddSlider(content, ref y, "Idle Gain", "idlegain", 0f, 4f, 2, () => SettingsManager.Current.V2DetailIdleGain, "Volume for idle detail; higher more standby hum.");
             AddSlider(content, ref y, "State Gain", "stategain", 0f, 4f, 2, () => SettingsManager.Current.V2StateGain, "Volume for state layer; higher fuller engine bed.");
             AddSlider(content, ref y, "Output Curve", "curve", 0.25f, 10f, 2, () => SettingsManager.Current.AudioCurveExponent, "Shapes thrust-to-volume; higher favors high thrust, lower raises low thrust.");
             AddSlider(content, ref y, "Presence Floor", "presence", 0f, 1f, 2, () => SettingsManager.Current.MinimumShipPresence, "Minimum small-thruster presence; higher keeps tiny thrusters audible.");
-
-            AddSection(content, ref y, "Distance And Motion");
-            AddSlider(content, ref y, "Legacy Emitter Distance", "dist", 1f, 1000f, 0, () => SettingsManager.Current.V2EmitterDistance, "Legacy fallback fade distance; engine V2 mainly uses air/hull ranges.", true);
-            AddSlider(content, ref y, "Legacy Distance Curve", "distcurve", 0.1f, 5f, 2, () => SettingsManager.Current.V2DistanceCurve, "Legacy fallback fade shape; higher drops faster near range end.");
             AddSlider(content, ref y, "Command Smoothing", "cmdsmooth", 0f, 5000f, 0, () => SettingsManager.Current.V2DetailCommandSmoothingMs, "Smooths thrust input before detail audio; higher slower, lower snappier.");
             AddSlider(content, ref y, "Emitter Fade", "emitterfade", 0f, 1000f, 0, () => SettingsManager.Current.V2EmitterFadeInMs, "Fade-in for new emitters; higher softer starts.");
             AddSlider(content, ref y, "Volume Smoothing", "smooth", 0f, 500f, 0, () => SettingsManager.Current.V2SmoothingMs, "Smooths engine volume updates; higher steadier, lower more reactive.");
             AddSlider(content, ref y, "Soft Fade Width", "fade", 0.001f, 0.25f, 3, () => SettingsManager.Current.V2SoftFadeRatio, "Near-zero thrust crossfade; higher softer idle transitions.");
+            AddSlider(content, ref y, "Remote Collapse Range", "remotecollapse", 0f, 5000f, 0, () => SettingsManager.Current.V2RemoteGridCollapseDistance, "Remote ships beyond this range use one grid-centered V2 thruster source; 0 disables the remote aggregate.");
 
-            AddMajorSection(content, ref y, "Engine Filter", EngineFilterPanel);
-            AddSection(content, ref y, "Routing");
-            AddFilterDropdown(content, ref y, "External Engine Route", () => SettingsManager.Current.EngineFilter, SettingsManager.TrySetFilter, "Filter applied to outside/contact engine emitters.");
-            AddFilterDropdown(content, ref y, "Internal Engine Route", () => SettingsManager.Current.InternalEngineFilter, SettingsManager.TrySetInternalFilter, "Filter applied to inside-ship engine emitters.");
-            AddToggle(content, ref y, "Dynamic Engine Filter", () => SettingsManager.Current.EngineFilterDynamic, value => SettingsManager.Current.EngineFilterDynamic = value, "Makes enginefilter follow distance, atmosphere, hull contact, and interior state.");
-            AddReadout(content, ref y, "Static Fallback", FormatEngineStaticFallbackState, "Shows whether dynamic enginefilter is bypassing the static fallback.", 0.040f, 0.44f);
-            AddCustomFilterTypeDropdown(content, ref y, "Fallback Static Type", () => SettingsManager.Current.Filter1Type, SettingsManager.TrySetFilter1Type, "Static enginefilter shape used only when dynamic mode is off.");
-            AddSlider(content, ref y, "Fallback Static Freq", "enginefilterfreq", RspDynamicAudioFilters.MinFilterFrequency, RspDynamicAudioFilters.MaxFilterFrequency, 0, () => SettingsManager.Current.Filter1Frequency, "Static cutoff when dynamic is off; higher brighter, lower darker.", true);
-            AddSlider(content, ref y, "Fallback Static Q", "enginefilterq", RspDynamicAudioFilters.MinFilterQ, RspDynamicAudioFilters.MaxFilterQ, 2, () => SettingsManager.Current.Filter1Q, "Static resonance when dynamic is off; higher sharper, lower smoother.");
-            AddFilterChart(content, ref y, "Live Engine Response", V2EngineFilterTelemetry.RepresentativeType, V2EngineFilterTelemetry.RepresentativeFrequency, V2EngineFilterTelemetry.RepresentativeQ, "Preview of current enginefilter frequency/Q, not an audio spectrum.");
+            AddMajorSection(content, ref y, "Thruster Propagation", EngineFilterPanel);
+            AddSection(content, ref y, "Filter And Readouts");
+            AddFilterDropdown(content, ref y, "Thruster Filter", () => SettingsManager.Current.EngineFilter, SetUnifiedEngineFilterRoute, "Filter route used for both atmospheric and hull thruster propagation.");
+            AddToggle(content, ref y, "Dynamic Propagation", () => SettingsManager.Current.EngineFilterDynamic, value => SettingsManager.Current.EngineFilterDynamic = value, "Makes thruster tone follow distance, atmosphere, hull contact, and occlusion.");
+            AddSlider(content, ref y, "Filter Smoothing", "livefiltersmooth", 0f, 200f, 0, () => SettingsManager.Current.LiveFilterSmoothingMs, "Smooths live filter cutoff changes (ms) to remove pops/zipper; higher = more lag, 0 = off.");
+            AddFilterChart(content, ref y, "Thruster Response", V2EngineFilterTelemetry.RepresentativeType, V2EngineFilterTelemetry.RepresentativeFrequency, V2EngineFilterTelemetry.RepresentativeQ, "Preview of the current thruster filter frequency/Q.");
+            AddReadout(content, ref y, "Environment", V2EngineFilterTelemetry.FormatEnvironment, "Live listener/source atmosphere and room data feeding thruster propagation.", 0.050f);
+            AddReadout(content, ref y, "Thrusters", () => V2EngineFilterTelemetry.FormatEmitters(6), "Recent thruster emitters and their dynamic filter outputs.", 0.145f, 0.36f);
 
-            AddSection(content, ref y, "Engine Filter Live Inputs");
-            AddToggle(content, ref y, "Atmosphere Override", () => SettingsManager.Current.V2AtmosphereOverrideEnabled, value => SettingsManager.Current.V2AtmosphereOverrideEnabled = value, "Forces V2 atmosphere input for enginefilter testing.");
-            AddSlider(content, ref y, "External Atmosphere", "externalatm", 0f, 1f, 2, () => SettingsManager.Current.V2AtmosphereOverride, "Test pressure for enginefilter; 0 vacuum/dark, 1 air/bright.");
-            AddReadout(content, ref y, "Environment", V2EngineFilterTelemetry.FormatEnvironment, "Live listener/source atmosphere and room data feeding enginefilter.", 0.050f);
-            AddReadout(content, ref y, "Emitters", () => V2EngineFilterTelemetry.FormatEmitters(6), "Recent engine emitters and their dynamic filter outputs.", 0.145f, 0.36f);
-
-            AddSection(content, ref y, "Engine Air Path");
+            AddSection(content, ref y, "Atmospheric Path");
             AddSlider(content, ref y, "Air Near Cutoff", "engineairnear", RspDynamicAudioFilters.MinFilterFrequency, RspDynamicAudioFilters.MaxFilterFrequency, 0, () => SettingsManager.Current.EngineFilterAirNearFrequency, "Brightest air-path cutoff near engines; higher clearer.", true);
             AddSlider(content, ref y, "Air Far Cutoff", "engineairfar", RspDynamicAudioFilters.MinFilterFrequency, RspDynamicAudioFilters.MaxFilterFrequency, 0, () => SettingsManager.Current.EngineFilterAirFarFrequency, "Darkest air-path cutoff at range; lower dulls distant engines.", true);
             AddSlider(content, ref y, "Air Filter Range", "engineairrange", 1f, 5000f, 0, () => SettingsManager.Current.EngineFilterAirRange, "Air-path distance span; higher carries brightness farther.", true);
             AddSlider(content, ref y, "Air Distance Curve", "engineaircurve", 0.1f, 5f, 2, () => SettingsManager.Current.EngineFilterAirDistanceCurve, "Air-path fade shape; higher delays high-frequency loss.");
             AddSlider(content, ref y, "Air Q", "engineairq", RspDynamicAudioFilters.MinFilterQ, RspDynamicAudioFilters.MaxFilterQ, 2, () => SettingsManager.Current.EngineFilterAirQ, "Air-path resonance; higher sharper, lower smoother.");
-            AddSlider(content, ref y, "Interior Air Blend", "engineinteriorair", 0f, 4f, 2, () => SettingsManager.Current.EngineFilterInteriorAirWeight, "Interior pressure contribution; higher makes sealed air less muffled.");
+            AddSlider(content, ref y, "Air Env Occlusion", "engineenvocclusion", 0f, 1f, 2, () => SettingsManager.Current.EngineFilterAirEnvironmentOcclusionContribution, "How strongly the local environment/ambience occlusion reduces atmospheric thruster sound; 0 ignores it, 1 follows it fully.");
 
-            AddSection(content, ref y, "Engine Hull Path");
+            AddSection(content, ref y, "Hull Path");
             AddSlider(content, ref y, "Hull Near Cutoff", "enginehullnear", RspDynamicAudioFilters.MinFilterFrequency, RspDynamicAudioFilters.MaxFilterFrequency, 0, () => SettingsManager.Current.EngineFilterHullNearFrequency, "Structure path cutoff near engines; higher brighter hull sound.", true);
             AddSlider(content, ref y, "Hull Far Cutoff", "enginehullfar", RspDynamicAudioFilters.MinFilterFrequency, RspDynamicAudioFilters.MaxFilterFrequency, 0, () => SettingsManager.Current.EngineFilterHullFarFrequency, "Structure path cutoff far through grid; lower darker rumble.", true);
             AddSlider(content, ref y, "Hull Filter Range", "enginehullrange", 1f, 1000f, 0, () => SettingsManager.Current.EngineFilterHullRange, "Structure path distance span; higher carries hull sound farther.", true);
             AddSlider(content, ref y, "Hull Distance Curve", "enginehullcurve", 0.1f, 5f, 2, () => SettingsManager.Current.EngineFilterHullDistanceCurve, "Hull-path fade shape; higher delays darkening.");
             AddSlider(content, ref y, "Hull Q", "enginehullq", RspDynamicAudioFilters.MinFilterQ, RspDynamicAudioFilters.MaxFilterQ, 2, () => SettingsManager.Current.EngineFilterHullQ, "Hull-path resonance; higher sharper metallic tone.");
-            AddSlider(content, ref y, "Interior Cutoff Cap", "engineinteriorcutoff", RspDynamicAudioFilters.MinFilterFrequency, RspDynamicAudioFilters.MaxFilterFrequency, 0, () => SettingsManager.Current.EngineFilterInteriorMaxFrequency, "Max air-path cutoff indoors; lower makes interiors darker.", true);
-            AddSlider(content, ref y, "Vacuum Contact Cutoff", "enginevacuumcutoff", RspDynamicAudioFilters.MinFilterFrequency, RspDynamicAudioFilters.MaxFilterFrequency, 0, () => SettingsManager.Current.EngineFilterVacuumContactFrequency, "Vacuum/contact fallback cutoff; lower deeper and duller.", true);
 
             AddMajorSection(content, ref y, "Player / Aux Filter", AuxFilterPanel);
             AddSection(content, ref y, "Aux Master Routes");
@@ -218,7 +201,6 @@ namespace RealisticSoundPlus
             AddToggle(content, ref y, "Environment Bed", () => SettingsManager.Current.PlayerFilterEnvironmentEnabled, value => SettingsManager.Current.PlayerFilterEnvironmentEnabled = value, "Filters wind/weather ambience using env probe and pressure.");
             AddToggle(content, ref y, "Block Emitters", () => SettingsManager.Current.PlayerFilterBlockEnabled, value => SettingsManager.Current.PlayerFilterBlockEnabled = value, "Filters block/world sounds using source path, distance, and room state.");
             AddToggle(content, ref y, "Player Local", () => SettingsManager.Current.PlayerFilterLocalEnabled, value => SettingsManager.Current.PlayerFilterLocalEnabled = value, "Filters player-local sounds by pressure only.");
-            AddToggle(content, ref y, "Block Ray Debug", () => SettingsManager.Current.PlayerFilterPathDebugEnabled, value => SettingsManager.Current.PlayerFilterPathDebugEnabled = value, "Draws block-source occlusion rays; green clear, red blocked.");
 
             _currentAccent = SharedPanel;
             AddSection(content, ref y, "Shared Aux Filter Shape");
@@ -229,39 +211,68 @@ namespace RealisticSoundPlus
             AddSlider(content, ref y, "Aux Occlusion Strength", "auxocclusionstrength", 0f, 4f, 2, () => SettingsManager.Current.PlayerFilterOcclusionStrength, "Global aux occlusion multiplier; higher more muffling.");
             AddFilterChart(content, ref y, "Aux Response", () => SettingsManager.Current.Filter2Type, () => SettingsManager.Current.Filter2Frequency, () => SettingsManager.Current.Filter2Q, "Preview of shared aux filter shape at clear cutoff/Q.");
 
-            AddSection(content, ref y, "Shared Overrides And Sealed Rooms");
-            AddToggle(content, ref y, "Aux Atmosphere Override", () => SettingsManager.Current.PlayerFilterAtmosphereOverrideEnabled, value => SettingsManager.Current.PlayerFilterAtmosphereOverrideEnabled = value, "Forces aux pressure input for env/block/local testing.");
-            AddSlider(content, ref y, "Aux Sim Pressure", "auxatm", 0f, 1f, 2, () => SettingsManager.Current.PlayerFilterAtmosphereOverride, "Test pressure for aux; 0 vacuum/muffled, 1 air/clear.");
+            AddSection(content, ref y, "Sealed Rooms");
             AddSlider(content, ref y, "Sealed Environment Factor", "sealedenv", 0f, 1f, 2, () => SettingsManager.Current.PlayerFilterEnvironmentSealedFactor, "Extra wind muffling in airtight rooms; higher quieter sealed interiors.");
-            AddSlider(content, ref y, "Sealed Blocks Factor", "sealedblock", 0f, 1f, 2, () => SettingsManager.Current.PlayerFilterBlockSealedFactor, "Extra block muffling outside sealed room; higher stronger door/wall contrast.");
+            AddSlider(content, ref y, "Sealed Blocks Factor", "sealedblock", 0f, 1f, 2, () => SettingsManager.Current.PlayerFilterBlockSealedFactor, "Extra block muffling when you are OUTSIDE the source's sealed room; higher = stronger door/wall contrast.");
+            AddSlider(content, ref y, "Thin Wall Muffle", "thinsealmuffle", 0f, 1f, 2, () => SettingsManager.Current.PlayerFilterBlockSealedBarrierLoss, "How much THIN sealed walls/roof (armour/glass/plate) seal the OUTSIDE WIND out. 1 = thin shell fully blocks wind (default); LOWER and the wind leaks through the thin shell - brighter, airier. Scales with how much of the sky-dome is a thin sealed shell, so it has real two-way authority sealed or unsealed. Also muffles block sources behind thin sealed faces. Open gratings unaffected.");
+            AddSlider(content, ref y, "Thin Wall Max Span", "sealbarrierthin", 1f, 6f, 1, () => SettingsManager.Current.PlayerFilterSealedBarrierThinFactor, "How many blocks thick a SEALED wall can be and still get the Thin Wall Muffle bonus. 1 = single layer only; raise to also muffle 2-3 block sealed walls.");
 
             _currentAccent = EnvironmentPanel;
-            AddSection(content, ref y, "Environment Occlusion Geometry");
+            // ENV MUFFLE PIPELINE: rays are cast over the sky dome; each direction is open (sky) or blocked (by
+            // structure of a given thickness); the persistent directional map stores those open/blocked readings;
+            // the OPEN-SKY FRACTION (shaped by the aperture curve) becomes the ambient muffle. The map persists
+            // and re-probes in place as you move, so the muffle stays stable rather than re-evaluating from scratch.
+            AddSection(content, ref y, "Environment Sealing (ambient muffle)");
             AddInlineReadout(content, ref y, V2PlayerFilterRuntime.FormatEnvironmentLiveReadout, "Live env output: covered sky, final muffling, and final volume.");
-            AddSlider(content, ref y, "Probe Ray Length", "playerenvray", 5f, 1000f, 0, () => SettingsManager.Current.PlayerEnvRayLength, "Environment probe radius; higher samples farther openings.", true);
-            AddSlider(content, ref y, "Env Structure Thickness", "envstructurethickness", 0.1f, 20f, 2, () => SettingsManager.Current.PlayerEnvStructureThicknessScale, "Wall thickness scale for env rays; higher lets thin cover leak more.");
-            AddSlider(content, ref y, "Voxel Occlusion Weight", "voxelweight", 0f, 10f, 2, () => SettingsManager.Current.PlayerFilterVoxelOcclusionWeight, "Terrain/asteroid weight for env and block rays; higher more muffling, 0 off.");
-            AddSlider(content, ref y, "Env Aperture Curve", "envaperturecurve", 0.1f, 10f, 2, () => SettingsManager.Current.PlayerEnvApertureCurve, "Shapes open-sky fraction; higher makes small openings count less.");
+            AddSlider(content, ref y, "Sky Probe Range", "envreverbray", 5f, 1000f, 0, () => SettingsManager.Current.PlayerEnvRayLength, "How far the sky-sealing rays reach (m). Longer detects farther openings (a distant skylight still lets ambient in); shorter only checks nearby cover. Also sizes the reverb room.", true);
+            AddSlider(content, ref y, "Cover Thickness To Seal", "envstructurethickness", 0.1f, 20f, 2, () => SettingsManager.Current.PlayerEnvStructureThicknessScale, "How much structure between you and the sky is needed to fully muffle: HIGHER = thick cover required (thin roofs/walls leak ambient in); LOWER = even thin cover seals you off.");
+            AddSlider(content, ref y, "Opening Sensitivity", "envaperturecurve", 0.1f, 10f, 2, () => SettingsManager.Current.PlayerEnvApertureCurve, "How a PARTIAL opening maps to loudness: HIGHER = a small gap barely brightens (stays muffled until a big opening); LOWER = any gap lets ambient through quickly.");
+            AddSlider(content, ref y, "Env Voxel Weight", "voxelmuffle", 0f, 10f, 2, () => SettingsManager.Current.PlayerFilterVoxelOcclusionWeight, "Adds terrain/asteroid voxels (upper hemisphere, planets only) as sky-sealing alongside grid structure; higher = terrain overhead muffles more, 0 = grid only. (Block sounds have their own 'Block Voxel Weight'.)");
+
+            AddSection(content, ref y, "Sealing Map (resolution & response)");
+            AddSlider(content, ref y, "Map Detail", "envmapcells", 32f, 192f, 0, () => SettingsManager.Current.PlayerEnvMapCellCount, "Number of directions in the persistent sealing map. MORE = finer detail (a narrow skylight registers), slightly more cost; fewer = coarser but cheaper.");
+            AddSlider(content, ref y, "Map Response", "envmapalpha", 0.1f, 1f, 2, () => SettingsManager.Current.PlayerEnvMapCellAlpha, "How fast a direction adopts a new reading when re-probed. LOWER = steadier/slower to change; HIGHER = snappier. This is how quickly the muffle reacts when geometry around you changes.");
+            AddSlider(content, ref y, "Map Refresh Rate", "envmaprays", 4f, 32f, 0, () => SettingsManager.Current.PlayerEnvMapRaysPerUpdate, "Directions re-probed per update. HIGHER = the map adapts faster after you walk to a new area (full sweep = Map Detail / this). Does not affect a stationary reading.");
+            AddToggle(content, ref y, "Show Sealing Map", () => SettingsManager.Current.PlayerEnvMapDebugEnabled, value => SettingsManager.Current.PlayerEnvMapDebugEnabled = value, "Debug overlay: draws the directional sealing map as flat tiles on a dome - green = open sky, red = sealed/blocked.");
 
             AddSection(content, ref y, "Environment Bed");
             AddSlider(content, ref y, "Env Volume Muffle", "envvolmuffle", 0f, 4f, 2, () => SettingsManager.Current.PlayerFilterEnvironmentVolumeMuffleWeight, "Wind volume reduction from env muffle; higher fades harder, 0 tone only.");
             AddSlider(content, ref y, "Env Bed Minimum Gain", "envfloor", 0f, 0.5f, 2, () => SettingsManager.Current.PlayerFilterEnvironmentMinGain, "Floor for RSP wind volume; higher keeps muffled wind audible.");
             AddSlider(content, ref y, "Env Muffled Cutoff", "envmufflefreq", RspDynamicAudioFilters.MinFilterFrequency, RspDynamicAudioFilters.MaxFilterFrequency, 0, () => SettingsManager.Current.PlayerFilterEnvironmentMuffledFrequency, "Lowest wind cutoff under cover; higher keeps wind brighter.", true);
-            AddReadout(content, ref y, "Environment Probe", V2PlayerEnvironmentTelemetry.FormatSummary, "Summary of env ray, voxel, pressure, and sealed-room output.", 0.060f, 0.38f);
-            AddReadout(content, ref y, "Probe Details", V2PlayerEnvironmentTelemetry.FormatDetails, "Detailed env ray and oxygen-room data for sealed testing.", 0.088f, 0.34f);
+            AddReadout(content, ref y, "Env/Reverb Probe", V2PlayerEnvironmentTelemetry.FormatSummary, "Summary of shared env/reverb rays, voxel, pressure, and sealed-room output.", 0.060f, 0.38f);
 
             _currentAccent = BlockPanel;
-            AddSection(content, ref y, "Block Emitters");
-            AddSlider(content, ref y, "Block Structure Thickness", "blockstructurethickness", 0.1f, 20f, 2, () => SettingsManager.Current.PlayerFilterBlockStructureThicknessScale, "Wall thickness scale for block rays; higher reduces thin-obstacle muting.");
-            AddSlider(content, ref y, "Block Occlusion Curve", "blockocclusioncurve", 0.1f, 5f, 2, () => SettingsManager.Current.PlayerFilterBlockOcclusionCurve, "Shapes block ray occlusion; higher forgives light blockage.");
-            AddSlider(content, ref y, "Block Range Scale", "blockdistancescale", 0.1f, 100f, 2, () => SettingsManager.Current.PlayerFilterBlockRangeScale, "Multiplier for vanilla block cue range; higher carries sounds farther.");
-            AddSlider(content, ref y, "Block Fallback Range", "blockrange", 1f, 1000f, 0, () => SettingsManager.Current.PlayerFilterBlockRange, "Range used only when vanilla cue distance is unknown.", true);
-            AddSlider(content, ref y, "Block Travel Curve", "blockcurve", 0.1f, 5f, 2, () => SettingsManager.Current.PlayerFilterBlockDistanceCurve, "Distance fade over scaled range; higher stays loud then drops.");
-            AddSlider(content, ref y, "Block Volume Muffle", "blockvolmuffle", 0f, 4f, 2, () => SettingsManager.Current.PlayerFilterBlockVolumeMuffleWeight, "Block volume cut from muffling; higher quieter through walls, 0 tone only.");
-            AddSlider(content, ref y, "Block Muffled Cutoff", "blockmufflefreq", RspDynamicAudioFilters.MinFilterFrequency, RspDynamicAudioFilters.MaxFilterFrequency, 0, () => SettingsManager.Current.PlayerFilterBlockMuffledFrequency, "Lowest block cutoff at heavy muffling; higher brighter.", true);
-            AddReadout(content, ref y, "Block Range Gate", V2BlockRangeScaler.FormatStatus, "Shows vanilla distance-gate overrides for recent block/world cues.", 0.055f, 0.38f);
+            // Block emitters now resolve along TWO legs: the DIRECT line straight through structure (muffled by
+            // thickness -> low cutoff) and the AIR detour around corners (stays bright -> high cutoff). They are
+            // energy-blended into one low-pass; the air leg can only ever brighten the direct result, and only
+            // when the direct line is blocked AND an open path exists.
+            AddSection(content, ref y, "Block - Direct Path (through walls)");
+            AddSlider(content, ref y, "Wall Thickness Muffle", "blockstructurethickness", 0.1f, 20f, 2, () => SettingsManager.Current.PlayerFilterBlockStructureThicknessScale, "DIRECT leg: how much solid grid thickness on the straight line to the source muffles it. The main through-wall knob; higher = thin walls muffle less.");
+            AddSlider(content, ref y, "Direct Occlusion Curve", "blockocclusioncurve", 0.1f, 5f, 2, () => SettingsManager.Current.PlayerFilterBlockOcclusionCurve, "DIRECT leg: shapes the straight-line occlusion response; higher forgives light blockage.");
+            AddSlider(content, ref y, "Block Voxel Weight", "blockvoxelweight", 0f, 10f, 2, () => { float w = SettingsManager.Current.PlayerFilterBlockVoxelOcclusionWeight; return w < 0f ? SettingsManager.Current.PlayerFilterVoxelOcclusionWeight : w; }, "BLOCK occlusion only: how much terrain/asteroid voxels muffle a block source's direct line; higher = more muffling through terrain, 0 = off. Separate from the wind 'Env Voxel Weight'.");
+            AddSlider(content, ref y, "Direct Muffled Cutoff", "blockmufflefreq", RspDynamicAudioFilters.MinFilterFrequency, RspDynamicAudioFilters.MaxFilterFrequency, 0, () => SettingsManager.Current.PlayerFilterBlockMuffledFrequency, "DIRECT leg: the LOW cutoff a source collapses to through a thick wall (the low-frequency-only floor). The bright end is 'Aux Clear Cutoff'.", true);
+
+            AddSection(content, ref y, "Block - Air Path (around corners)");
+            // --- Air leg TONE (how the detour sounds) ---
+            AddSlider(content, ref y, "Air Path Brightness", "blockairbright", 0f, 1f, 2, () => SettingsManager.Current.PlayerFilterBlockAirBrightness, "AIR leg tone: brightness FLOOR - how bright a SHORT detour stays (muffle at zero length). Lower = brighter / more high end. Muffle then accumulates with length (next slider).");
+            AddSlider(content, ref y, "Air Path Length Muffle", "blockairlengthmuffle", 0f, 0.1f, 3, () => SettingsManager.Current.PlayerFilterBlockAirLengthMuffle, "AIR leg tone: extra muffle accumulated PER METRE of detour (high-frequency loss over distance) - a longer around-the-corner path arrives progressively duller. 0 = length ignored (flat brightness).");
+            // --- Which ROUTE the air path takes (pathfinding) ---
+            AddSlider(content, ref y, "Air Path Reach", "blockairpathreach", 1f, 16f, 0, () => SettingsManager.Current.PlayerFilterBlockAirPathReach, "ROUTE: how far (grid cells) the around-corner flood-fill searches beyond the direct line. Raise for longer detours - multi-flight/switchback staircases need more reach. Higher = more CPU per blocked source.");
+            AddToggle(content, ref y, "Air Path Through Open Blocks", () => SettingsManager.Current.PlayerFilterBlockAirPathThroughBlocks, value => SettingsManager.Current.PlayerFilterBlockAirPathThroughBlocks = value, "ROUTE: sound goes where air goes - let the detour pass through any non-sealing block (stairs, catwalks, gratings, railings), not just empty cells + open doors. Needed for stairwells packed with stair blocks. Full-armour walls/floors and closed doors still block.");
+            AddSlider(content, ref y, "Route Open-Air Bias", "blockairopenbias", 0f, 30f, 0, () => SettingsManager.Current.PlayerFilterBlockAirPathOpenBias, "ROUTE choice only: how strongly the path AVOIDS grated/non-sealing blocks when picking its route (open stairwell vs a hop through a grated floor). Only matters when more than one route exists. Does NOT move the emitter - that's 'Emitter Portal Pull' below.");
+            // --- Where the EMITTER sits (localisation / repositioning) ---
+            AddToggle(content, ref y, "Reposition To Doorway", () => SettingsManager.Current.PlayerFilterBlockRepositionEnabled, value => SettingsManager.Current.PlayerFilterBlockRepositionEnabled = value, "EXPERIMENTAL: when a source is blocked but an open detour exists, move its emitter toward the doorway/stairwell portal so it localises to the opening. The detour attenuation is carried by gain. Static-base sources only for now.");
+            AddSlider(content, ref y, "Emitter Portal Pull", "blockrepoairbias", 0.1f, 10f, 1, () => SettingsManager.Current.PlayerFilterBlockRepositionAirBias, "EMITTER position: how far the emitter moves toward the air-path portal vs staying at the source. 1 = physical loudness blend; raise to localise harder to the opening. DIFFERENT from 'Route Open-Air Bias' (that picks the route; this moves the emitter along it).");
+            AddSlider(content, ref y, "Reposition Smoothing", "blockreposeslew", 1f, 2000f, 0, () => SettingsManager.Current.PlayerFilterBlockRepositionSlewMs, "Temporal smoothing (ms) of the emitter's position as its blended target moves. Higher = smoother glide. Snaps once on first placement, no slide out from the block.");
+
+            AddSection(content, ref y, "Block - Range & Output (both paths)");
+            AddSlider(content, ref y, "Block Sound Range", "blockrange", 1f, 150f, 0, () => SettingsManager.Current.PlayerFilterBlockMaxRange, "Absolute block cue range for discovery and vanilla distance extension; lower reduces large-base voices.", true);
+            AddSlider(content, ref y, "Block Travel Curve", "blockcurve", 0.1f, 5f, 2, () => SettingsManager.Current.PlayerFilterBlockDistanceCurve, "Block volume distance-falloff SHAPE: higher = holds volume then drops steeply near max range; lower = fades evenly with distance. (Both paths use it, so a steeper curve also makes a long air detour fade more than the short direct line - that's a side effect, not a separate control.)");
+            AddSlider(content, ref y, "Block Volume Muffle", "blockvolmuffle", 0f, 4f, 2, () => SettingsManager.Current.PlayerFilterBlockVolumeMuffleWeight, "Volume cut from muffling (applies to the blended result); higher quieter through walls, 0 tone only.");
+            AddSlider(content, ref y, "Block Occlusion Smoothing", "blockocclusionsmooth", 0f, 2000f, 0, () => SettingsManager.Current.PlayerFilterBlockOcclusionSmoothingMs, "Temporal smoothing of the block occlusion; higher steadier and less flicker, lower more responsive.");
             AddReadout(content, ref y, "Block Candidates", V2AuxSourceOcclusionTelemetry.FormatSummary, "Summary of recent non-engine block/world source candidates.", 0.058f, 0.38f);
-            AddReadout(content, ref y, "Block Source Detail", () => V2AuxSourceOcclusionTelemetry.FormatSources(6), "Per-source distance, room, seal, muffling, cutoff, and gain.", 0.150f, 0.34f);
+            AddReadout(content, ref y, "Block Source Detail", () => V2AuxSourceOcclusionTelemetry.FormatSources(6), "Per-source distance, room, seal, muffling, cutoff, gain, and air-path length/merge.", 0.150f, 0.34f);
+            AddToggle(content, ref y, "Block Occlusion Rays", () => SettingsManager.Current.PlayerFilterPathDebugEnabled, value => SettingsManager.Current.PlayerFilterPathDebugEnabled = value, "Debug overlay: draws the listener->block rays colour-coded by where thickness is gained (green open, orange structure, amber voxel, dim skipped). Air-path length/merge shown as text per source.");
 
             _currentAccent = SharedPanel;
             AddSection(content, ref y, "Player Local");
@@ -272,12 +283,27 @@ namespace RealisticSoundPlus
             AddReadout(content, ref y, "Applied Summary", V2PlayerFilterRuntime.FormatSummary, "Counts and strongest voice currently controlled by aux filter.", 0.060f, 0.38f);
             AddReadout(content, ref y, "Applied Detail", () => V2PlayerFilterRuntime.FormatSources(6), "Per-voice aux category, muffle, cutoff, gain, and range.", 0.150f, 0.34f);
 
-            AddMajorSection(content, ref y, "Global Reverb Test", SoftPanel);
-            AddToggle(content, ref y, "Global Reverb", () => SettingsManager.Current.GlobalReverbEnabled, value => SettingsManager.Current.GlobalReverbEnabled = value, "Enables experimental global XAudio reverb on routed game voices.");
-            AddSlider(content, ref y, "Reverb Diffusion", "reverbdiffusion", 0f, 1f, 2, () => SettingsManager.Current.GlobalReverbDiffusion, "Reflection density; higher smoother/denser, lower sparse.");
-            AddSlider(content, ref y, "Reverb Room Size", "reverbroomsize", 0f, 1f, 2, () => SettingsManager.Current.GlobalReverbRoomSize, "Reverb size; higher longer/larger, lower smaller/tighter.");
-            AddReadout(content, ref y, "Reverb Runtime", V2GlobalReverbRuntime.FormatStatus, "Status of global reverb hook and parameter writes.", 0.055f, 0.40f);
-            AddReadout(content, ref y, "Reverb Affected Voices", () => V2GlobalReverbRuntime.FormatAffectedVoices(8), "Live voices routed through the reverb submix.", 0.150f, 0.40f);
+            AddMajorSection(content, ref y, "Environmental Reverb", SoftPanel);
+            AddToggle(content, ref y, "Reverb", () => SettingsManager.Current.GlobalReverbEnabled, value => SettingsManager.Current.GlobalReverbEnabled = value, "Enables live environmental reflections from the current room and pressure.");
+            AddToggle(content, ref y, "Global Mix", IsLiveReverbMasterRoute, SetLiveReverbMasterRoute, "Off uses World mix for in-game audio; on uses Global mix for the full game mix including UI.");
+            AddReadout(content, ref y, "Reverb Mix", FormatLiveReverbMix, "World follows in-game audio; Global follows the full game mix including UI.", 0.030f, 0.38f);
+
+            AddSection(content, ref y, "Room Driven Modifiers");
+            AddSlider(content, ref y, "Sealed Room Geometry", "reverbsealedgeo", 0f, 1f, 2, () => SettingsManager.Current.ReverbSealedGeometryWeight, "Blend exact cell-set room geometry into reverb size in sealed rooms; 0 = ray-only (old), 1 = fully trust geometry (steadier).");
+            AddAutoReverbSlider(content, ref y, "Reverb Room Size", "room", "reverbroommod", 0.25f, 2f, 2, () => SettingsManager.Current.GlobalReverbRoomSizeModifier, "Multiplier on ray-calculated room size; 1 uses the auto value.");
+            AddAutoReverbSlider(content, ref y, "Reverb Diffusion", "diffusion", "reverbdiffmod", 0.25f, 2f, 2, () => SettingsManager.Current.GlobalReverbDiffusionModifier, "Multiplier on auto diffusion; higher smoother, lower more distinct.");
+            AddAutoReverbSlider(content, ref y, "Decay Time", "decay", "reverbdecaymod", 0.25f, 2.5f, 2, () => SettingsManager.Current.GlobalReverbDecayModifier, "Multiplier on auto RT60 decay; higher longer tail.");
+            AddAutoReverbSlider(content, ref y, "Early Reflections", "early", "reverbearlyoffsetdb", -12f, 12f, 1, () => SettingsManager.Current.GlobalReverbEarlyGainOffsetDb, "dB offset on auto first reflections; higher stronger onset.");
+            AddAutoReverbSlider(content, ref y, "Late Tail", "tail", "reverbtailoffsetdb", -12f, 12f, 1, () => SettingsManager.Current.GlobalReverbTailGainOffsetDb, "dB offset on auto tail level; higher more sustained room.");
+            AddAutoReverbSlider(content, ref y, "Pre Delay", "predelay", "reverbpremod", 0.25f, 2.5f, 2, () => SettingsManager.Current.GlobalReverbPredelayModifier, "Multiplier on auto first-bounce delay; higher feels farther.");
+            AddAutoReverbSlider(content, ref y, "Late Delay", "latedelay", "reverblatemod", 0.25f, 2.5f, 2, () => SettingsManager.Current.GlobalReverbLateDelayModifier, "Multiplier on auto late-field delay; higher separates tail.");
+            AddAutoReverbSlider(content, ref y, "Tail Density", "density", "reverbdensemod", 0.5f, 1.5f, 2, () => SettingsManager.Current.GlobalReverbDensityModifier, "Multiplier on auto tail density; higher smoother wash.");
+            AddAutoReverbSlider(content, ref y, "Tone Cutoff", "tone", "reverbtonemod", 0.5f, 2f, 2, () => SettingsManager.Current.GlobalReverbToneModifier, "Multiplier on auto damping cutoff; higher brighter tail.");
+            AddAutoReverbSlider(content, ref y, "HF Damping", "hf", "reverbhfoffsetdb", -12f, 12f, 1, () => SettingsManager.Current.GlobalReverbHighFrequencyOffsetDb, "dB offset on auto high-frequency damping; higher crisper.");
+
+            AddSection(content, ref y, "Live Output");
+            AddSlider(content, ref y, "Reverb Amount", "reverbwet", 0f, 4f, 2, () => SettingsManager.Current.GlobalReverbWetSend, "Overall live reverb level; 0 disables the reflected field.");
+            AddReadout(content, ref y, "Live DSP", V2GlobalReverbRuntime.FormatStatus, "Live reverb route and processor status.", 0.070f, 0.40f);
 
             AddSection(content, ref y, "Ship Scaling");
             AddSlider(content, ref y, "Quiet Force Log", "quietlog", 1f, 10f, 2, () => SettingsManager.Current.QuietShipForceLog10, "Thruster force treated as quiet baseline; higher makes small ships quieter.");
@@ -330,7 +356,7 @@ namespace RealisticSoundPlus
             stripe.OriginAlign = MyGuiDrawAlignEnum.HORISONTAL_LEFT_AND_VERTICAL_CENTER;
             Add(content.Controls, stripe);
 
-            Add(content.Controls, Label(title, new Vector2(-0.333f, y), 0.66f, "White"));
+            Add(content.Controls, Label(title, new Vector2(-0.34f, y), 0.66f, "White"));
             y += 0.031f;
         }
 
@@ -354,7 +380,7 @@ namespace RealisticSoundPlus
             stripe.OriginAlign = MyGuiDrawAlignEnum.HORISONTAL_LEFT_AND_VERTICAL_CENTER;
             Add(content.Controls, stripe);
 
-            Add(content.Controls, Label(title.ToUpperInvariant(), new Vector2(-0.333f, y), 0.72f, "White"));
+            Add(content.Controls, Label(title.ToUpperInvariant(), new Vector2(-0.34f, y), 0.72f, "White"));
             y += 0.034f;
         }
 
@@ -453,19 +479,38 @@ namespace RealisticSoundPlus
             y += 0.142f;
         }
 
-        private void AddSlider(MyGuiControlParent content, ref float y, string label, string command, float min, float max, int decimals, Func<float> getValue, string tooltip, bool logarithmic = false)
+        private void AddAutoReverbSlider(MyGuiControlParent content, ref float y, string label, string autoKey, string command, float min, float max, int decimals, Func<float> getValue, string tooltip, bool logarithmic = false)
         {
+            AddSlider(
+                content,
+                ref y,
+                label,
+                command,
+                min,
+                max,
+                decimals,
+                getValue,
+                tooltip,
+                logarithmic,
+                "Green",
+                () => label + "  " + V2ManagedDspReverbRuntime.FormatAutoValue(autoKey));
+        }
+
+        private void AddSlider(MyGuiControlParent content, ref float y, string label, string command, float min, float max, int decimals, Func<float> getValue, string tooltip, bool logarithmic = false, string labelFont = "White", Func<string> getDynamicLabel = null)
+        {
+            // One aligned row: [name] .... [slider] [value], with the min/max range under the slider ends.
             string unit = GetSliderUnit(command, label);
-            MyGuiControlLabel nameLabel = Label(label, new Vector2(-0.34f, y), 0.54f, "White");
-            MyGuiControlLabel valueLabel = Label(string.Empty, new Vector2(0.31f, y), 0.50f, "White");
+            MyGuiControlLabel nameLabel = Label(getDynamicLabel != null ? getDynamicLabel() : label, new Vector2(-0.34f, y), 0.54f, labelFont);
+            MyGuiControlLabel valueLabel = Label(string.Empty, new Vector2(0.345f, y), 0.50f, "White");
             valueLabel.OriginAlign = MyGuiDrawAlignEnum.HORISONTAL_RIGHT_AND_VERTICAL_CENTER;
             SetHint(nameLabel, tooltip);
             SetHint(valueLabel, tooltip);
             Add(content.Controls, nameLabel);
             Add(content.Controls, valueLabel);
 
-            MyGuiControlLabel minLabel = Label(FormatWithUnit(min, decimals, unit), new Vector2(-0.055f, y + 0.019f), 0.38f, "White");
-            MyGuiControlLabel maxLabel = Label(FormatWithUnit(max, decimals, unit), new Vector2(0.315f, y + 0.019f), 0.38f, "White");
+            MyGuiControlLabel minLabel = Label(FormatWithUnit(min, decimals, unit), new Vector2(-0.02f, y + 0.020f), 0.36f, "White");
+            minLabel.OriginAlign = MyGuiDrawAlignEnum.HORISONTAL_LEFT_AND_VERTICAL_CENTER;
+            MyGuiControlLabel maxLabel = Label(FormatWithUnit(max, decimals, unit), new Vector2(0.28f, y + 0.020f), 0.36f, "White");
             maxLabel.OriginAlign = MyGuiDrawAlignEnum.HORISONTAL_RIGHT_AND_VERTICAL_CENTER;
             SetHint(minLabel, tooltip);
             SetHint(maxLabel, tooltip);
@@ -479,24 +524,20 @@ namespace RealisticSoundPlus
                 : Clamp(getValue(), min, max);
             float sliderDefault = logarithmic ? ToLogPosition(defaultValue, min, max) : defaultValue;
 
-            MyGuiControlSlider slider = new MyGuiControlSlider(
-                position: new Vector2(0.13f, y + 0.019f),
+            RspSlider slider = new RspSlider(
+                position: new Vector2(0.13f, y),
                 minValue: sliderMin,
                 maxValue: sliderMax,
                 width: 0.30f,
                 defaultValue: sliderDefault,
                 toolTip: tooltip,
-                originAlign: MyGuiDrawAlignEnum.HORISONTAL_CENTER_AND_VERTICAL_CENTER,
-                showLabel: false);
-            slider.BackgroundTexture = null;
-            slider.BorderEnabled = false;
-            slider.ColorMask = new Vector4(0.70f, 0.82f, 0.88f, 0.72f);
-            slider.Size = new Vector2(0.30f, 0.018f);
+                originAlign: MyGuiDrawAlignEnum.HORISONTAL_CENTER_AND_VERTICAL_CENTER);
+            slider.Size = new Vector2(0.30f, 0.020f);
             SetHint(slider, tooltip);
             Add(content.Controls, slider);
 
-            _sliders.Add(new SliderBinding(slider, valueLabel, command, decimals, unit, getValue, min, max, defaultValue, logarithmic));
-            y += 0.056f;
+            _sliders.Add(new SliderBinding(slider, nameLabel, valueLabel, label, getDynamicLabel, command, decimals, unit, getValue, min, max, defaultValue, logarithmic));
+            y += 0.052f;
         }
 
         private void PollControls()
@@ -643,6 +684,12 @@ namespace RealisticSoundPlus
             if (text.Contains("freq") || text.Contains("cutoff"))
                 return "Hz";
 
+            if (key.Contains("offset") || key.Contains("db") || text.Contains("damping"))
+                return "dB";
+
+            if (key.Contains("mod"))
+                return "x";
+
             if (key == "smooth" || key == "cmdsmooth" || key == "auxsmooth" || key == "emitterfade" || text.Contains("smoothing"))
                 return "ms";
 
@@ -655,8 +702,11 @@ namespace RealisticSoundPlus
             if (text.Contains("thickness"))
                 return "m";
 
-            if (text.Contains("gain"))
+            if (key.Contains("wet") || text.Contains("wet send") || text.Contains("gain"))
                 return "x";
+
+            if (text.Contains("decay time"))
+                return "s";
 
             if (text.Contains("curve") || text.Contains("blend") || text.Contains("strength") || text.Contains("scale") || text.Contains("multiplier") || text.Contains("weight") || text.Contains("volume muffle"))
                 return "x";
@@ -684,6 +734,40 @@ namespace RealisticSoundPlus
                     settings.Filter1Type,
                     settings.Filter1Frequency,
                     settings.Filter1Q);
+        }
+
+        private static bool SetUnifiedEngineFilterRoute(string value)
+        {
+            bool external = SettingsManager.TrySetFilter(value);
+            bool internalRoute = SettingsManager.TrySetInternalFilter(value);
+            return external && internalRoute;
+        }
+
+        private static bool IsLiveReverbMasterRoute()
+        {
+            return SettingsManager.IsGlobalReverbCustomMasterRoute(SettingsManager.Current);
+        }
+
+        private static void SetLiveReverbMasterRoute(bool master)
+        {
+            SettingsManager.TrySetGlobalReverbRoute(master ? "custommaster" : "custominline");
+            V2DebugLog.WriteEvent("menu", "reverb mix " + FormatLiveReverbMix() + " route=" + SettingsManager.Current.GlobalReverbRoute);
+        }
+
+        private static string FormatLiveReverbMix()
+        {
+            string route = SettingsManager.NormalizeGlobalReverbRoute(SettingsManager.Current.GlobalReverbRoute);
+            if (string.Equals(route, "custommaster", StringComparison.OrdinalIgnoreCase))
+                return "Global";
+            if (string.Equals(route, "custominline", StringComparison.OrdinalIgnoreCase))
+                return "World";
+            if (string.Equals(route, "managed", StringComparison.OrdinalIgnoreCase))
+                return "Managed";
+            if (string.Equals(route, "custombus", StringComparison.OrdinalIgnoreCase))
+                return "Bus Test";
+            if (string.Equals(route, "globalbus", StringComparison.OrdinalIgnoreCase))
+                return "XAudio Bus";
+            return route ?? "Managed";
         }
 
         private static float ToLogPosition(float value, float min, float max)
@@ -741,7 +825,10 @@ namespace RealisticSoundPlus
         private sealed class SliderBinding
         {
             private readonly MyGuiControlSlider _slider;
+            private readonly MyGuiControlLabel _nameLabel;
             private readonly MyGuiControlLabel _valueLabel;
+            private readonly string _baseLabel;
+            private readonly Func<string> _getDynamicLabel;
             private readonly string _command;
             private readonly int _decimals;
             private readonly string _unit;
@@ -751,11 +838,15 @@ namespace RealisticSoundPlus
             private readonly float _defaultValue;
             private readonly bool _logarithmic;
             private float _lastValue;
+            private string _lastNameText;
 
-            public SliderBinding(MyGuiControlSlider slider, MyGuiControlLabel valueLabel, string command, int decimals, string unit, Func<float> getValue, float min, float max, float defaultValue, bool logarithmic)
+            public SliderBinding(MyGuiControlSlider slider, MyGuiControlLabel nameLabel, MyGuiControlLabel valueLabel, string baseLabel, Func<string> getDynamicLabel, string command, int decimals, string unit, Func<float> getValue, float min, float max, float defaultValue, bool logarithmic)
             {
                 _slider = slider;
+                _nameLabel = nameLabel;
                 _valueLabel = valueLabel;
+                _baseLabel = baseLabel;
+                _getDynamicLabel = getDynamicLabel;
                 _command = command;
                 _decimals = decimals;
                 _unit = unit;
@@ -794,6 +885,16 @@ namespace RealisticSoundPlus
 
             public void RefreshLabel()
             {
+                if (_getDynamicLabel != null)
+                {
+                    string nameText = _getDynamicLabel() ?? _baseLabel;
+                    if (!string.Equals(nameText, _lastNameText, StringComparison.Ordinal))
+                    {
+                        _lastNameText = nameText;
+                        _nameLabel.Text = nameText;
+                    }
+                }
+
                 _valueLabel.Text = FormatWithUnit(_getValue(), _decimals, _unit);
             }
         }
@@ -883,6 +984,85 @@ namespace RealisticSoundPlus
             }
         }
 
+        // Slider with a clean, flat custom track instead of the engine's default grey rail box. Because the
+        // visual is fully custom, the VALUE is also mapped from our own geometry in HandleInput - otherwise the
+        // base maps clicks over its internal rail (offset from our full-width draw) and the grab point sits to
+        // the side of the drawn thumb.
+        private sealed class RspSlider : MyGuiControlSlider
+        {
+            private static readonly Color TrackColor = new Color(120, 150, 165, 110);
+            private static readonly Color FillColor = new Color(150, 200, 222, 190);
+            private static readonly Color ThumbColor = new Color(214, 234, 242, 255);
+            private const float ThumbWidth = 0.006f;
+            private const float ThumbHeightFraction = 0.5f; // shorter than the full control height
+            private bool _dragging;
+
+            public RspSlider(Vector2 position, float minValue, float maxValue, float width, float defaultValue, string toolTip, MyGuiDrawAlignEnum originAlign)
+                : base(position: position, minValue: minValue, maxValue: maxValue, width: width, defaultValue: defaultValue, toolTip: toolTip, originAlign: originAlign, showLabel: false)
+            {
+            }
+
+            public override MyGuiControlBase HandleInput()
+            {
+                MyGuiControlBase captured = base.HandleInput(); // keep base focus / hover / tooltip / keyboard
+                if (MyInput.Static == null)
+                    return captured;
+
+                if (IsMouseOver && MyInput.Static.IsNewLeftMousePressed())
+                    _dragging = true;
+                if (!MyInput.Static.IsLeftMousePressed())
+                    _dragging = false;
+
+                if (_dragging)
+                {
+                    Vector2 topLeft = GetPositionAbsoluteTopLeft();
+                    float w = Size.X;
+                    if (w > 1e-4f)
+                    {
+                        float t = (MyGuiManager.MouseCursorPosition.X - topLeft.X) / w; // OUR geometry == the drawn track
+                        if (t < 0f) t = 0f; else if (t > 1f) t = 1f;
+                        float v = MinValue + t * (MaxValue - MinValue);
+                        if (Math.Abs(v - Value) > 1e-6f)
+                            Value = v; // override the base's offset mapping
+                        captured = this;
+                    }
+                }
+                return captured;
+            }
+
+            public override void Draw(float transitionAlpha, float backgroundTransitionAlpha)
+            {
+                // Intentionally NOT calling base.Draw: that is what paints the grey rail box.
+                if (!Visible)
+                    return;
+
+                Vector2 topLeft = GetPositionAbsoluteTopLeft();
+                Vector2 size = Size;
+                float midY = topLeft.Y + size.Y * 0.5f;
+                float trackH = 0.0016f;
+                float trackY = midY - trackH * 0.5f;
+
+                float range = MaxValue - MinValue;
+                float t = range > 1e-6f ? (Value - MinValue) / range : 0f;
+                if (t < 0f) t = 0f; else if (t > 1f) t = 1f;
+                float fillW = size.X * t;
+
+                MyGuiManager.DrawRectangle(new Vector2(topLeft.X, trackY), new Vector2(size.X, trackH), ApplyAlpha(TrackColor, transitionAlpha));
+                if (fillW > 0f)
+                    MyGuiManager.DrawRectangle(new Vector2(topLeft.X, trackY), new Vector2(fillW, trackH), ApplyAlpha(FillColor, transitionAlpha));
+
+                float thumbH = size.Y * ThumbHeightFraction;
+                float thumbY = topLeft.Y + (size.Y - thumbH) * 0.5f; // centred -> shorter handle
+                MyGuiManager.DrawRectangle(new Vector2(topLeft.X + fillW - ThumbWidth * 0.5f, thumbY), new Vector2(ThumbWidth, thumbH), ApplyAlpha(ThumbColor, transitionAlpha));
+            }
+
+            private static Color ApplyAlpha(Color color, float transitionAlpha)
+            {
+                float a = transitionAlpha < 0f ? 0f : (transitionAlpha > 1f ? 1f : transitionAlpha);
+                return new Color(color.R, color.G, color.B, (byte)(color.A * a));
+            }
+        }
+
         private sealed class RspFilterResponseChart : MyGuiControlBase
         {
             private const int Samples = 88;
@@ -890,13 +1070,13 @@ namespace RealisticSoundPlus
             private const float MaxHz = RspDynamicAudioFilters.MaxFilterFrequency;
             private const float MinDb = -48f;
             private const float MaxDb = 6f;
-            private static readonly Color FrameColor = new Color(92, 122, 132, 210);
-            private static readonly Color MajorGridColor = new Color(82, 104, 112, 145);
-            private static readonly Color MinorGridColor = new Color(52, 64, 70, 75);
-            private static readonly Color LabelColor = new Color(184, 204, 214, 225);
-            private static readonly Color ResponseColor = new Color(118, 220, 255, 255);
-            private static readonly Color ZeroDbColor = new Color(160, 176, 184, 185);
-            private static readonly Color FillColor = new Color(55, 135, 180, 36);
+            private static readonly Color FrameColor = new Color(130, 165, 182, 235);
+            private static readonly Color MajorGridColor = new Color(120, 152, 168, 210);
+            private static readonly Color MinorGridColor = new Color(78, 98, 110, 140);
+            private static readonly Color LabelColor = new Color(190, 210, 220, 235);
+            private static readonly Color ResponseColor = new Color(120, 222, 255, 255);
+            private static readonly Color ZeroDbColor = new Color(170, 188, 198, 210);
+            private static readonly Color FillColor = new Color(60, 140, 188, 48);
             private static readonly float[] MajorFrequencies = { 5f, 10f, 20f, 50f, 100f, 200f, 500f, 1000f, 2000f, 5000f, 8000f };
             private static readonly float[] MinorFrequencies = { 7.5f, 15f, 30f, 75f, 150f, 300f, 750f, 1500f, 3000f, 6500f };
             private static readonly float[] MajorDbTicks = { 0f, -6f, -12f, -18f, -24f, -36f, -48f };
@@ -926,7 +1106,8 @@ namespace RealisticSoundPlus
                 Vector2 size = Size;
                 Vector2 bottomRight = topLeft + size;
 
-                MyGuiManager.DrawRectangle(topLeft, size, new Color(8, 12, 15, 150));
+                // No filled backdrop: the solid panel obscured visibility and was clipped by the menu top.
+                // The frame, grid, labels and response curve carry the chart on the transparent menu behind it.
                 DrawRect(topLeft, bottomRight, FrameColor);
                 DrawGrid(topLeft, size);
                 DrawResponse(topLeft, size);

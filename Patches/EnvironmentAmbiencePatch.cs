@@ -25,6 +25,7 @@ namespace RealisticSoundPlus.Patches
         private static int _planetHardOffBypassed;
         private static int _planetCarrierRepairs;
         private static int _weatherCarrierRepairs;
+        private static string _lastOwnershipReason = "none";
         private static DateTime _lastLogUtc = DateTime.MinValue;
 
         public static void ResetRuntimeState()
@@ -33,22 +34,43 @@ namespace RealisticSoundPlus.Patches
             _planetCarrierRepairs = 0;
             _weatherCarrierRepairs = 0;
             _planetAmbientUnavailable = false;
+            _lastOwnershipReason = "reset";
             _lastLogUtc = DateTime.MinValue;
         }
 
         public static bool ShouldOwnEnvironmentAmbience()
         {
             RealisticSoundPlusSettings settings = SettingsManager.Current;
-            return settings != null
+            bool enabled = settings != null
                 && settings.PlayerFilterEnabled
                 && settings.PlayerFilterEnvironmentEnabled;
+            if (!enabled)
+            {
+                _lastOwnershipReason = "disabled";
+                return false;
+            }
+
+            if (!V2PlayerEnvironmentTelemetry.TryGetLatest(out V2PlayerEnvironmentSample sample))
+            {
+                _lastOwnershipReason = "waiting";
+                return true;
+            }
+
+            bool own = sample.PlanetEnvironmentAvailable
+                || sample.WindAudibility > 0.001f
+                || sample.WindExposure > 0.001f;
+            _lastOwnershipReason = own
+                ? sample.PlanetEnvironmentAvailable ? "planet" : "audible-wind"
+                : "no-planet-wind";
+            return own;
         }
 
         public static string FormatSummary()
         {
             return "planetOffBypass=" + _planetHardOffBypassed
                 + " planetCarrier=" + _planetCarrierRepairs
-                + " weatherCarrier=" + _weatherCarrierRepairs;
+                + " weatherCarrier=" + _weatherCarrierRepairs
+                + " own=" + _lastOwnershipReason;
         }
 
         public static bool BypassPlanetAmbientOff(object instance)

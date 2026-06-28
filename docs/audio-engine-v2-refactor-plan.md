@@ -6,6 +6,61 @@ Reference snapshot branch: `reference/current-build-before-v2`
 
 Earlier planning branch: `audio-engine-v2-refactor`
 
+> **Status note (June 2026):** This document is the *original V2 design plan* and the
+> confirmed-vanilla cue/thruster/sound-group reference. The mod has since implemented most
+> of this plan and reorganized around three areas. For the current build, architecture,
+> menu, and command surface, see the [README](../README.md); where the two disagree, the
+> code and the in-game menu are authoritative. The reference tables further down (vanilla
+> ship sound groups, state roles, 2D/3D cue pairings, thruster primary sounds) remain
+> accurate and are still the working reference.
+
+## Current Status (June 2026)
+
+The build (branch `v2/live-audio-engine`) now organizes both the code and the in-game menu
+([RspSettingsMenu.cs](../RspSettingsMenu.cs)) around three areas. The menu's four major
+sections are **Thruster Audio**, **Thruster Propagation**, **Player / Aux Filter**, and
+**Environmental Reverb**.
+
+1. **Thruster sound realism — implemented.** The six-direction grid model
+   ([V2GridAudioState.cs](../AudioEngineV2/V2GridAudioState.cs)) and per-emitter dynamic
+   filter ([V2EngineFilterModel.cs](../AudioEngineV2/V2EngineFilterModel.cs)) are live. The
+   "Planned Filter Path Model" below (parallel airborne-exterior + structure-borne hull
+   subpaths) was built: cutoffs are energy-blended between an atmospheric path and a hull
+   path, with Q following the dominant route. Menu: *Thruster Propagation → Atmospheric
+   Path / Hull Path*.
+
+2. **Progressive environmental muffling — implemented, maturing.** The 26-ray listener
+   openness probe drives continuous (non-binary) muffling of wind/weather, block, and
+   player-local categories ([V2PlayerFilterRuntime.cs](../AudioEngineV2/V2PlayerFilterRuntime.cs)).
+   The "important wind limitation" noted later in this plan — that filtering cannot revive a
+   voice vanilla has fully stopped — is now addressed by keeping the vanilla planet-ambient
+   and weather carriers alive ([EnvironmentAmbiencePatch.cs](../Patches/EnvironmentAmbiencePatch.cs),
+   the menu's *Environment Bed*), so descending into a base progressively darkens the
+   outside world instead of cutting it.
+
+3. **Environmental reverb — active development (new since this plan).** A custom DSP wet
+   path now produces reflections for game audio, with parameters driven live by the
+   spherical ray probe: managed-DSP tails
+   ([V2ManagedDspReverbRuntime.cs](../AudioEngineV2/V2ManagedDspReverbRuntime.cs)), a
+   streaming XAPO processor ([V2LiveReverbPocProcessor.cs](../AudioEngineV2/V2LiveReverbPocProcessor.cs)),
+   and `SubmixVoice` wet-bus plumbing
+   ([V2ReverbDiagnosticPing.cs](../AudioEngineV2/V2ReverbDiagnosticPing.cs)). This replaces
+   Keen's `SetReverbParameters` wrapper (a no-op in the tested build) and the early
+   XAudio-submix experiment. Routes are selectable via `/rsp reverbroute`
+   (`world`/`global`/`managed`/`globalbus`/`custombus`); the default `custommaster` aims to
+   reflect the full in-game mix. The "all sounds" master routing is still being finalized.
+
+Other deltas since this plan was written:
+
+- The active Harmony surface is broader than the "narrow" set described later: alongside the
+  thruster/ship-cue/filter hooks, RSP now patches planet-ambient and weather carriers (Area 2)
+  and `MyCharacterBreath` (helmet-open breathing).
+- Filtering supports the full `LowPass / HighPass / BandPass / Notch` enum in the custom
+  filter type controls, not just low-pass.
+- The `/rsp` command surface and defaults have grown and been retuned; treat `/rsp show`
+  and the settings XML as the source of truth for live values rather than any default
+  quoted in prose.
+
 ## Project Goal
 
 Rebuild Realistic Sound Plus around an explicit client-side ship audio engine that uses vanilla Space Engineers sounds as source material, but owns emitter placement, loop selection, state transitions, filtering, and listener-environment mixing.

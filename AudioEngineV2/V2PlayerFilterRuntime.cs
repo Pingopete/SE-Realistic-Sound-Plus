@@ -13,7 +13,7 @@ namespace RealisticSoundPlus.AudioEngineV2
 {
     internal static class V2PlayerFilterRuntime
     {
-        private static readonly TimeSpan UpdateInterval = TimeSpan.Zero;
+        private static readonly TimeSpan UpdateInterval = TimeSpan.FromMilliseconds(50);
         private static readonly TimeSpan SampleLifetime = TimeSpan.FromSeconds(2);
         private const float FilterBypassMuffle = 0.10f;
         private const BindingFlags InstanceMembers = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
@@ -36,6 +36,7 @@ namespace RealisticSoundPlus.AudioEngineV2
 
         public static void Reset()
         {
+            ClearTrackedVoices();
             LastVoiceSignatures.Clear();
             FilterSmoothingStates.Clear();
             VolumeSmoothingStates.Clear();
@@ -77,8 +78,21 @@ namespace RealisticSoundPlus.AudioEngineV2
 
             _wasEnabled = true;
             ProcessVoices(played.Sound, settings, now);
+            if (ShouldProcessHudVoices(settings))
+                ProcessVoices(played.Hud, settings, now);
             PurgeSamples();
             LogIfDue();
+        }
+
+        private static bool ShouldProcessHudVoices(RealisticSoundPlusSettings settings)
+        {
+            if (settings == null || !settings.PlayerFilterLocalEnabled)
+                return false;
+
+            if (MyAPIGateway.Session == null)
+                return false;
+
+            return V2PlayerEnvironmentTelemetry.TryGetLatest(out V2PlayerEnvironmentSample env) && env.Valid;
         }
 
         public static string FormatSummary()
@@ -209,11 +223,12 @@ namespace RealisticSoundPlus.AudioEngineV2
             if (voices == null || voices.Count == 0)
                 return;
 
-            Dictionary<string, int> cueOrdinals = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             for (int i = 0; i < voices.Count; i++)
             {
                 IMySourceVoice voice = voices[i];
                 if (voice == null || !voice.IsValid || !voice.IsPlaying)
+                    continue;
+                if (V2ReverbDiagnosticPing.IsOwnedWetVoice(voice))
                     continue;
 
                 string cueName = voice.CueEnum.ToString();
@@ -225,11 +240,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                 if (string.IsNullOrWhiteSpace(cueName) || cueName == "NullOrEmpty" || (score <= 0.001f && !possibleEnvironment))
                     continue;
 
-                int cueOrdinal = 0;
-                cueOrdinals.TryGetValue(cueName, out cueOrdinal);
-                cueOrdinals[cueName] = cueOrdinal + 1;
-
-                if (!TryClassifyAndCalculate(voice, cueName, cueOrdinal, score, settings, out V2PlayerFilterSample sample))
+                if (!TryClassifyAndCalculate(voice, cueName, score, settings, out V2PlayerFilterSample sample))
                 {
                     ClearVoiceControlsIfTracked(voice, settings);
                     continue;
@@ -240,6 +251,13 @@ namespace RealisticSoundPlus.AudioEngineV2
                 sample.UpdatedUtc = now;
                 if (sample.Muffle > FilterBypassMuffle)
                     sample.Applied = ApplyFilterIfChanged(voice, settings.Filter2Type, sample.Frequency, sample.Q, sample.Category);
+                else if (LastVoiceSignatures.ContainsKey(voice))
+                    // Below the bypass threshold, glide the cutoff back toward clear through the SAME smoothing
+                    // path instead of hard-snapping it wide open (which also deleted the smoothing state).
+                    // Hard-clearing here is what turned every brief occlusion dip into an instant audible jump;
+                    // gliding keeps muffle/clear transitions continuous. Genuine release happens when the voice
+                    // stops being a block candidate (ClearVoiceControlsIfTracked above).
+                    sample.Applied = ApplyFilterIfChanged(voice, settings.Filter2Type, RspDynamicAudioFilters.MaxFilterFrequency, settings.Filter2Q, sample.Category);
                 else
                     ClearVoiceFilterIfTracked(voice, settings);
 
@@ -250,28 +268,33 @@ namespace RealisticSoundPlus.AudioEngineV2
             }
         }
 
-        private static bool TryClassifyAndCalculate(IMySourceVoice voice, string cueName, int cueOrdinal, float score, RealisticSoundPlusSettings settings, out V2PlayerFilterSample sample)
+        private static bool TryClassifyAndCalculate(IMySourceVoice voice, string cueName, float score, RealisticSoundPlusSettings settings, out V2PlayerFilterSample sample)
         {
             sample = default(V2PlayerFilterSample);
-            if (V2AuxCueClassifier.IsNonWorldCue(cueName))
+            if (V2AuxCueClassifier.IsNonWorldCue(cueName) && !V2AuxCueClassifier.IsImmersiveUiCue(cueName))
                 return false;
 
             if (V2AuxCueClassifier.IsEngineCue(cueName))
                 return false;
 
+            bool controllableActionCue = V2AuxCueClassifier.IsControllableActionCue(cueName);
+            if (settings.PlayerFilterBlockEnabled
+                && controllableActionCue
+                && TryCalculatePhysicalBlockEmitter(voice, cueName, score, settings, out sample))
+                return true;
+
             if (settings.PlayerFilterLocalEnabled && V2AuxCueClassifier.IsPlayerLocalCue(cueName))
                 return TryCalculatePlayerLocal(cueName, score, settings, out sample);
 
-            bool knownBlockCue = V2AuxCueClassifier.IsKnownBlockCue(cueName);
-            bool blockCueNeedsResolvedSource = V2AuxCueClassifier.IsKnownBlockCueButNeedsPhysicalSource(cueName);
-            if (settings.PlayerFilterBlockEnabled && (knownBlockCue || blockCueNeedsResolvedSource) && TryCalculateResolvedBlock(cueName, cueOrdinal, score, settings, out sample))
+            if (settings.PlayerFilterBlockEnabled && TryCalculatePhysicalBlockEmitter(voice, cueName, score, settings, out sample))
                 return true;
 
-            if (settings.PlayerFilterBlockEnabled && RspDynamicAudioFilters.TryResolveEmitter(voice, out MyEntity3DSoundEmitter emitter) && emitter != null)
-                return TryCalculateBlock(cueName, score, settings, emitter, out sample);
-
+            bool blockCueNeedsResolvedSource = V2AuxCueClassifier.IsKnownBlockCueButNeedsPhysicalSource(cueName);
             if (blockCueNeedsResolvedSource)
                 return false;
+
+            if (settings.PlayerFilterLocalEnabled && controllableActionCue)
+                return TryCalculatePlayerLocal(cueName, score, settings, out sample);
 
             if (settings.PlayerFilterEnvironmentEnabled && V2AuxCueClassifier.IsEnvironmentCue(cueName))
                 return TryCalculateEnvironment(cueName, score, settings, out sample);
@@ -279,10 +302,40 @@ namespace RealisticSoundPlus.AudioEngineV2
             return false;
         }
 
+        private static bool TryCalculatePhysicalBlockEmitter(IMySourceVoice voice, string cueName, float score, RealisticSoundPlusSettings settings, out V2PlayerFilterSample sample)
+        {
+            sample = default(V2PlayerFilterSample);
+            if (!RspDynamicAudioFilters.TryResolveEmitter(voice, out MyEntity3DSoundEmitter emitter) || !IsReliablePhysicalEmitter(emitter))
+                return false;
+
+            if (!TryCalculateBlock(cueName, score, settings, emitter, out sample))
+                return false;
+
+            V2BlockSoundSourceResolver.RecordPhysicalEmitterBlock();
+            return true;
+        }
+
+        private static bool IsReliablePhysicalEmitter(MyEntity3DSoundEmitter emitter)
+        {
+            if (emitter == null)
+                return false;
+
+            Vector3D source = emitter.SourcePosition;
+            return source != Vector3D.Zero
+                && !double.IsNaN(source.X)
+                && !double.IsNaN(source.Y)
+                && !double.IsNaN(source.Z)
+                && !double.IsInfinity(source.X)
+                && !double.IsInfinity(source.Y)
+                && !double.IsInfinity(source.Z);
+        }
+
         private static bool TryCalculateEnvironment(string cueName, float score, RealisticSoundPlusSettings settings, out V2PlayerFilterSample sample)
         {
             sample = default(V2PlayerFilterSample);
             if (!V2PlayerEnvironmentTelemetry.TryGetLatest(out V2PlayerEnvironmentSample env))
+                return false;
+            if (!ShouldFilterEnvironmentVoice(score, env))
                 return false;
 
             float localAtmosphere = GetEffectiveAtmosphere(env.LocalAtmosphere, settings);
@@ -294,7 +347,8 @@ namespace RealisticSoundPlus.AudioEngineV2
                 if (!vanillaSuppressed || settings.PlayerFilterEnvironmentMinGain <= 0f)
                     return false;
 
-                muffle = 1f;
+                if (vanillaSuppressed && settings.PlayerFilterEnvironmentMinGain > 0f)
+                    muffle = 1f;
             }
 
             sample = new V2PlayerFilterSample
@@ -313,6 +367,17 @@ namespace RealisticSoundPlus.AudioEngineV2
             return true;
         }
 
+        private static bool ShouldFilterEnvironmentVoice(float score, V2PlayerEnvironmentSample env)
+        {
+            if (!env.Valid)
+                return false;
+
+            return env.PlanetEnvironmentAvailable
+                || score > 0.001f
+                || env.WindAudibility > 0.001f
+                || env.WindExposure > 0.001f;
+        }
+
         private static bool TryCalculateBlock(string cueName, float score, RealisticSoundPlusSettings settings, MyEntity3DSoundEmitter emitter, out V2PlayerFilterSample sample)
         {
             sample = default(V2PlayerFilterSample);
@@ -327,45 +392,9 @@ namespace RealisticSoundPlus.AudioEngineV2
                 Category = "block",
                 CueName = cueName,
                 Score = score,
-                Distance = aux.Distance,
-                Muffle = muffle,
-                Frequency = BlendCutoff(settings.Filter2Frequency, settings.PlayerFilterBlockMuffledFrequency, muffle),
-                Q = settings.Filter2Q,
-                LocalAtmosphere = localAtmosphere,
-                OpenFraction = aux.OpenFraction,
-                VanillaMaxDistance = aux.VanillaMaxDistance,
-                EffectiveRange = aux.EffectiveRange,
-                RangeScale = aux.RangeScale,
-                CustomRangeApplied = aux.CustomRangeApplied,
-                VolumeGain = aux.EstimatedGain * CalculateMuffleVolumeGain(muffle, settings.PlayerFilterBlockVolumeMuffleWeight)
-            };
-            return true;
-        }
-
-        private static bool TryCalculateResolvedBlock(string cueName, int cueOrdinal, float score, RealisticSoundPlusSettings settings, out V2PlayerFilterSample sample)
-        {
-            sample = default(V2PlayerFilterSample);
-            Vector3D listener = AudioEngineV2Runtime.Listener.Position;
-            if (listener == Vector3D.Zero)
-                listener = MyAPIGateway.Session?.Camera?.Position ?? Vector3D.Zero;
-
-            if (!V2BlockSoundSourceResolver.TryResolve(cueName, listener, cueOrdinal, out Vector3D source, out string sourceLabel))
-                return false;
-
-            if (!V2AuxSourceOcclusionTelemetry.TryCalculate("S", cueName, score, source, out V2AuxSourceOcclusionSample aux))
-                return false;
-
-            float localAtmosphere = GetEffectiveAtmosphere(aux.LocalAtmosphere, settings);
-            float pressureMuffle = 1f - Clamp01(localAtmosphere);
-            float muffle = Combine(aux.FinalMuffling, pressureMuffle);
-
-            sample = new V2PlayerFilterSample
-            {
-                Category = "block",
-                CueName = string.IsNullOrWhiteSpace(sourceLabel)
-                    ? cueName + "#" + cueOrdinal.ToString(CultureInfo.InvariantCulture)
-                    : cueName + "#" + cueOrdinal.ToString(CultureInfo.InvariantCulture) + "@" + Trim(sourceLabel, 18),
-                Score = score,
+                SourcePosition = aux.SourcePosition,
+                EntityWorldPosition = TryGetEntityWorldPosition(emitter),
+                SourceEntityId = emitter.Entity?.EntityId ?? 0L,
                 Distance = aux.Distance,
                 Muffle = muffle,
                 Frequency = BlendCutoff(settings.Filter2Frequency, settings.PlayerFilterBlockMuffledFrequency, muffle),
@@ -925,12 +954,108 @@ namespace RealisticSoundPlus.AudioEngineV2
                 return;
 
             _lastLogUtc = now;
-            V2DebugLog.WriteEvent("player-filter", FormatSummary() + " | " + FormatSources(5).Replace(Environment.NewLine, "; "));
+            V2DebugLog.WriteEvent("player-filter", FormatSummary()
+                + " | nearblk: " + FormatNearestBlocks(6)
+                + " | " + FormatSources(8).Replace(Environment.NewLine, "; "));
         }
 
         private static string BuildKey(V2PlayerFilterSample sample)
         {
-            return (sample.Category ?? "?") + ":" + (sample.CueName ?? "?");
+            string key = (sample.Category ?? "?") + ":" + (sample.CueName ?? "?");
+
+            // Block emitters are physical sources, so the same block cue can play from many positions at
+            // once (e.g. the player's nearby base and a second base 60 km away). Keying by cue name alone
+            // made them collide, and the last writer won — which is why the readout only ever showed the
+            // distant base. Discriminate by the owning block's entity id (stable; a source 60 km out
+            // jitters position by metres each frame, so a position key churns into hundreds of rows).
+            // Fall back to a coarse position only when no entity id is available. Env/local stay
+            // cue-keyed (they are listener-global).
+            if (string.Equals(sample.Category, "block", StringComparison.OrdinalIgnoreCase))
+            {
+                if (sample.SourceEntityId != 0L)
+                    key += "@e" + sample.SourceEntityId.ToString(CultureInfo.InvariantCulture);
+                else if (sample.SourcePosition != Vector3D.Zero)
+                    key += string.Format(
+                        CultureInfo.InvariantCulture,
+                        "@p{0:0}:{1:0}:{2:0}",
+                        Math.Round(sample.SourcePosition.X / 4.0) * 4.0,
+                        Math.Round(sample.SourcePosition.Y / 4.0) * 4.0,
+                        Math.Round(sample.SourcePosition.Z / 4.0) * 4.0);
+            }
+
+            return key;
+        }
+
+        // Block sources sorted by the emitter's TRUE entity distance (not the source distance occlusion
+        // uses, and not voice volume). This surfaces a block physically next to the listener even when
+        // its SourcePosition is stale/far. Each row shows entDist (truth) vs srcDist (what occlusion
+        // sees) vs srcVsEnt (how far SourcePosition has drifted from the real block). If srcVsEnt is
+        // large while entDist is small, the source position is stale — the actual defect.
+        public static string FormatNearestBlocks(int maxLines)
+        {
+            PurgeSamples();
+            Vector3D listener = AudioEngineV2Runtime.Listener.Position;
+            List<V2PlayerFilterSample> blocks = new List<V2PlayerFilterSample>();
+            foreach (V2PlayerFilterSample sample in Samples.Values)
+            {
+                if (string.Equals(sample.Category, "block", StringComparison.OrdinalIgnoreCase))
+                    blocks.Add(sample);
+            }
+
+            if (blocks.Count == 0)
+                return "none";
+
+            blocks.Sort((left, right) => EntityDistance(left, listener).CompareTo(EntityDistance(right, listener)));
+            StringBuilder builder = new StringBuilder();
+            int count = Math.Min(maxLines, blocks.Count);
+            for (int i = 0; i < count; i++)
+            {
+                V2PlayerFilterSample sample = blocks[i];
+                float divergence = (sample.SourcePosition != Vector3D.Zero && sample.EntityWorldPosition != Vector3D.Zero)
+                    ? (float)Vector3D.Distance(sample.SourcePosition, sample.EntityWorldPosition)
+                    : -1f;
+                if (i > 0)
+                    builder.Append("; ");
+
+                builder.AppendFormat(
+                    CultureInfo.InvariantCulture,
+                    "{0} entDist={1:0}m srcDist={2:0}m srcVsEnt={3:0}m muff={4:0.00} open={5:0.00}",
+                    Trim(sample.CueName, 20),
+                    EntityDistance(sample, listener),
+                    sample.Distance,
+                    divergence,
+                    sample.Muffle,
+                    sample.OpenFraction);
+            }
+
+            return string.Format(CultureInfo.InvariantCulture, "count={0} {1}", blocks.Count, builder);
+        }
+
+        private static float EntityDistance(V2PlayerFilterSample sample, Vector3D listener)
+        {
+            if (sample.EntityWorldPosition == Vector3D.Zero || listener == Vector3D.Zero)
+                return sample.Distance;
+
+            return (float)Vector3D.Distance(sample.EntityWorldPosition, listener);
+        }
+
+        private static Vector3D TryGetEntityWorldPosition(MyEntity3DSoundEmitter emitter)
+        {
+            try
+            {
+                var entity = emitter?.Entity;
+                if (entity == null)
+                    return Vector3D.Zero;
+
+                if (entity.PositionComp != null)
+                    return entity.PositionComp.GetPosition();
+
+                return entity.WorldMatrix.Translation;
+            }
+            catch
+            {
+                return Vector3D.Zero;
+            }
         }
 
         private static float GetEffectiveAtmosphere(float realAtmosphere, RealisticSoundPlusSettings settings)
@@ -1011,5 +1136,6 @@ namespace RealisticSoundPlus.AudioEngineV2
             public float Multiplier;
             public DateTime UpdatedUtc;
         }
+
     }
 }

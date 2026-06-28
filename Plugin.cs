@@ -36,9 +36,12 @@ namespace RealisticSoundPlus
             SettingsCommands.TryRegister();
             AudioEngineV2Runtime.Update();
             V2ConnectorImpactAudio.Update();
+            V2BlockEmitterReposition.Update();
             AudioVoiceCatalog.Update();
             V2DebugLog.Update();
             V2AuxOcclusionDebugOverlay.Draw();
+            V2PlayerEnvironmentTelemetry.DrawReverbRayDebug();
+            V2PlayerEnvironmentTelemetry.DrawEnvMapDebug();
             AudioDebugOverlay.Draw();
             FilterDebugOverlay.Draw();
 

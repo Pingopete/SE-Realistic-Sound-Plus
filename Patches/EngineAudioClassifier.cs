@@ -18,11 +18,8 @@ namespace RealisticSoundPlus.Patches
             if (string.IsNullOrWhiteSpace(cueName))
                 return false;
 
-            if (cueName.StartsWith("ArcBlockHydrogenEngine", StringComparison.OrdinalIgnoreCase))
-                return true;
-
-            if (cueName.IndexOf("HydrogenEngine", StringComparison.OrdinalIgnoreCase) >= 0)
-                return true;
+            if (IsFunctionalBlockHydrogenEngineCue(cueName))
+                return false;
 
             if (cueName.IndexOf("JetHydrogen", StringComparison.OrdinalIgnoreCase) >= 0)
                 return true;
@@ -41,6 +38,15 @@ namespace RealisticSoundPlus.Patches
                 return true;
 
             return IsKnownShipMotionCue(cueName);
+        }
+
+        public static bool IsFunctionalBlockHydrogenEngineCue(string cueName)
+        {
+            if (string.IsNullOrWhiteSpace(cueName))
+                return false;
+
+            return cueName.StartsWith("ArcBlockHydrogenEngine", StringComparison.OrdinalIgnoreCase)
+                || cueName.IndexOf("BlockHydrogenEngine", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         public static bool IsKnownVanillaShipStateCue(string cueName)

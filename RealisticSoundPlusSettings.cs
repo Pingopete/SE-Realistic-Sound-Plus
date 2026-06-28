@@ -18,13 +18,15 @@ namespace RealisticSoundPlus
         public float AtmosphericMufflingFloor { get; set; } = 0.5f;
         public string EngineFilter { get; set; } = "EngineFilter";
         public string InternalEngineFilter { get; set; } = "EngineFilter";
-        public float Filter1Frequency { get; set; } = 300f;
-        public float Filter1Q { get; set; } = 0.7f;
+        public float Filter1Frequency { get; set; } = 8000f;
+        public float Filter1Q { get; set; } = 0.919831157f;
         public string Filter1Type { get; set; } = "LowPass";
-        public float Filter2Frequency { get; set; } = 1200f;
-        public float Filter2Q { get; set; } = 0.7f;
+        public float Filter2Frequency { get; set; } = 8000f;
+        public float Filter2Q { get; set; } = 0.1f;
         public string Filter2Type { get; set; } = "LowPass";
         public bool EngineFilterDynamic { get; set; } = true;
+        public float LiveFilterSmoothingMs { get; set; } = 45f;
+        public float ReverbSealedGeometryWeight { get; set; } = 0.75f;
         public bool V2AtmosphereOverrideEnabled { get; set; } = false;
         public float V2AtmosphereOverride { get; set; } = 0.971752346f;
         public float EngineFilterAirNearFrequency { get; set; } = 8000f;
@@ -38,39 +40,82 @@ namespace RealisticSoundPlus
         public float EngineFilterHullRange { get; set; } = 271.383942f;
         public float EngineFilterHullDistanceCurve { get; set; } = 1.26052666f;
         public float EngineFilterHullQ { get; set; } = 1.191213f;
+        public float EngineFilterAirEnvironmentOcclusionContribution { get; set; } = 1f;
         public float EngineFilterInteriorMaxFrequency { get; set; } = 8000f;
         public float EngineFilterVacuumContactFrequency { get; set; } = 20.2895f;
         public float PlayerEnvRayLength { get; set; } = 27.8737087f;
-        public float PlayerEnvApertureCurve { get; set; } = 1.0102917f;
+        public float PlayerEnvApertureCurve { get; set; } = 0.751832f;
         public float PlayerEnvOcclusionCurve { get; set; } = 4.9959054f;
+        public int PlayerEnvMapCellCount { get; set; } = 96;
+        public float PlayerEnvMapCellAlpha { get; set; } = 0.5f;
+        public float PlayerEnvMapConfidenceDecayMeters { get; set; } = 1.5f;
+        public float PlayerEnvMapResetMoveMeters { get; set; } = 4.0f;
+        public int PlayerEnvMapRaysPerUpdate { get; set; } = 16;
         public float PlayerFilterStructureThicknessScale { get; set; } = 1.15048516f;
-        public float PlayerEnvStructureThicknessScale { get; set; } = 0.968652368f;
+        public float PlayerEnvStructureThicknessScale { get; set; } = 2.838953f;
         public float PlayerFilterBlockStructureThicknessScale { get; set; } = 2.08563447f;
         public float PlayerFilterBlockOcclusionCurve { get; set; } = 0.429020733f;
-        public float PlayerFilterVoxelOcclusionWeight { get; set; } = 4.13063955f;
+        public float PlayerFilterBlockOcclusionSmoothingMs { get; set; } = 300f;
+        public float PlayerFilterVoxelOcclusionWeight { get; set; } = 1.9507097f;
+        public float PlayerFilterBlockVoxelOcclusionWeight { get; set; } = -1f;
         public float PlayerEnvSealedExtraMuffling { get; set; } = 0.5932017f;
         public float PlayerEnvSealOpenThreshold { get; set; } = 0f;
-        public float PlayerFilterEnvironmentSealedFactor { get; set; } = 0.5932017f;
-        public float PlayerFilterBlockSealedFactor { get; set; } = 0.5932017f;
+        public float PlayerFilterEnvironmentSealedFactor { get; set; } = 0f;
+        public float PlayerFilterBlockSealedFactor { get; set; } = 0f;
+        // Thin-wall WIND SEALING (the "Thin Wall Muffle" knob), now BIDIRECTIONAL: 1 = thin sealed walls/roof fully
+        // seal the wind out (today's behaviour, the default), lower = wind leaks through the thin shell (brighter).
+        public float PlayerFilterBlockSealedBarrierLoss { get; set; } = 1f;
+        public float PlayerEnvSealedBarrierLoss { get; set; } = 1f;
+        // Max barrier thickness, in GRID BLOCKS, that still counts as a "thin" sealed face for the Thin Wall
+        // Muffle bonus. 1 = single sealing layer only; higher also catches 2-3 block sealed walls. (Was a
+        // fraction of the acoustic thickness scale, which never caught a normal large-grid block.)
+        public float PlayerFilterSealedBarrierThinFactor { get; set; } = 1.5f;
+        // Air (around-corner) leg brightness FLOOR for blocked block sources: the muffle at zero detour length
+        // (brightest, short path). Lower = brighter. 0.08 = prior hardcoded value.
+        public float PlayerFilterBlockAirBrightness { get; set; } = 0.08f;
+        // Extra muffle accumulated PER METRE of air-path length (high-frequency loss over distance): a longer
+        // detour arrives duller. 0 = flat (length ignored, old behaviour). ~0.015 = noticeable over 20-40 m.
+        public float PlayerFilterBlockAirLengthMuffle { get; set; } = 0.015f;
+        // Emitter repositioning: move a blocked block source to its doorway portal so it localises to the
+        // opening (direction), with the detour attenuation carried by gain. OFF by default (experimental).
+        public bool PlayerFilterBlockRepositionEnabled { get; set; } = false;
+        public float PlayerFilterBlockRepositionSlewMs { get; set; } = 120f;       // per-frame glide toward target
+        public float PlayerFilterBlockRepositionPortalAvgMs { get; set; } = 200f;  // averages the grid-quantised portal jumps
+        // How strongly the emitter localises to the AIR-PATH portal vs the direct (through-structure) line.
+        // 1 = physical loudness blend; higher pulls the position toward the doorway/stairwell even when the
+        // direct line still transmits some sound. (This is the blend weight - NOT the path-search Open Path Bias.)
+        public float PlayerFilterBlockRepositionAirBias { get; set; } = 1f;
+        // How far (grid cells) the air-path flood-fill may search beyond the source<->listener box. Larger finds
+        // longer detours (multi-flight switchback staircases, paths that swing wide) at more BFS cost.
+        public float PlayerFilterBlockAirPathReach { get; set; } = 3f;
+        // "Sound goes where air goes": treat any non-airtight cell as passable (stairs, catwalks, gratings) so
+        // the air path can travel a stairwell packed with stair blocks. OFF = empty cells + open doors only.
+        public bool PlayerFilterBlockAirPathThroughBlocks { get; set; } = false;
+        // Cost penalty for routing through a grated/non-sealing block vs open air. Higher = the path prefers the
+        // open stairwell void far more strongly over a short hop through a grated floor. 0 = pure shortest path.
+        public float PlayerFilterBlockAirPathOpenBias { get; set; } = 6f;
+        public bool PlayerEnvMapDebugEnabled { get; set; } = false;
         public bool PlayerFilterEnabled { get; set; } = true;
         public bool PlayerFilterEnvironmentEnabled { get; set; } = true;
         public bool PlayerFilterBlockEnabled { get; set; } = true;
         public bool PlayerFilterLocalEnabled { get; set; } = true;
         public bool PlayerFilterPathDebugEnabled { get; set; } = false;
+        public bool ReverbRayDebugEnabled { get; set; } = false;
         public bool PlayerFilterAtmosphereOverrideEnabled { get; set; } = false;
         public float PlayerFilterAtmosphereOverride { get; set; } = 1f;
         public float PlayerFilterOcclusionStrength { get; set; } = 1.0048033f;
-        public float PlayerFilterEnvironmentVolumeMuffleWeight { get; set; } = 0.994361341f;
-        public float PlayerFilterBlockVolumeMuffleWeight { get; set; } = 2.064745f;
+        public float PlayerFilterEnvironmentVolumeMuffleWeight { get; set; } = 0.6288639f;
+        public float PlayerFilterBlockVolumeMuffleWeight { get; set; } = 2.44068527f;
         public float PlayerFilterLocalVolumeMuffleWeight { get; set; } = 1.0048033f;
         public float PlayerFilterEnvironmentMinGain { get; set; } = 0f;
         public float PlayerFilterEnvironmentMuffledFrequency { get; set; } = 5f;
         public float PlayerFilterBlockMuffledFrequency { get; set; } = 5f;
         public float PlayerFilterMuffledFrequency { get; set; } = 10.8494892f;
-        public float PlayerFilterBlockRange { get; set; } = 1f;
-        public float PlayerFilterBlockRangeScale { get; set; } = 6.80799437f;
+        public float PlayerFilterBlockRange { get; set; } = 100f;
+        public float PlayerFilterBlockRangeScale { get; set; } = 1f;
+        public float PlayerFilterBlockMaxRange { get; set; } = 100f;
         public float PlayerFilterBlockDistanceCurve { get; set; } = 4.11323071f;
-        public float PlayerFilterSmoothingMs { get; set; } = 1000f;
+        public float PlayerFilterSmoothingMs { get; set; } = 485.850616f;
         public float V2SmoothingMs { get; set; } = 237.207642f;
         public float V2DetailCommandSmoothingMs { get; set; } = 2091.426f;
         public float V2EmitterFadeInMs { get; set; } = 315.162872f;
@@ -84,13 +129,34 @@ namespace RealisticSoundPlus
         public float V2DetailIdleGain { get; set; } = 4.0f;
         public float V2StateGain { get; set; } = 2.336257f;
         public float V2EmitterDistance { get; set; } = 325.01593f;
+        public float V2RemoteGridCollapseDistance { get; set; } = 300f;
         public float V2DistanceCurve { get; set; } = 1.03026366f;
         public bool AudioOverlayEnabled { get; set; } = false;
         public bool FilterOverlayEnabled { get; set; } = false;
         public bool V2DebugLogEnabled { get; set; } = true;
         public bool GlobalReverbEnabled { get; set; } = true;
-        public float GlobalReverbDiffusion { get; set; } = 0.172880113f;
+        public string GlobalReverbRoute { get; set; } = "custommaster";
+        public float GlobalReverbDiffusion { get; set; } = 0.419590652f;
         public float GlobalReverbRoomSize { get; set; } = 1f;
+        public float GlobalReverbWetSend { get; set; } = 1f;
+        public float GlobalReverbDecaySeconds { get; set; } = 6f;
+        public float GlobalReverbEarlyGainDb { get; set; } = 4f;
+        public float GlobalReverbTailGainDb { get; set; } = 9f;
+        public float GlobalReverbPredelayMs { get; set; } = 78f;
+        public float GlobalReverbLateDelayMs { get; set; } = 78f;
+        public float GlobalReverbDensity { get; set; } = 75f;
+        public float GlobalReverbToneHz { get; set; } = 5000f;
+        public float GlobalReverbHighFrequencyDb { get; set; } = 0f;
+        public float GlobalReverbDiffusionModifier { get; set; } = 1f;
+        public float GlobalReverbRoomSizeModifier { get; set; } = 1f;
+        public float GlobalReverbDecayModifier { get; set; } = 1f;
+        public float GlobalReverbEarlyGainOffsetDb { get; set; } = 0f;
+        public float GlobalReverbTailGainOffsetDb { get; set; } = 0f;
+        public float GlobalReverbPredelayModifier { get; set; } = 1f;
+        public float GlobalReverbLateDelayModifier { get; set; } = 1f;
+        public float GlobalReverbDensityModifier { get; set; } = 1f;
+        public float GlobalReverbToneModifier { get; set; } = 1f;
+        public float GlobalReverbHighFrequencyOffsetDb { get; set; } = 0f;
     }
 
     internal static class SettingsManager
@@ -146,7 +212,7 @@ namespace RealisticSoundPlus
         public static string Summary()
         {
             return string.Format(CultureInfo.InvariantCulture,
-                "route=v2, gain={0:0.00}, thrustCurve={1:0.00}, presenceMin={2:0.00}, external={3}, internal={4}, enginefilter={5}/{6:0}/{7:0.00}/dyn={8}, auxfilter={9}/{10:0}/{11:0.00}, atmOverride={12}/{13:0.00}, air={14:0}-{15:0}Hz/{16:0}m/c{17:0.00}/q{18:0.00}/inside{19:0.00}/cap{20:0}Hz/vac{21:0}Hz, hull={22:0}-{23:0}Hz/{24:0}m/c{25:0.00}/q{26:0.00}, playerEnv=ray{27:0}/ap{28:0.00}/envThick{29:0.00}m/vox{30:0.00}/sealedEnv{31:0.00}, playerFilter={32}/env{33}/block{34}/local{35}/pathdbg{36}/auxAtm{37}/{38:0.00}/occStrength{39:0.00}/volW{40:0.00}/{41:0.00}/{42:0.00}/envFloor{43:0.00}/envMuff{44:0}Hz/blockMuff{45:0}Hz/localMuff{46:0}Hz/blockThick{47:0.00}m/blockCurve{48:0.00}/sealedBlock{49:0.00}/blockFallback{50:0}m/scale{51:0.00}/c{52:0.00}/auxSmoothMs{53:0}, smoothMs={54:0}, cmdSmoothMs={55:0}, emitterFadeMs={56:0}, fade={57:0.000}, detail={58}({59:0.00}), idle={60}({61:0.00}), detail2dpos={62}, state={63}({64:0.00}), dist={65:0}, distcurve={66:0.00}, state2dpos={67}, sounds={68}, filters={69}, log={70}, reverb={71}/diff{72:0.00}/room{73:0.00}",
+                "route=v2, gain={0:0.00}, thrustCurve={1:0.00}, presenceMin={2:0.00}, external={3}, internal={4}, enginefilter={5}/{6:0}/{7:0.00}/dyn={8}, auxfilter={9}/{10:0}/{11:0.00}, atmOverride={12}/{13:0.00}, air={14:0}-{15:0}Hz/{16:0}m/c{17:0.00}/q{18:0.00}/inside{19:0.00}/cap{20:0}Hz/vac{21:0}Hz, hull={22:0}-{23:0}Hz/{24:0}m/c{25:0.00}/q{26:0.00}, playerEnv=ray{27:0}/ap{28:0.00}/envThick{29:0.00}m/vox{30:0.00}/sealedEnv{31:0.00}, playerFilter={32}/env{33}/block{34}/local{35}/pathdbg{36}/auxAtm{37}/{38:0.00}/occStrength{39:0.00}/volW{40:0.00}/{41:0.00}/{42:0.00}/envFloor{43:0.00}/envMuff{44:0}Hz/blockMuff{45:0}Hz/localMuff{46:0}Hz/blockThick{47:0.00}m/blockCurve{48:0.00}/blockVox{83:0.00}/sealedBlock{49:0.00}/blockRange{84:0}m/c{52:0.00}/auxSmoothMs{53:0}, smoothMs={54:0}, cmdSmoothMs={55:0}, emitterFadeMs={56:0}, fade={57:0.000}, detail={58}({59:0.00}), idle={60}({61:0.00}), detail2dpos={62}, state={63}({64:0.00}), dist={65:0}, distcurve={66:0.00}, state2dpos={67}, sounds={68}, filters={69}, log={70}, reverb={71}/{85}/diff{72:0.00}/room{73:0.00}/wet{74:0.00}/decay{75:0.0}s/early{76:0.0}dB/tail{77:0.0}dB/pre{78:0}ms/late{79:0}ms/dens{80:0}%/tone{81:0}Hz/hf{82:0.0}dB",
                 Current.EngineGain,
                 Current.AudioCurveExponent,
                 Current.MinimumShipPresence,
@@ -220,12 +286,34 @@ namespace RealisticSoundPlus
                 Current.V2DebugLogEnabled ? "on" : "off",
                 Current.GlobalReverbEnabled ? "on" : "off",
                 Current.GlobalReverbDiffusion,
-                Current.GlobalReverbRoomSize);
+                Current.GlobalReverbRoomSize,
+                Current.GlobalReverbWetSend,
+                Current.GlobalReverbDecaySeconds,
+                Current.GlobalReverbEarlyGainDb,
+                Current.GlobalReverbTailGainDb,
+                Current.GlobalReverbPredelayMs,
+                Current.GlobalReverbLateDelayMs,
+                Current.GlobalReverbDensity,
+                Current.GlobalReverbToneHz,
+                Current.GlobalReverbHighFrequencyDb,
+                ResolveBlockVoxelOcclusionWeight(Current),
+                Current.PlayerFilterBlockMaxRange,
+                NormalizeGlobalReverbRoute(Current.GlobalReverbRoute));
         }
 
         public static bool TryGetDefault(string name, out float value)
         {
             return TryReadFloat(new RealisticSoundPlusSettings(), name, out value);
+        }
+
+        private static float ResolveBlockVoxelOcclusionWeight(RealisticSoundPlusSettings settings)
+        {
+            if (settings == null)
+                return 0f;
+
+            return settings.PlayerFilterBlockVoxelOcclusionWeight < 0f
+                ? settings.PlayerFilterVoxelOcclusionWeight
+                : settings.PlayerFilterBlockVoxelOcclusionWeight;
         }
 
         private static bool TryReadFloat(RealisticSoundPlusSettings settings, string name, out float value)
@@ -307,6 +395,11 @@ namespace RealisticSoundPlus
                 case "enginehullq":
                 case "enginefilterhullq":
                 case "hullq": value = settings.EngineFilterHullQ; return true;
+                case "engineenvocclusion":
+                case "engineenvironmentocclusion":
+                case "thrusterenvocclusion":
+                case "thrusterairenvocclusion":
+                case "airenvocclusion": value = settings.EngineFilterAirEnvironmentOcclusionContribution; return true;
                 case "engineinteriorcutoff":
                 case "enginefilterinteriorcutoff":
                 case "interiorcutoff": value = settings.EngineFilterInteriorMaxFrequency; return true;
@@ -318,6 +411,10 @@ namespace RealisticSoundPlus
                 case "externalatm":
                 case "testatm": value = settings.V2AtmosphereOverride; return true;
                 case "playerenvray":
+                case "envreverbray":
+                case "reverbray":
+                case "roomray":
+                case "proberay":
                 case "playerray":
                 case "envray":
                 case "occlusionray": value = settings.PlayerEnvRayLength; return true;
@@ -343,11 +440,56 @@ namespace RealisticSoundPlus
                 case "blockstructurethickness":
                 case "blockthickness":
                 case "sourcepaththickness": value = settings.PlayerFilterBlockStructureThicknessScale; return true;
+                case "livefiltersmooth":
+                case "dezipper": value = settings.LiveFilterSmoothingMs; return true;
+                case "reverbsealedgeo":
+                case "reverbgeoweight": value = settings.ReverbSealedGeometryWeight; return true;
+                case "sealbarrierblock": value = settings.PlayerFilterBlockSealedBarrierLoss; return true;
+                case "sealbarrierenv": value = settings.PlayerEnvSealedBarrierLoss; return true;
+                case "sealbarrierthin": value = settings.PlayerFilterSealedBarrierThinFactor; return true;
+                // Coupled tester handle: one knob drives both block + env thin-seal loss (chat can still set each).
+                case "thinseal":
+                case "thinsealmuffle": value = settings.PlayerFilterBlockSealedBarrierLoss; return true;
+                case "blockairbright":
+                case "airbright":
+                case "airpathbrightness": value = settings.PlayerFilterBlockAirBrightness; return true;
+                case "blockairlengthmuffle":
+                case "airlengthmuffle":
+                case "airmuffleperm": value = settings.PlayerFilterBlockAirLengthMuffle; return true;
+                case "blockreposeslew":
+                case "repositionslew": value = settings.PlayerFilterBlockRepositionSlewMs; return true;
+                case "blockportalavg":
+                case "portalavg": value = settings.PlayerFilterBlockRepositionPortalAvgMs; return true;
+                case "blockrepoairbias":
+                case "repoairbias":
+                case "airbias": value = settings.PlayerFilterBlockRepositionAirBias; return true;
+                case "blockairpathreach":
+                case "airpathreach":
+                case "airreach": value = settings.PlayerFilterBlockAirPathReach; return true;
+                case "blockairopenbias":
+                case "airopenbias":
+                case "openbias": value = settings.PlayerFilterBlockAirPathOpenBias; return true;
+                case "envmapcells": value = settings.PlayerEnvMapCellCount; return true;
+                case "envmapalpha": value = settings.PlayerEnvMapCellAlpha; return true;
+                case "envmapdecay": value = settings.PlayerEnvMapConfidenceDecayMeters; return true;
+                case "envmapreset": value = settings.PlayerEnvMapResetMoveMeters; return true;
+                case "envmaprays": value = settings.PlayerEnvMapRaysPerUpdate; return true;
                 case "playerfiltervoxelocclusionweight":
+                case "envvoxelocclusionweight":
+                case "envvoxelweight":
+                case "envvoxel":
                 case "voxelocclusionweight":
                 case "voxelweight":
                 case "voxelocclusion":
                 case "voxelmuffle": value = settings.PlayerFilterVoxelOcclusionWeight; return true;
+                // Coupled tester handle: one knob drives env + block voxel weight together (chat can still set each).
+                case "voxelboth":
+                case "voxelall": value = settings.PlayerFilterVoxelOcclusionWeight; return true;
+                case "playerfilterblockvoxelocclusionweight":
+                case "blockvoxelocclusionweight":
+                case "blockvoxelweight":
+                case "blockvoxel":
+                case "blockvoxelmuffle": value = ResolveBlockVoxelOcclusionWeight(settings); return true;
                 case "playerfilterstructurethicknessscale":
                 case "structurethickness":
                 case "occlusionthickness":
@@ -411,12 +553,18 @@ namespace RealisticSoundPlus
                 case "playerfilterblockrange":
                 case "blockrange":
                 case "auxblockrange":
-                case "blockfallbackrange": value = settings.PlayerFilterBlockRange; return true;
+                case "blockfallbackrange":
+                case "blocksoundrange": value = settings.PlayerFilterBlockMaxRange; return true;
+                case "playerfilterblockmaxrange":
+                case "blockmaxrange":
+                case "blockrangemax":
+                case "blockmaxdist":
+                case "blockmaxdistance": value = settings.PlayerFilterBlockMaxRange; return true;
                 case "playerfilterblockrangescale":
                 case "blockrangescale":
                 case "blockdistancescale":
                 case "blockscale":
-                case "blockdist": value = settings.PlayerFilterBlockRangeScale; return true;
+                case "blockdist": value = settings.PlayerFilterBlockMaxRange; return true;
                 case "playerfilterblockdistancecurve":
                 case "blockdistancecurve":
                 case "blockcurve":
@@ -426,6 +574,11 @@ namespace RealisticSoundPlus
                 case "auxsmooth":
                 case "auxsmoothing":
                 case "filtersmooth": value = settings.PlayerFilterSmoothingMs; return true;
+                case "playerfilterblockocclusionsmoothingms":
+                case "blockocclusionsmoothingms":
+                case "blockocclusionsmooth":
+                case "blockocclsmooth":
+                case "occlusionsmooth": value = settings.PlayerFilterBlockOcclusionSmoothingMs; return true;
                 case "smooth":
                 case "v2smooth":
                 case "smoothing": value = settings.V2SmoothingMs; return true;
@@ -440,6 +593,11 @@ namespace RealisticSoundPlus
                 case "dist":
                 case "distance":
                 case "v2dist": value = settings.V2EmitterDistance; return true;
+                case "remotecollapse":
+                case "remotegridcollapse":
+                case "v2remotecollapse":
+                case "thrustercollapse":
+                case "gridcollapse": value = settings.V2RemoteGridCollapseDistance; return true;
                 case "distcurve":
                 case "v2distcurve": value = settings.V2DistanceCurve; return true;
                 case "detailgain":
@@ -452,6 +610,42 @@ namespace RealisticSoundPlus
                 case "reverbdiffusion": value = settings.GlobalReverbDiffusion; return true;
                 case "reverbroomsize":
                 case "reverbroom": value = settings.GlobalReverbRoomSize; return true;
+                case "reverbwet":
+                case "reverbwetsend": value = settings.GlobalReverbWetSend; return true;
+                case "reverbdecay":
+                case "reverbdecayseconds": value = settings.GlobalReverbDecaySeconds; return true;
+                case "reverbearlydb":
+                case "reverbearlygain": value = settings.GlobalReverbEarlyGainDb; return true;
+                case "reverbtaildb":
+                case "reverbtailgain": value = settings.GlobalReverbTailGainDb; return true;
+                case "reverbpredelay":
+                case "reverbpredelayms": value = settings.GlobalReverbPredelayMs; return true;
+                case "reverblatedelay":
+                case "reverblatedelayms": value = settings.GlobalReverbLateDelayMs; return true;
+                case "reverbdensity":
+                case "reverbtaildensity": value = settings.GlobalReverbDensity; return true;
+                case "reverbtone":
+                case "reverbtonehz": value = settings.GlobalReverbToneHz; return true;
+                case "reverbhfdb":
+                case "reverbhfdamping": value = settings.GlobalReverbHighFrequencyDb; return true;
+                case "reverbdiffusionmod":
+                case "reverbdiffmod": value = settings.GlobalReverbDiffusionModifier; return true;
+                case "reverbroomsizemod":
+                case "reverbroommod": value = settings.GlobalReverbRoomSizeModifier; return true;
+                case "reverbdecaymod": value = settings.GlobalReverbDecayModifier; return true;
+                case "reverbearlyoffset":
+                case "reverbearlyoffsetdb": value = settings.GlobalReverbEarlyGainOffsetDb; return true;
+                case "reverbtailoffset":
+                case "reverbtailoffsetdb": value = settings.GlobalReverbTailGainOffsetDb; return true;
+                case "reverbpredelaymod":
+                case "reverbpremod": value = settings.GlobalReverbPredelayModifier; return true;
+                case "reverblatedelaymod":
+                case "reverblatemod": value = settings.GlobalReverbLateDelayModifier; return true;
+                case "reverbdensitymod":
+                case "reverbdensemod": value = settings.GlobalReverbDensityModifier; return true;
+                case "reverbtonemod": value = settings.GlobalReverbToneModifier; return true;
+                case "reverbhfoffset":
+                case "reverbhfoffsetdb": value = settings.GlobalReverbHighFrequencyOffsetDb; return true;
                 default:
                     return false;
             }
@@ -572,6 +766,13 @@ namespace RealisticSoundPlus
                 case "hullq":
                     Current.EngineFilterHullQ = value;
                     break;
+                case "engineenvocclusion":
+                case "engineenvironmentocclusion":
+                case "thrusterenvocclusion":
+                case "thrusterairenvocclusion":
+                case "airenvocclusion":
+                    Current.EngineFilterAirEnvironmentOcclusionContribution = value;
+                    break;
                 case "engineinteriorcutoff":
                 case "enginefilterinteriorcutoff":
                 case "interiorcutoff":
@@ -589,6 +790,10 @@ namespace RealisticSoundPlus
                     Current.V2AtmosphereOverride = value;
                     break;
                 case "playerenvray":
+                case "envreverbray":
+                case "reverbray":
+                case "roomray":
+                case "proberay":
                 case "playerray":
                 case "envray":
                 case "occlusionray":
@@ -628,12 +833,97 @@ namespace RealisticSoundPlus
                 case "sourcepaththickness":
                     Current.PlayerFilterBlockStructureThicknessScale = value;
                     break;
+                case "livefiltersmooth":
+                case "dezipper":
+                    Current.LiveFilterSmoothingMs = value;
+                    break;
+                case "reverbsealedgeo":
+                case "reverbgeoweight":
+                    Current.ReverbSealedGeometryWeight = value;
+                    break;
+                case "sealbarrierblock":
+                    Current.PlayerFilterBlockSealedBarrierLoss = value;
+                    break;
+                case "sealbarrierenv":
+                    Current.PlayerEnvSealedBarrierLoss = value;
+                    break;
+                case "sealbarrierthin":
+                    Current.PlayerFilterSealedBarrierThinFactor = value;
+                    break;
+                case "thinseal":
+                case "thinsealmuffle":
+                    Current.PlayerFilterBlockSealedBarrierLoss = value;
+                    Current.PlayerEnvSealedBarrierLoss = value;
+                    break;
+                case "blockairbright":
+                case "airbright":
+                case "airpathbrightness":
+                    Current.PlayerFilterBlockAirBrightness = value;
+                    break;
+                case "blockairlengthmuffle":
+                case "airlengthmuffle":
+                case "airmuffleperm":
+                    Current.PlayerFilterBlockAirLengthMuffle = value;
+                    break;
+                case "blockreposeslew":
+                case "repositionslew":
+                    Current.PlayerFilterBlockRepositionSlewMs = value;
+                    break;
+                case "blockportalavg":
+                case "portalavg":
+                    Current.PlayerFilterBlockRepositionPortalAvgMs = value;
+                    break;
+                case "blockrepoairbias":
+                case "repoairbias":
+                case "airbias":
+                    Current.PlayerFilterBlockRepositionAirBias = value;
+                    break;
+                case "blockairpathreach":
+                case "airpathreach":
+                case "airreach":
+                    Current.PlayerFilterBlockAirPathReach = value;
+                    break;
+                case "blockairopenbias":
+                case "airopenbias":
+                case "openbias":
+                    Current.PlayerFilterBlockAirPathOpenBias = value;
+                    break;
+                case "envmapcells":
+                    Current.PlayerEnvMapCellCount = (int)value;
+                    break;
+                case "envmapalpha":
+                    Current.PlayerEnvMapCellAlpha = value;
+                    break;
+                case "envmapdecay":
+                    Current.PlayerEnvMapConfidenceDecayMeters = value;
+                    break;
+                case "envmapreset":
+                    Current.PlayerEnvMapResetMoveMeters = value;
+                    break;
+                case "envmaprays":
+                    Current.PlayerEnvMapRaysPerUpdate = (int)value;
+                    break;
                 case "playerfiltervoxelocclusionweight":
+                case "envvoxelocclusionweight":
+                case "envvoxelweight":
+                case "envvoxel":
                 case "voxelocclusionweight":
                 case "voxelweight":
                 case "voxelocclusion":
                 case "voxelmuffle":
                     Current.PlayerFilterVoxelOcclusionWeight = value;
+                    break;
+                case "voxelboth":
+                case "voxelall":
+                    Current.PlayerFilterVoxelOcclusionWeight = value;
+                    Current.PlayerFilterBlockVoxelOcclusionWeight = value;
+                    break;
+                case "playerfilterblockvoxelocclusionweight":
+                case "blockvoxelocclusionweight":
+                case "blockvoxelweight":
+                case "blockvoxel":
+                case "blockvoxelmuffle":
+                    Current.PlayerFilterBlockVoxelOcclusionWeight = value;
                     break;
                 case "playerfilterstructurethicknessscale":
                 case "structurethickness":
@@ -731,8 +1021,8 @@ namespace RealisticSoundPlus
                 case "playerfilterblockrange":
                 case "auxblockrange":
                 case "blockrange":
-                    Current.PlayerFilterBlockRange = value;
-                    break;
+                case "blockfallbackrange":
+                case "blocksoundrange":
                 case "playerfilterblockrangescale":
                 case "auxblockrangescale":
                 case "blockdistancescale":
@@ -742,7 +1032,12 @@ namespace RealisticSoundPlus
                 case "blocksoundscale":
                 case "blockrangescale":
                 case "blockscale":
-                    Current.PlayerFilterBlockRangeScale = value;
+                case "playerfilterblockmaxrange":
+                case "blockmaxrange":
+                case "blockrangemax":
+                case "blockmaxdist":
+                case "blockmaxdistance":
+                    SetUnifiedBlockRange(value);
                     break;
                 case "playerfilterblockcurve":
                 case "auxblockcurve":
@@ -756,6 +1051,13 @@ namespace RealisticSoundPlus
                 case "auxsmoothing":
                 case "auxsmooth":
                     Current.PlayerFilterSmoothingMs = value;
+                    break;
+                case "playerfilterblockocclusionsmoothingms":
+                case "blockocclusionsmoothingms":
+                case "blockocclusionsmooth":
+                case "blockocclsmooth":
+                case "occlusionsmooth":
+                    Current.PlayerFilterBlockOcclusionSmoothingMs = value;
                     break;
                 case "playerfilteratm":
                 case "playerfilterpressure":
@@ -775,6 +1077,97 @@ namespace RealisticSoundPlus
                 case "globalreverbroomsize":
                 case "globalreverbroom":
                     Current.GlobalReverbRoomSize = value;
+                    break;
+                case "reverbwet":
+                case "reverbwetsend":
+                case "globalreverbwet":
+                case "globalreverbwetsend":
+                    Current.GlobalReverbWetSend = value;
+                    break;
+                case "reverbdecay":
+                case "reverbdecayseconds":
+                case "globalreverbdecay":
+                case "globalreverbdecayseconds":
+                    Current.GlobalReverbDecaySeconds = value;
+                    break;
+                case "reverbearlydb":
+                case "reverbearlygain":
+                case "reverbreflectiondb":
+                case "reverbreflectiongain":
+                    Current.GlobalReverbEarlyGainDb = value;
+                    break;
+                case "reverbtaildb":
+                case "reverbtailgain":
+                case "reverblatedb":
+                case "reverblategain":
+                    Current.GlobalReverbTailGainDb = value;
+                    break;
+                case "reverbpredelay":
+                case "reverbpredelayms":
+                case "reverbpre":
+                case "reverbprems":
+                    Current.GlobalReverbPredelayMs = value;
+                    break;
+                case "reverblatedelay":
+                case "reverblatedelayms":
+                case "reverblate":
+                case "reverblatems":
+                    Current.GlobalReverbLateDelayMs = value;
+                    break;
+                case "reverbdensity":
+                case "reverbtaildensity":
+                case "reverbdense":
+                    Current.GlobalReverbDensity = value;
+                    break;
+                case "reverbtone":
+                case "reverbtonehz":
+                case "reverbfilterfreq":
+                case "reverbfilterhz":
+                    Current.GlobalReverbToneHz = value;
+                    break;
+                case "reverbhfdb":
+                case "reverbhfdamping":
+                case "reverbhighfreqdb":
+                case "reverbhighfrequencydb":
+                    Current.GlobalReverbHighFrequencyDb = value;
+                    break;
+                case "reverbdiffusionmod":
+                case "reverbdiffmod":
+                    Current.GlobalReverbDiffusionModifier = value;
+                    break;
+                case "reverbroomsizemod":
+                case "reverbroommod":
+                    Current.GlobalReverbRoomSizeModifier = value;
+                    break;
+                case "reverbdecaymod":
+                    Current.GlobalReverbDecayModifier = value;
+                    break;
+                case "reverbearlyoffset":
+                case "reverbearlyoffsetdb":
+                    Current.GlobalReverbEarlyGainOffsetDb = value;
+                    break;
+                case "reverbtailoffset":
+                case "reverbtailoffsetdb":
+                    Current.GlobalReverbTailGainOffsetDb = value;
+                    break;
+                case "reverbpredelaymod":
+                case "reverbpremod":
+                    Current.GlobalReverbPredelayModifier = value;
+                    break;
+                case "reverblatedelaymod":
+                case "reverblatemod":
+                    Current.GlobalReverbLateDelayModifier = value;
+                    break;
+                case "reverbdensitymod":
+                case "reverbdensemod":
+                    Current.GlobalReverbDensityModifier = value;
+                    break;
+                case "reverbtonemod":
+                    Current.GlobalReverbToneModifier = value;
+                    break;
+                case "reverbhfoffset":
+                case "reverbhfoffsetdb":
+                    Current.GlobalReverbHighFrequencyOffsetDb = value;
                     break;
                 case "smooth":
                 case "smoothing":
@@ -804,6 +1197,13 @@ namespace RealisticSoundPlus
                 case "v2dist":
                 case "emitterdist":
                     Current.V2EmitterDistance = value;
+                    break;
+                case "remotecollapse":
+                case "remotegridcollapse":
+                case "v2remotecollapse":
+                case "thrustercollapse":
+                case "gridcollapse":
+                    Current.V2RemoteGridCollapseDistance = value;
                     break;
                 case "distcurve":
                 case "v2distcurve":
@@ -971,6 +1371,22 @@ namespace RealisticSoundPlus
             return true;
         }
 
+        public static bool TrySetReverbRayDebug(string value)
+        {
+            if (!TryParseBool(value, out bool enabled))
+                return false;
+            Current.ReverbRayDebugEnabled = enabled;
+            return true;
+        }
+
+        public static bool TrySetEnvMapDebug(string value)
+        {
+            if (!TryParseBool(value, out bool enabled))
+                return false;
+            Current.PlayerEnvMapDebugEnabled = enabled;
+            return true;
+        }
+
         public static bool TrySetPlayerFilterAtmosphereOverride(string value)
         {
             if (!TryParseBool(value, out bool enabled))
@@ -985,6 +1401,85 @@ namespace RealisticSoundPlus
                 return false;
             Current.GlobalReverbEnabled = enabled;
             return true;
+        }
+
+        public static bool TrySetGlobalReverbRoute(string value)
+        {
+            string route = NormalizeGlobalReverbRoute(value);
+            if (route == null)
+                return false;
+
+            Current.GlobalReverbRoute = route;
+            return true;
+        }
+
+        public static string NormalizeGlobalReverbRoute(string value)
+        {
+            switch ((value ?? string.Empty).Trim().ToLowerInvariant())
+            {
+                case "":
+                case "managed":
+                case "copy":
+                case "dsp":
+                case "tail":
+                case "tails":
+                    return "managed";
+                case "bus":
+                case "globalbus":
+                case "live":
+                case "livebus":
+                case "xaudio":
+                    return "globalbus";
+                case "custom":
+                case "custombus":
+                case "poc":
+                case "livepoc":
+                case "customdsp":
+                    return "custombus";
+                case "inline":
+                case "world":
+                case "game":
+                case "ingame":
+                case "custominline":
+                case "inlinecustom":
+                case "liveinline":
+                case "inlinedsp":
+                    return "custominline";
+                case "master":
+                case "global":
+                case "custommaster":
+                case "masterinline":
+                case "inlinemaster":
+                case "globalinline":
+                case "liveglobal":
+                    return "custommaster";
+                default:
+                    return null;
+            }
+        }
+
+        public static bool IsGlobalReverbGlobalBusRoute(RealisticSoundPlusSettings settings)
+        {
+            string route = NormalizeGlobalReverbRoute(settings?.GlobalReverbRoute);
+            return string.Equals(route, "globalbus", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(route, "custombus", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(route, "custominline", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(route, "custommaster", StringComparison.OrdinalIgnoreCase);
+        }
+
+        public static bool IsGlobalReverbCustomBusRoute(RealisticSoundPlusSettings settings)
+        {
+            return string.Equals(NormalizeGlobalReverbRoute(settings?.GlobalReverbRoute), "custombus", StringComparison.OrdinalIgnoreCase);
+        }
+
+        public static bool IsGlobalReverbCustomInlineRoute(RealisticSoundPlusSettings settings)
+        {
+            return string.Equals(NormalizeGlobalReverbRoute(settings?.GlobalReverbRoute), "custominline", StringComparison.OrdinalIgnoreCase);
+        }
+
+        public static bool IsGlobalReverbCustomMasterRoute(RealisticSoundPlusSettings settings)
+        {
+            return string.Equals(NormalizeGlobalReverbRoute(settings?.GlobalReverbRoute), "custommaster", StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool TryParseBool(string value, out bool enabled)
@@ -1142,6 +1637,7 @@ namespace RealisticSoundPlus
             Current.EngineFilterHullRange = Clamp(Current.EngineFilterHullRange, 1f, 1000f);
             Current.EngineFilterHullDistanceCurve = Clamp(Current.EngineFilterHullDistanceCurve, 0.1f, 5f);
             Current.EngineFilterHullQ = Clamp(Current.EngineFilterHullQ, AudioEngineV2.RspDynamicAudioFilters.MinFilterQ, AudioEngineV2.RspDynamicAudioFilters.MaxFilterQ);
+            Current.EngineFilterAirEnvironmentOcclusionContribution = Clamp(Current.EngineFilterAirEnvironmentOcclusionContribution, 0f, 1f);
             Current.EngineFilterInteriorMaxFrequency = Clamp(Current.EngineFilterInteriorMaxFrequency, AudioEngineV2.RspDynamicAudioFilters.MinFilterFrequency, AudioEngineV2.RspDynamicAudioFilters.MaxFilterFrequency);
             Current.EngineFilterVacuumContactFrequency = Clamp(Current.EngineFilterVacuumContactFrequency, AudioEngineV2.RspDynamicAudioFilters.MinFilterFrequency, AudioEngineV2.RspDynamicAudioFilters.MaxFilterFrequency);
             Current.PlayerEnvRayLength = Clamp(Current.PlayerEnvRayLength, 5f, 1000f);
@@ -1158,6 +1654,9 @@ namespace RealisticSoundPlus
             Current.PlayerFilterBlockStructureThicknessScale = Clamp(Current.PlayerFilterBlockStructureThicknessScale, 0.1f, 20f);
             Current.PlayerFilterBlockOcclusionCurve = Clamp(Current.PlayerFilterBlockOcclusionCurve, 0.1f, 5f);
             Current.PlayerFilterVoxelOcclusionWeight = Clamp(Current.PlayerFilterVoxelOcclusionWeight, 0f, 10f);
+            if (Current.PlayerFilterBlockVoxelOcclusionWeight < 0f)
+                Current.PlayerFilterBlockVoxelOcclusionWeight = Current.PlayerFilterVoxelOcclusionWeight;
+            Current.PlayerFilterBlockVoxelOcclusionWeight = Clamp(Current.PlayerFilterBlockVoxelOcclusionWeight, 0f, 10f);
             Current.PlayerEnvSealedExtraMuffling = Clamp(Current.PlayerEnvSealedExtraMuffling, 0f, 1f);
             Current.PlayerEnvSealOpenThreshold = Clamp(Current.PlayerEnvSealOpenThreshold, 0f, 1f);
             if (Current.PlayerFilterEnvironmentSealedFactor < 0f)
@@ -1166,6 +1665,20 @@ namespace RealisticSoundPlus
                 Current.PlayerFilterBlockSealedFactor = Current.PlayerEnvSealedExtraMuffling;
             Current.PlayerFilterEnvironmentSealedFactor = Clamp(Current.PlayerFilterEnvironmentSealedFactor, 0f, 1f);
             Current.PlayerFilterBlockSealedFactor = Clamp(Current.PlayerFilterBlockSealedFactor, 0f, 1f);
+            Current.PlayerFilterBlockSealedBarrierLoss = Clamp(Current.PlayerFilterBlockSealedBarrierLoss, 0f, 1f);
+            Current.PlayerEnvSealedBarrierLoss = Clamp(Current.PlayerEnvSealedBarrierLoss, 0f, 1f);
+            // Thin factor is now measured in grid blocks (>= 1). Migrate legacy sub-block values (old default 0.6,
+            // a fraction of thickness scale) up to the working default so the bonus can actually catch one block.
+            if (Current.PlayerFilterSealedBarrierThinFactor < 1f)
+                Current.PlayerFilterSealedBarrierThinFactor = 1.5f;
+            Current.PlayerFilterSealedBarrierThinFactor = Clamp(Current.PlayerFilterSealedBarrierThinFactor, 1f, 6f);
+            Current.PlayerFilterBlockAirBrightness = Clamp(Current.PlayerFilterBlockAirBrightness, 0f, 1f);
+            Current.PlayerFilterBlockAirLengthMuffle = Clamp(Current.PlayerFilterBlockAirLengthMuffle, 0f, 0.1f);
+            Current.PlayerFilterBlockRepositionSlewMs = Clamp(Current.PlayerFilterBlockRepositionSlewMs, 1f, 2000f);
+            Current.PlayerFilterBlockRepositionAirBias = Clamp(Current.PlayerFilterBlockRepositionAirBias, 0.1f, 10f);
+            Current.PlayerFilterBlockRepositionPortalAvgMs = Clamp(Current.PlayerFilterBlockRepositionPortalAvgMs, 1f, 2000f);
+            Current.PlayerFilterBlockAirPathReach = Clamp(Current.PlayerFilterBlockAirPathReach, 1f, 16f);
+            Current.PlayerFilterBlockAirPathOpenBias = Clamp(Current.PlayerFilterBlockAirPathOpenBias, 0f, 30f);
             Current.PlayerFilterAtmosphereOverride = Clamp(Current.PlayerFilterAtmosphereOverride, 0f, 1f);
             Current.PlayerFilterOcclusionStrength = Clamp(Current.PlayerFilterOcclusionStrength, 0f, 4f);
             Current.PlayerFilterEnvironmentVolumeMuffleWeight = Clamp(Current.PlayerFilterEnvironmentVolumeMuffleWeight, 0f, 4f);
@@ -1175,10 +1688,12 @@ namespace RealisticSoundPlus
             Current.PlayerFilterEnvironmentMuffledFrequency = Clamp(Current.PlayerFilterEnvironmentMuffledFrequency, AudioEngineV2.RspDynamicAudioFilters.MinFilterFrequency, AudioEngineV2.RspDynamicAudioFilters.MaxFilterFrequency);
             Current.PlayerFilterBlockMuffledFrequency = Clamp(Current.PlayerFilterBlockMuffledFrequency, AudioEngineV2.RspDynamicAudioFilters.MinFilterFrequency, AudioEngineV2.RspDynamicAudioFilters.MaxFilterFrequency);
             Current.PlayerFilterMuffledFrequency = Clamp(Current.PlayerFilterMuffledFrequency, AudioEngineV2.RspDynamicAudioFilters.MinFilterFrequency, AudioEngineV2.RspDynamicAudioFilters.MaxFilterFrequency);
-            Current.PlayerFilterBlockRange = Clamp(Current.PlayerFilterBlockRange, 1f, 1000f);
-            Current.PlayerFilterBlockRangeScale = Clamp(Current.PlayerFilterBlockRangeScale, 0.1f, 100f);
+            Current.PlayerFilterBlockMaxRange = Clamp(Current.PlayerFilterBlockMaxRange, 1f, 150f);
+            Current.PlayerFilterBlockRange = Current.PlayerFilterBlockMaxRange;
+            Current.PlayerFilterBlockRangeScale = 1f;
             Current.PlayerFilterBlockDistanceCurve = Clamp(Current.PlayerFilterBlockDistanceCurve, 0.1f, 5f);
             Current.PlayerFilterSmoothingMs = Clamp(Current.PlayerFilterSmoothingMs, 0f, 5000f);
+            Current.PlayerFilterBlockOcclusionSmoothingMs = Clamp(Current.PlayerFilterBlockOcclusionSmoothingMs, 0f, 5000f);
             Current.V2SmoothingMs = Clamp(Current.V2SmoothingMs, 0f, 500f);
             Current.V2DetailCommandSmoothingMs = Clamp(Current.V2DetailCommandSmoothingMs, 0f, 5000f);
             Current.V2EmitterFadeInMs = Clamp(Current.V2EmitterFadeInMs, 0f, 1000f);
@@ -1187,9 +1702,30 @@ namespace RealisticSoundPlus
             Current.V2DetailIdleGain = Clamp(Current.V2DetailIdleGain, 0f, 4f);
             Current.V2StateGain = Clamp(Current.V2StateGain, 0f, 4f);
             Current.V2EmitterDistance = Clamp(Current.V2EmitterDistance, 1f, 1000f);
+            Current.V2RemoteGridCollapseDistance = Clamp(Current.V2RemoteGridCollapseDistance, 0f, 5000f);
             Current.V2DistanceCurve = Clamp(Current.V2DistanceCurve, 0.1f, 5f);
+            Current.GlobalReverbRoute = NormalizeGlobalReverbRoute(Current.GlobalReverbRoute) ?? "custommaster";
             Current.GlobalReverbDiffusion = Clamp(Current.GlobalReverbDiffusion, 0f, 1f);
             Current.GlobalReverbRoomSize = Clamp(Current.GlobalReverbRoomSize, 0f, 1f);
+            Current.GlobalReverbWetSend = Clamp(Current.GlobalReverbWetSend, 0f, 4f);
+            Current.GlobalReverbDecaySeconds = Clamp(Current.GlobalReverbDecaySeconds, 0.1f, 30f);
+            Current.GlobalReverbEarlyGainDb = Clamp(Current.GlobalReverbEarlyGainDb, -60f, 20f);
+            Current.GlobalReverbTailGainDb = Clamp(Current.GlobalReverbTailGainDb, -60f, 20f);
+            Current.GlobalReverbPredelayMs = Clamp(Current.GlobalReverbPredelayMs, 0f, 300f);
+            Current.GlobalReverbLateDelayMs = Clamp(Current.GlobalReverbLateDelayMs, 0f, 85f);
+            Current.GlobalReverbDensity = Clamp(Current.GlobalReverbDensity, 0f, 100f);
+            Current.GlobalReverbToneHz = Clamp(Current.GlobalReverbToneHz, 20f, 20000f);
+            Current.GlobalReverbHighFrequencyDb = Clamp(Current.GlobalReverbHighFrequencyDb, -60f, 0f);
+            Current.GlobalReverbDiffusionModifier = Clamp(Current.GlobalReverbDiffusionModifier, 0.25f, 2f);
+            Current.GlobalReverbRoomSizeModifier = Clamp(Current.GlobalReverbRoomSizeModifier, 0.25f, 2f);
+            Current.GlobalReverbDecayModifier = Clamp(Current.GlobalReverbDecayModifier, 0.25f, 2.5f);
+            Current.GlobalReverbEarlyGainOffsetDb = Clamp(Current.GlobalReverbEarlyGainOffsetDb, -12f, 12f);
+            Current.GlobalReverbTailGainOffsetDb = Clamp(Current.GlobalReverbTailGainOffsetDb, -12f, 12f);
+            Current.GlobalReverbPredelayModifier = Clamp(Current.GlobalReverbPredelayModifier, 0.25f, 2.5f);
+            Current.GlobalReverbLateDelayModifier = Clamp(Current.GlobalReverbLateDelayModifier, 0.25f, 2.5f);
+            Current.GlobalReverbDensityModifier = Clamp(Current.GlobalReverbDensityModifier, 0.5f, 1.5f);
+            Current.GlobalReverbToneModifier = Clamp(Current.GlobalReverbToneModifier, 0.5f, 2f);
+            Current.GlobalReverbHighFrequencyOffsetDb = Clamp(Current.GlobalReverbHighFrequencyOffsetDb, -12f, 12f);
         }
 
         private static float Clamp(float value, float min, float max)
@@ -1197,6 +1733,14 @@ namespace RealisticSoundPlus
             if (value < min)
                 return min;
             return value > max ? max : value;
+        }
+
+        private static void SetUnifiedBlockRange(float value)
+        {
+            float range = Clamp(value, 1f, 150f);
+            Current.PlayerFilterBlockMaxRange = range;
+            Current.PlayerFilterBlockRange = range;
+            Current.PlayerFilterBlockRangeScale = 1f;
         }
     }
 }

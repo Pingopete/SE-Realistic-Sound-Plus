@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using RealisticSoundPlus.Patches;
 using Sandbox.Game.Entities;
+using Sandbox.ModAPI;
 using VRage.Game.Entity;
 using VRage.Utils;
 using VRageMath;
@@ -21,6 +22,8 @@ namespace RealisticSoundPlus.AudioEngineV2
         private static readonly Dictionary<MyEntity3DSoundEmitter, V2FilterRoute> V2EmitterFilterRoutes = new Dictionary<MyEntity3DSoundEmitter, V2FilterRoute>();
         private static readonly Dictionary<MyEntity3DSoundEmitter, string> V2EmitterDebugLabels = new Dictionary<MyEntity3DSoundEmitter, string>();
         private static readonly Dictionary<MyEntity3DSoundEmitter, Vector3D> V2EmitterPositions = new Dictionary<MyEntity3DSoundEmitter, Vector3D>();
+        private static readonly Dictionary<MyEntity3DSoundEmitter, long> V2EmitterSourceGridIds = new Dictionary<MyEntity3DSoundEmitter, long>();
+        private static readonly Dictionary<MyEntity3DSoundEmitter, long> V2EmitterSourceEntityIds = new Dictionary<MyEntity3DSoundEmitter, long>();
         private static readonly HashSet<string> MutedVanillaCues = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private static bool _loggedEnabled;
         private static bool _hasListener;
@@ -30,6 +33,7 @@ namespace RealisticSoundPlus.AudioEngineV2
         private static int _censusThrusterReports;
         private static int _fallbackRejectedThrusterReports;
         private static int _gridMismatchThrusterReports;
+        private static int _remoteCollapsedThrusterReports;
         private static int _lastCensusProcessed;
         private static int _lastCensusRemoved;
         private static DateTime _lastCensusUtc = DateTime.MinValue;
@@ -46,6 +50,7 @@ namespace RealisticSoundPlus.AudioEngineV2
         private static long _lastLoggedContactGridId;
         private static bool _lastLoggedInsideShip;
         private static bool _lastLoggedVanillaFallback;
+        private static bool _legacyReverbSuppressed;
 
         public static V2AudioListenerState Listener => _listener;
 
@@ -61,6 +66,8 @@ namespace RealisticSoundPlus.AudioEngineV2
             V2EmitterFilterRoutes.Clear();
             V2EmitterDebugLabels.Clear();
             V2EmitterPositions.Clear();
+            V2EmitterSourceGridIds.Clear();
+            V2EmitterSourceEntityIds.Clear();
             MutedVanillaCues.Clear();
             _loggedEnabled = false;
             _hasListener = false;
@@ -70,6 +77,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             _censusThrusterReports = 0;
             _fallbackRejectedThrusterReports = 0;
             _gridMismatchThrusterReports = 0;
+            _remoteCollapsedThrusterReports = 0;
             _lastCensusProcessed = 0;
             _lastCensusRemoved = 0;
             _lastCensusUtc = DateTime.MinValue;
@@ -91,19 +99,37 @@ namespace RealisticSoundPlus.AudioEngineV2
             V2EngineFilterTelemetry.Reset();
             V2PlayerEnvironmentTelemetry.Reset();
             V2AuxSourceOcclusionTelemetry.Reset();
+            V2BlockEmitterReposition.Reset();
             V2PlayerFilterRuntime.Reset();
             V2BlockSoundSourceResolver.Reset();
+            V2GridStructureProbe.Reset();
+            V2AudioListenerState.ResetStability();
             RspDynamicAudioFilters.ResetRuntimeState();
             V2GlobalReverbRuntime.ResetRuntimeState();
+            V2ReverbDiagnosticPing.Reset();
+            V2ManagedDspReverbRuntime.Reset();
             V2ConnectorImpactAudio.ResetRuntimeState();
+            _legacyReverbSuppressed = false;
 
             MyLog.Default.WriteLineAndConsole("[RealisticSoundPlus] V2 audio runtime reset: " + reason);
         }
 
         public static void Update()
         {
-            RspDynamicAudioFilters.UpdateFromSettings(SettingsManager.Current);
-            V2GlobalReverbRuntime.Update();
+            RealisticSoundPlusSettings settings = SettingsManager.Current;
+            RspDynamicAudioFilters.UpdateFromSettings(settings);
+            if (SettingsManager.IsGlobalReverbGlobalBusRoute(settings))
+            {
+                _legacyReverbSuppressed = false;
+                V2GlobalReverbRuntime.UpdateGlobalBusRoute();
+            }
+            else
+            {
+                SuppressLegacyReverbRoute();
+            }
+
+            V2ManagedDspReverbRuntime.Update();
+            V2ReverbDiagnosticPing.Update();
             TrackEmitterBindingSignature();
             _listener = V2AudioListenerState.Capture();
             _hasListener = true;
@@ -113,7 +139,10 @@ namespace RealisticSoundPlus.AudioEngineV2
             LogListenerTransitionIfChanged(_listener);
             if (_listener.VanillaFallback)
             {
-                SilenceAllEmitters();
+                if (SettingsManager.Current.V2RemoteGridCollapseDistance > 0f)
+                    SilenceDirectionalEmitters();
+                else
+                    SilenceAllEmitters();
                 _lastCensusProcessed = 0;
                 _lastCensusRemoved = 0;
             }
@@ -131,6 +160,16 @@ namespace RealisticSoundPlus.AudioEngineV2
                 _loggedEnabled = true;
                 MyLog.Default.WriteLineAndConsole("[RealisticSoundPlus] Audio Engine V2 is the active ship-engine route. Six-direction detail/state emitter routing is active while the listener is inside or controlling a ship.");
             }
+        }
+
+        private static void SuppressLegacyReverbRoute()
+        {
+            if (_legacyReverbSuppressed)
+                return;
+
+            V2GlobalReverbRuntime.RestoreVanillaState("managed-dsp-route");
+            _legacyReverbSuppressed = true;
+            V2DebugLog.WriteEvent("global-reverb", "legacy XAudio effect route suppressed; managed DSP tail route active");
         }
 
         private static void LogListenerTransitionIfChanged(V2AudioListenerState listener)
@@ -186,19 +225,28 @@ namespace RealisticSoundPlus.AudioEngineV2
                 _hasListener = true;
             }
 
+            bool remoteCollapsed = false;
             if (_listener.VanillaFallback)
             {
-                if (!fromCensus)
-                    _fallbackRejectedThrusterReports = SaturatingIncrement(_fallbackRejectedThrusterReports);
-                return;
+                if (!TryShouldProcessRemoteCollapsedThruster(thruster, _listener, out remoteCollapsed))
+                {
+                    if (!fromCensus)
+                        _fallbackRejectedThrusterReports = SaturatingIncrement(_fallbackRejectedThrusterReports);
+                    return;
+                }
+            }
+            else if (_listener.GridEntityId != 0L && thruster.CubeGrid.EntityId != _listener.GridEntityId)
+            {
+                if (!TryShouldProcessRemoteCollapsedThruster(thruster, _listener, out remoteCollapsed))
+                {
+                    if (!fromCensus)
+                        _gridMismatchThrusterReports = SaturatingIncrement(_gridMismatchThrusterReports);
+                    return;
+                }
             }
 
-            if (_listener.GridEntityId != 0L && thruster.CubeGrid.EntityId != _listener.GridEntityId)
-            {
-                if (!fromCensus)
-                    _gridMismatchThrusterReports = SaturatingIncrement(_gridMismatchThrusterReports);
-                return;
-            }
+            if (remoteCollapsed && !fromCensus)
+                _remoteCollapsedThrusterReports = SaturatingIncrement(_remoteCollapsedThrusterReports);
 
             if (fromCensus)
                 _censusThrusterReports = SaturatingIncrement(_censusThrusterReports);
@@ -208,12 +256,88 @@ namespace RealisticSoundPlus.AudioEngineV2
             V2GridAudioState state = GetOrCreateGridState(thruster.CubeGrid);
             try
             {
-                state.ReportThruster(thruster, _listener, updateAudio);
+                if (remoteCollapsed)
+                    state.ReportRemoteThrusterCollapsed(thruster, _listener, updateAudio);
+                else
+                    state.ReportThruster(thruster, _listener, updateAudio);
             }
             catch (Exception ex)
             {
                 LogThrusterReportFailure(thruster, fromCensus, updateAudio, ex);
             }
+        }
+
+        private static bool TryShouldProcessRemoteCollapsedThruster(MyThrust thruster, V2AudioListenerState listener, out bool remoteCollapsed)
+        {
+            remoteCollapsed = false;
+            if (thruster == null || thruster.CubeGrid == null)
+                return false;
+
+            RealisticSoundPlusSettings settings = SettingsManager.Current;
+            float threshold = settings?.V2RemoteGridCollapseDistance ?? 0f;
+            if (threshold <= 0f)
+                return false;
+
+            Vector3D listenerPosition = ResolveListenerPosition(listener);
+            Vector3D gridCenter = ResolveGridCenter(thruster.CubeGrid, thruster.WorldMatrix.Translation);
+            if (listenerPosition == Vector3D.Zero || gridCenter == Vector3D.Zero)
+                return false;
+
+            double distance = Vector3D.Distance(listenerPosition, gridCenter);
+            if (distance < threshold)
+                return false;
+
+            remoteCollapsed = true;
+            return true;
+        }
+
+        private static Vector3D ResolveListenerPosition(V2AudioListenerState listener)
+        {
+            if (listener.Position != Vector3D.Zero)
+                return listener.Position;
+
+            try
+            {
+                Vector3D cameraPosition = MyAPIGateway.Session?.Camera?.Position ?? Vector3D.Zero;
+                if (cameraPosition != Vector3D.Zero)
+                    return cameraPosition;
+            }
+            catch
+            {
+            }
+
+            return Vector3D.Zero;
+        }
+
+        private static Vector3D ResolveGridCenter(MyCubeGrid grid, Vector3D fallback)
+        {
+            if (grid == null)
+                return fallback;
+
+            try
+            {
+                if (grid.PositionComp != null)
+                {
+                    Vector3D center = grid.PositionComp.WorldAABB.Center;
+                    if (center != Vector3D.Zero)
+                        return center;
+                }
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                Vector3D origin = grid.WorldMatrix.Translation;
+                if (origin != Vector3D.Zero)
+                    return origin;
+            }
+            catch
+            {
+            }
+
+            return fallback;
         }
 
         private static V2AudioDebugState.ThrusterReportSnapshot CreateThrusterReportSnapshot()
@@ -227,6 +351,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                 CensusReports = _censusThrusterReports,
                 FallbackRejectedReports = _fallbackRejectedThrusterReports,
                 GridMismatchReports = _gridMismatchThrusterReports,
+                RemoteCollapsedReports = _remoteCollapsedThrusterReports,
                 RegisteredEmitters = V2Emitters.Count,
                 UnfilteredEmitters = UnfilteredV2Emitters.Count,
                 FilterHits = ThrusterFilterPatch.PatchHits,
@@ -305,6 +430,11 @@ namespace RealisticSoundPlus.AudioEngineV2
 
         public static void RegisterEmitter(MyEntity3DSoundEmitter emitter, V2FilterRoute filterRoute, string debugLabel)
         {
+            RegisterEmitter(emitter, filterRoute, debugLabel, 0L, 0L);
+        }
+
+        public static void RegisterEmitter(MyEntity3DSoundEmitter emitter, V2FilterRoute filterRoute, string debugLabel, long sourceGridId, long sourceEntityId)
+        {
             if (emitter == null)
                 return;
 
@@ -317,6 +447,16 @@ namespace RealisticSoundPlus.AudioEngineV2
 
             if (!string.IsNullOrWhiteSpace(debugLabel))
                 V2EmitterDebugLabels[emitter] = debugLabel;
+
+            if (sourceGridId != 0L)
+                V2EmitterSourceGridIds[emitter] = sourceGridId;
+            else
+                V2EmitterSourceGridIds.Remove(emitter);
+
+            if (sourceEntityId != 0L)
+                V2EmitterSourceEntityIds[emitter] = sourceEntityId;
+            else
+                V2EmitterSourceEntityIds.Remove(emitter);
 
             ThrusterFilterPatch.MarkKnownEngineCueEmitter(emitter);
         }
@@ -331,6 +471,8 @@ namespace RealisticSoundPlus.AudioEngineV2
             V2EmitterFilterRoutes.Remove(emitter);
             V2EmitterDebugLabels.Remove(emitter);
             V2EmitterPositions.Remove(emitter);
+            V2EmitterSourceGridIds.Remove(emitter);
+            V2EmitterSourceEntityIds.Remove(emitter);
         }
 
         public static bool IsV2Emitter(MyEntity3DSoundEmitter emitter)
@@ -422,6 +564,18 @@ namespace RealisticSoundPlus.AudioEngineV2
         {
             position = Vector3D.Zero;
             return emitter != null && V2EmitterPositions.TryGetValue(emitter, out position) && position != Vector3D.Zero;
+        }
+
+        public static bool TryGetEmitterSourceIds(MyEntity3DSoundEmitter emitter, out long sourceGridId, out long sourceEntityId)
+        {
+            sourceGridId = 0L;
+            sourceEntityId = 0L;
+            if (emitter == null)
+                return false;
+
+            V2EmitterSourceGridIds.TryGetValue(emitter, out sourceGridId);
+            V2EmitterSourceEntityIds.TryGetValue(emitter, out sourceEntityId);
+            return sourceGridId != 0L || sourceEntityId != 0L;
         }
 
         private static bool TryGetSuppressibleVanillaCue(MyEntity3DSoundEmitter emitter, out string cueName)
@@ -643,7 +797,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             }
         }
 
-        private static bool TryGetGridById(long gridId, out MyCubeGrid grid)
+        internal static bool TryGetGridById(long gridId, out MyCubeGrid grid)
         {
             grid = null;
             if (gridId == 0L)
@@ -754,6 +908,12 @@ namespace RealisticSoundPlus.AudioEngineV2
         {
             foreach (V2GridAudioState state in GridStates.Values)
                 state.Silence();
+        }
+
+        private static void SilenceDirectionalEmitters()
+        {
+            foreach (V2GridAudioState state in GridStates.Values)
+                state.SilenceDirectionalEmitters();
         }
 
         private static void CleanupEmptyGridStates()

@@ -12,7 +12,18 @@ namespace RealisticSoundPlus.AudioEngineV2
         public float Score;
         public Vector3D SourcePosition;
         public Vector3D ListenerPosition;
-        public Vector3D FirstBlockedPosition;
+        public Vector3D ProbeFrom;
+        public Vector3D ProbeTo;
+        public bool AirPathAvailable;     // an open-air detour to the listener was found (flood-fill)
+        public float AirPathLength;       // open-air detour length (m)
+        public bool MergedFromAirPath;    // the air leg actually reduced muffle/gain
+        public float PreAirPathMuffling;  // through-structure FinalMuffling before the air-path merge
+        public Vector3D PortalWorld;      // doorway the listener localises the air leg to (reposition anchor)
+        public bool PortalValid;          // a usable portal distinct from the listener was found
+        public bool RepositionApplied;    // the emitter is being moved this sample
+        public Vector3D RepositionTarget; // blended emitter target: lerp(source, portal) by path weight
+        public float RepositionBlend;     // 0 = at source (struct dominates), 1 = at portal (air dominates)
+        public System.Collections.Generic.List<Vector3D> AirRoute; // surface air-path route (debug viz only)
         public float Distance;
         public float PathLength;
         public bool MainRayBlocked;
