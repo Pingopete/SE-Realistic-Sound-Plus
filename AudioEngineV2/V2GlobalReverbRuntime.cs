@@ -626,6 +626,9 @@ namespace RealisticSoundPlus.AudioEngineV2
         private static readonly Dictionary<IMySourceVoice, BlockSplitRoute> BlockSplitRoutes = new Dictionary<IMySourceVoice, BlockSplitRoute>();
         private static object _blockSplitSubmix;   // block voices route here (1 hop) -> master; carries the dry/wet reverb XAPO
         private static object _blockReverbEffect;  // V2LiveReverbPocProcessor on _blockSplitSubmix; dry/wet via SetBlockDryWet
+        private static int _blockSubmixChannels = 2;
+        private static int _blockSubmixRate = 48000;
+        private static int _blockLiveScans;        // scans with a source live on the submix before attaching the reverb
         private static string _blockSplitGraph = "?";
         private static bool _blockSplitDisabledForSession;
         private static string _blockSplitStatus = "blocksplit=off";
@@ -807,6 +810,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                 }
 
                 PurgeStaleBlockSplitRoutes(now);
+                AttachBlockReverbIfReady(active);
                 _blockSplitReheals += reheal;
                 _blockSplitStatus = string.Format(
                     CultureInfo.InvariantCulture,
@@ -818,6 +822,13 @@ namespace RealisticSoundPlus.AudioEngineV2
                     reheal,
                     _blockSplitReheals,
                     lastFail == null ? string.Empty : " lastFail=" + lastFail);
+
+                RealisticSoundPlusSettings s = SettingsManager.Current;
+                _blockSplitStatus += string.Format(CultureInfo.InvariantCulture, " dry={0:0.00} wet={1:0.00}",
+                    s == null ? -1f : s.BlockDryLevel, s == null ? -1f : s.BlockWetLevel);
+                V2LiveReverbPocProcessor bv = _blockReverbEffect as V2LiveReverbPocProcessor;
+                if (bv != null)
+                    _blockSplitStatus += " | verb " + bv.DiagnosticStatus;
 
                 if (added > 0 || reheal > 0 || now - _lastBlockSplitLogUtc > TimeSpan.FromSeconds(2))
                 {
@@ -850,7 +861,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                 return false;
             }
 
-            object submix = null, reverbEffect = null;
+            object submix = null;
             try
             {
                 int channels = Math.Max(1, ResolveSourceInputChannelCount(gameVoice));
@@ -869,54 +880,72 @@ namespace RealisticSoundPlus.AudioEngineV2
                     return false;
                 }
 
-                // dry+wet reverb XAPO (NOT wet-only — it mixes dry passthrough + reverb, the dry/wet balance is set
-                // per occlusion via SetBlockDryWet). Attached the way the working inline reverb is: descriptor with
-                // the channel count, then enable.
-                string verbStatus = "verb=skip";
-                MethodInfo setChain = ResolveSourceSetEffectChainMethod(submix.GetType());
-                if (setChain != null && _effectDescriptorType != null)
-                {
-                    try
-                    {
-                        V2LiveReverbPocProcessor processor = new V2LiveReverbPocProcessor(channels, sampleRate, false);
-                        processor.UpdateFromSettings(SettingsManager.Current);
-                        object descriptor = CreateSourceReverbDescriptor(processor, channels);
-                        Array descriptors = Array.CreateInstance(_effectDescriptorType, 1);
-                        descriptors.SetValue(descriptor, 0);
-                        setChain.Invoke(submix, new object[] { descriptors });
-                        ResolveSourceEnableEffectMethod(submix.GetType())?.Invoke(submix, new object[] { SourceReverbEffectIndex });
-                        reverbEffect = processor;
-                        verbStatus = "verb=on";
-                    }
-                    catch (Exception ex)
-                    {
-                        Exception inner = (ex as TargetInvocationException)?.InnerException ?? ex;
-                        verbStatus = "verb=fail:" + inner.GetType().Name;
-                        V2DebugLog.WriteEvent("block-split", "reverb-attach-failed " + inner.GetType().Name + ": " + inner.Message);
-                        DisposeComObject(reverbEffect);
-                        reverbEffect = null;
-                    }
-                }
-
                 bool toMaster = TrySetSubmixOutputs(submix, masterVoice);
 
+                // The reverb XAPO is attached LATER (AttachBlockReverbIfReady), once a source is actually flowing on
+                // this submix. Attaching to an EMPTY submix delivered a zeroed input to the effect (rawIn=0). The
+                // inline reverb works because it attaches to the already-live game submix; mirror that.
                 _blockSplitSubmix = submix;
-                _blockReverbEffect = reverbEffect;
+                _blockReverbEffect = null;
+                _blockSubmixChannels = channels;
+                _blockSubmixRate = sampleRate;
+                _blockLiveScans = 0;
                 _blockSplitGraph = string.Format(
                     CultureInfo.InvariantCulture,
-                    "{0}ch/{1}Hz submix->m={2} {3}",
-                    channels, sampleRate, toMaster ? "Y" : "N", verbStatus);
+                    "{0}ch/{1}Hz submix->m={2} verb=deferred",
+                    channels, sampleRate, toMaster ? "Y" : "N");
                 status = "blocksplit=graph-built [" + _blockSplitGraph + "]";
                 V2DebugLog.WriteEvent("block-split", status + " master=" + TypeName(masterVoice) + " submix=" + TypeName(submix));
                 return true;
             }
             catch (Exception ex)
             {
-                DisposeComObject(reverbEffect); DisposeComObject(submix);
+                DisposeComObject(submix);
                 _blockSplitDisabledForSession = true;
                 status = "blocksplit=graph-failed:" + ex.GetType().Name;
                 V2DebugLog.WriteEvent("block-split", status + " " + ex.Message);
                 return false;
+            }
+        }
+
+        // Attach the dry/wet reverb XAPO to the block submix AFTER a source has been live on it for a few scans (so
+        // it's attached to a flowing submix, like the inline reverb). _blockLiveScans gates the small settle delay.
+        private static void AttachBlockReverbIfReady(int active)
+        {
+            if (_blockSplitSubmix == null || _blockReverbEffect != null)
+                return;
+            if (active <= 0)
+            {
+                _blockLiveScans = 0;
+                return;
+            }
+            if (++_blockLiveScans < 3)
+                return;
+
+            MethodInfo setChain = ResolveSourceSetEffectChainMethod(_blockSplitSubmix.GetType());
+            if (setChain == null || _effectDescriptorType == null)
+                return;
+
+            object processor = null;
+            try
+            {
+                V2LiveReverbPocProcessor verb = new V2LiveReverbPocProcessor(_blockSubmixChannels, _blockSubmixRate, false);
+                verb.UpdateFromSettings(SettingsManager.Current);
+                processor = verb;
+                object descriptor = CreateSourceReverbDescriptor(verb, _blockSubmixChannels);
+                Array descriptors = Array.CreateInstance(_effectDescriptorType, 1);
+                descriptors.SetValue(descriptor, 0);
+                setChain.Invoke(_blockSplitSubmix, new object[] { descriptors });
+                ResolveSourceEnableEffectMethod(_blockSplitSubmix.GetType())?.Invoke(_blockSplitSubmix, new object[] { SourceReverbEffectIndex });
+                _blockReverbEffect = verb;
+                _blockSplitGraph = _blockSplitGraph.Replace("verb=deferred", "verb=on-live");
+                V2DebugLog.WriteEvent("block-split", "reverb-attached-live [" + _blockSplitGraph + "]");
+            }
+            catch (Exception ex)
+            {
+                Exception inner = (ex as TargetInvocationException)?.InnerException ?? ex;
+                V2DebugLog.WriteEvent("block-split", "reverb-attach-live-failed " + inner.GetType().Name + ": " + inner.Message);
+                DisposeComObject(processor);
             }
         }
 

@@ -79,6 +79,9 @@ namespace RealisticSoundPlus.AudioEngineV2
         private int _lastOutputPointer;
         private float _lastInputPeak;
         private float _lastOutputPeak;
+        private float _lastRawInputPeak;   // input peak measured UNCONDITIONALLY (before any early-return) for diagnosis
+        private int _lastHasBuffers;
+        private long _dryPathCount;
         private float _lastRamp;
         private string _lastFormatStatus = "fmt=float";
 
@@ -141,7 +144,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             {
                 return string.Format(
                     CultureInfo.InvariantCulture,
-                    "{0} lock={1} unlock={2} reset={3} proc={4} disabled={5} unsupported={6} silentIn={7} unsafe={8} panic={9} frames={10} inValid={11} ptr={12}/{13} flags={14}/{15} peak={16:0.0000}/{17:0.0000} tail={18:0.0000} ramp={19:0.00} {20}",
+                    "{0} lock={1} unlock={2} reset={3} proc={4} disabled={5} unsupported={6} silentIn={7} unsafe={8} panic={9} frames={10} inValid={11} ptr={12}/{13} flags={14}/{15} peak={16:0.0000}/{17:0.0000} tail={18:0.0000} ramp={19:0.00} {20} rawIn={21:0.0000} hasBuf={22} dryPath={23}",
                     Status,
                     Interlocked.Read(ref _lockCount),
                     Interlocked.Read(ref _unlockCount),
@@ -162,7 +165,10 @@ namespace RealisticSoundPlus.AudioEngineV2
                     _lastOutputPeak,
                     _tailEnergy,
                     _lastRamp,
-                    _lastFormatStatus);
+                    _lastFormatStatus,
+                    _lastRawInputPeak,
+                    _lastHasBuffers,
+                    Interlocked.Read(ref _dryPathCount));
             }
         }
 
@@ -314,6 +320,8 @@ namespace RealisticSoundPlus.AudioEngineV2
             _lastInputFlags = (int)input.BufferFlags;
             _lastInputPointer = input.Buffer == IntPtr.Zero ? 0 : 1;
             _lastOutputPointer = output.Buffer == IntPtr.Zero ? 0 : 1;
+            _lastRawInputPeak = MeasureRawInputPeak(input, samples);
+            _lastHasBuffers = HasBuffers() ? 1 : 0;
 
             if (output.Buffer == IntPtr.Zero || samples == 0 || !isEnabled || !HasBuffers())
             {
@@ -461,8 +469,25 @@ namespace RealisticSoundPlus.AudioEngineV2
             return inputFrameCount;
         }
 
+        private unsafe float MeasureRawInputPeak(BufferParameters input, int samples)
+        {
+            if (input.Buffer == IntPtr.Zero || samples <= 0 || !_lockedFormatIsFloat)
+                return 0f;
+
+            float* p = (float*)input.Buffer.ToPointer();
+            float peak = 0f;
+            for (int i = 0; i < samples; i++)
+            {
+                float a = Math.Abs(p[i]);
+                if (a > peak)
+                    peak = a;
+            }
+            return peak;
+        }
+
         private unsafe void CopyDryOrSilence(BufferParameters input, ref BufferParameters output, int samples, bool wetOnly)
         {
+            Interlocked.Increment(ref _dryPathCount);
             bool copiedDry = false;
             if (!wetOnly && output.Buffer != IntPtr.Zero && input.Buffer != IntPtr.Zero && samples > 0)
             {
