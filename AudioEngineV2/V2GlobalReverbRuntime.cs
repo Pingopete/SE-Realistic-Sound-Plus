@@ -649,6 +649,11 @@ namespace RealisticSoundPlus.AudioEngineV2
             return _blockSplitStatus;
         }
 
+        private static string TypeName(object o)
+        {
+            return o == null ? "null" : o.GetType().Name;
+        }
+
         public static void UpdateBlockDryWetSplit()
         {
             object audio = MyAudio.Static;
@@ -780,8 +785,9 @@ namespace RealisticSoundPlus.AudioEngineV2
                         }
                         catch (Exception ex)
                         {
-                            lastFail = "route:" + ex.GetType().Name;
-                            V2DebugLog.WriteEvent("block-split", "initial-route-failed " + Trim(cue, 28) + " " + ex.GetType().Name + ": " + ex.Message);
+                            Exception inner = (ex as TargetInvocationException)?.InnerException ?? ex.InnerException ?? ex;
+                            lastFail = "route:" + inner.GetType().Name;
+                            V2DebugLog.WriteEvent("block-split", "initial-route-failed " + Trim(cue, 28) + " " + inner.GetType().Name + ": " + inner.Message);
                             continue;
                         }
 
@@ -865,16 +871,32 @@ namespace RealisticSoundPlus.AudioEngineV2
                     return false;
                 }
 
-                // Wet-ONLY reverb on the reverb bus (it carries reflections only; the dry leg goes direct to master).
+                // Wet-ONLY reverb on the reverb bus, attached the SAME way the working inline reverb is: build the
+                // descriptor with the channel count AND enable the effect. The earlier attempt left the effect
+                // DISABLED in the chain, which XAudio2 rejected the moment a source tried to flow through it
+                // (source->split returned XAUDIO2_E_INVALID_CALL). With the fan-out alone (no effect) the route is
+                // fine, so this attach is the single thing that was poisoning the connection.
                 string verbStatus = "verb=skip";
                 MethodInfo setChain = ResolveSourceSetEffectChainMethod(reverb.GetType());
                 if (setChain != null && _effectDescriptorType != null)
                 {
-                    reverbEffect = new V2LiveReverbPocProcessor(channels, sampleRate, true);
-                    (reverbEffect as V2LiveReverbPocProcessor)?.UpdateFromSettings(SettingsManager.Current);
-                    verbStatus = TrySetSourceReverbEffectChain(reverb, setChain, reverbEffect, out string cs) ? "verb=on" : ("verb=" + cs);
-                    if (verbStatus != "verb=on")
+                    try
                     {
+                        V2LiveReverbPocProcessor processor = new V2LiveReverbPocProcessor(channels, sampleRate, true);
+                        processor.UpdateFromSettings(SettingsManager.Current);
+                        object descriptor = CreateSourceReverbDescriptor(processor, channels);
+                        Array descriptors = Array.CreateInstance(_effectDescriptorType, 1);
+                        descriptors.SetValue(descriptor, 0);
+                        setChain.Invoke(reverb, new object[] { descriptors });
+                        ResolveSourceEnableEffectMethod(reverb.GetType())?.Invoke(reverb, new object[] { SourceReverbEffectIndex });
+                        reverbEffect = processor;
+                        verbStatus = "verb=on";
+                    }
+                    catch (Exception ex)
+                    {
+                        Exception inner = (ex as TargetInvocationException)?.InnerException ?? ex;
+                        verbStatus = "verb=fail:" + inner.GetType().Name;
+                        V2DebugLog.WriteEvent("block-split", "reverb-attach-failed " + inner.GetType().Name + ": " + inner.Message);
                         DisposeComObject(reverbEffect);
                         reverbEffect = null;
                     }
@@ -892,6 +914,8 @@ namespace RealisticSoundPlus.AudioEngineV2
                     CultureInfo.InvariantCulture,
                     "{0}ch/{1}Hz dry->m={2} verb->m={3} split->dw={4} {5}",
                     channels, sampleRate, dryToMaster ? "Y" : "N", verbToMaster ? "Y" : "N", splitToChildren ? "Y" : "N", verbStatus);
+                V2DebugLog.WriteEvent("block-split", "graph-types master=" + TypeName(masterVoice) + " game=" + TypeName(gameVoice)
+                    + " split=" + TypeName(split) + " dry=" + TypeName(dry) + " reverb=" + TypeName(reverb));
                 status = "blocksplit=graph-built [" + _blockSplitGraph + "]";
                 V2DebugLog.WriteEvent("block-split", status);
                 return true;
