@@ -259,7 +259,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             return summary + string.Format(
                 CultureInfo.InvariantCulture,
                 " room={0} r={1:0.0}m med={2:0.0}m hit={3}/{4} decay={5:0.0}s pre={6:0}ms"
-                + " envmap={7}/{8}/{9} min={10} fb={11} thinSeal={12}",
+                + " envmap={7}/{8}/{9} min={10} fb={11} thinSeal={12} tscov={13:0.00}",
                 sample.ReverbRoomAvailable ? sample.ReverbRoomSource ?? "ray" : "none",
                 sample.ReverbRoomEquivalentRadius,
                 sample.ReverbRoomMedianDistance,
@@ -272,7 +272,8 @@ namespace RealisticSoundPlus.AudioEngineV2
                 _envMapCellCount,
                 _envMapDiagMinCoverage,
                 _envMapDiagFallback ? "Y" : "N",
-                _envThinSealHits);
+                _envThinSealHits,
+                _envThinSealCoverage);
         }
 
         public static string FormatDetails()
@@ -370,6 +371,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             float totalWeight = 0f;
             float weightedBlockedMeters = 0f;
             float weightedVoxelBlockedMeters = 0f;
+            float thinSealedWeight = 0f;
             bool raycastAvailable = !_castRayDisabled && position != Vector3D.Zero && MyAPIGateway.Session?.Camera != null;
             float thicknessScale = Math.Max(0.1f, settings.PlayerEnvStructureThicknessScale);
             float voxelWeight = NormalizeVoxelWeight(settings.PlayerFilterVoxelOcclusionWeight);
@@ -406,7 +408,8 @@ namespace RealisticSoundPlus.AudioEngineV2
                     ref openWeight,
                     ref totalWeight,
                     ref weightedBlockedMeters,
-                    ref weightedVoxelBlockedMeters);
+                    ref weightedVoxelBlockedMeters,
+                    ref thinSealedWeight);
             }
             if (reverbRayDebug != null)
             {
@@ -449,7 +452,20 @@ namespace RealisticSoundPlus.AudioEngineV2
             bool sealedEstimate = oxygenSealed;
             string sealedSource = oxygenSealed ? "oxygen-room" : "none";
             float sealedExtra = sealedEstimate ? settings.PlayerFilterEnvironmentSealedFactor : 0f;
-            float finalMuffling = ApplyOcclusionStrength(Clamp01(continuousMuffling + (1f - continuousMuffling) * sealedExtra), settings.PlayerFilterOcclusionStrength);
+            // Base wind muffle from structure occlusion + the pressurised-room seal (no thin-shell term yet).
+            float baseMuffling = Clamp01(continuousMuffling + (1f - continuousMuffling) * sealedExtra);
+            // Thin-sealed-shell WIND SEALING - the env "Thin Wall Muffle" knob, now BIDIRECTIONAL. thinSealedCoverage
+            // is how much of the sky dome is a thin sealed shell (thin roof/walls). The knob is how much that shell
+            // SEALS the wind out: 1 = fully sealed (the thin shell muffles wind like the rest of the structure -
+            // today's behaviour, and the default), 0 = the thin shell is acoustically OPEN and the wind leaks
+            // straight through it (bright/airy). So lowering the knob brightens by the LEAKING thin fraction. The
+            // old additive boost could only ever pile a few percent of extra muffle onto an already-saturated dome
+            // (1-(1-a)(1-b) caps out near 1), which is why it was inaudible; multiplying in the leak instead gives
+            // the knob real two-way authority and a clearly audible effect when you move it.
+            float thinSealedCoverage = totalWeight > 0.001f ? Clamp01(thinSealedWeight / totalWeight) : 0f;
+            _envThinSealCoverage = thinSealedCoverage;
+            float thinLeak = Clamp01(thinSealedCoverage * (1f - Clamp01(settings.PlayerEnvSealedBarrierLoss)));
+            float finalMuffling = ApplyOcclusionStrength(Clamp01(baseMuffling * (1f - thinLeak)), settings.PlayerFilterOcclusionStrength);
             float windExposure = Clamp01(1f - finalMuffling);
             RoomAcousticEstimate roomAcoustics = CalculateRoomAcoustics(roomProbe, oxygenProbe, rayLength, settings);
 
@@ -1139,6 +1155,7 @@ namespace RealisticSoundPlus.AudioEngineV2
         private static int _envMapDiagMinCoverage;
         private static bool _envMapDiagFallback;
         private static long _envThinSealHits;
+        private static float _envThinSealCoverage; // last-evaluated thin-sealed dome fraction (0..1), for diagnostics
 
         private static void EnsureEnvMap(int cellCount)
         {
@@ -1202,7 +1219,8 @@ namespace RealisticSoundPlus.AudioEngineV2
             ref float openWeight,
             ref float totalWeight,
             ref float weightedBlockedMeters,
-            ref float weightedVoxelBlockedMeters)
+            ref float weightedVoxelBlockedMeters,
+            ref float thinSealedWeight)
         {
             EnsureEnvMap(settings.PlayerEnvMapCellCount);
             PrepareEnvMapAccumulator(listener, position, rayLength, thicknessScale, voxelWeight, settings);
@@ -1244,7 +1262,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             }
             _envMapSweepIndex += rays;
 
-            AggregateEnvMap(ref open, ref blocked, ref openWeight, ref totalWeight, ref weightedBlockedMeters, ref weightedVoxelBlockedMeters);
+            AggregateEnvMap(ref open, ref blocked, ref openWeight, ref totalWeight, ref weightedBlockedMeters, ref weightedVoxelBlockedMeters, ref thinSealedWeight);
         }
 
         private static void MergeEnvCell(ref EnvMapCell cell, RollingRaySample s, float alpha, bool includeEnv)
@@ -1253,6 +1271,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             float open01 = s.Weight > 0.0001f ? Clamp01(s.OpenWeight / s.Weight) : 1f;
 
             cell.OpenWeight01 = Lerp(cell.OpenWeight01, open01, a);
+            cell.ThinSeal01 = Lerp(cell.ThinSeal01, s.ThinSeal01, a);
             cell.BlockedMeters = Lerp(cell.BlockedMeters, s.BlockedMeters, a);
             cell.VoxelMeters = Lerp(cell.VoxelMeters, s.VoxelMeters, a);
             cell.RayDistance = Lerp(cell.RayDistance, s.RayDistance, a);
@@ -1270,7 +1289,7 @@ namespace RealisticSoundPlus.AudioEngineV2
         // empty-fallback and never flip-flops as you move. Each cell holds its last-probed openness (re-probed
         // cyclically by the sweep), so the OpenFraction denominator is the steady sampled-cell count and the
         // numerator drifts smoothly as cells refresh - a stable, predictable structural muffle.
-        private static void AggregateEnvMap(ref int open, ref int blocked, ref float openWeight, ref float totalWeight, ref float weightedBlockedMeters, ref float weightedVoxelBlockedMeters)
+        private static void AggregateEnvMap(ref int open, ref int blocked, ref float openWeight, ref float totalWeight, ref float weightedBlockedMeters, ref float weightedVoxelBlockedMeters, ref float thinSealedWeight)
         {
             int n = _envMapCellCount;
             int sampledCells = 0;
@@ -1282,6 +1301,7 @@ namespace RealisticSoundPlus.AudioEngineV2
 
                 sampledCells++;
                 totalWeight += 1f;
+                thinSealedWeight += Clamp01(c.ThinSeal01); // dome fraction that is thin sealed shell (muffle authority)
                 if (c.EnvironmentBlocked)
                 {
                     blocked++;
@@ -1369,6 +1389,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             _envMapDiagMinCoverage = 0;
             _envMapDiagFallback = false;
             _envThinSealHits = 0L;
+            _envThinSealCoverage = 0f;
         }
 
         private struct EnvMapCell
@@ -1378,6 +1399,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             public bool EnvironmentAvailable;
             public bool EnvironmentBlocked;
             public float OpenWeight01;
+            public float ThinSeal01;     // EMA: how much this direction is a thin sealed face (env muffle authority)
             public float BlockedMeters;
             public float VoxelMeters;
             public float RayDistance;
@@ -1511,13 +1533,17 @@ namespace RealisticSoundPlus.AudioEngineV2
             sample.BlockedMeters = blockedMeters;
             float transRoll = CalculateThicknessTransmission(blockedMeters, thicknessScale);
             RealisticSoundPlusSettings rollSettings = SettingsManager.Current;
-            if (rollSettings != null && rollSettings.PlayerEnvSealedBarrierLoss > 0f && hit
-                && blockedMeters < thicknessScale * Math.Max(0.05f, rollSettings.PlayerFilterSealedBarrierThinFactor)
-                && TryGetFirstGridHitFace(from, to, out VRage.Game.ModAPI.IMyCubeGrid sealRollGrid, out Vector3I sealRollCell)
-                && V2GridStructureProbe.IsSealingBlockAtCell(sealRollGrid, sealRollCell))
+            // The thin sealed shell no longer just nudges this direction's transmission - the open apertures
+            // dominate the aperture fraction, so that lever was nearly dead. Instead we MEASURE whether this
+            // direction is a thin sealed face (ThinSeal01) and apply a dedicated muffle boost at the final
+            // assembly, where loss x dome-coverage has real authority. Geometry-only here, so the coverage is
+            // independent of the loss knob and scales smoothly; the hit counter still tracks active (loss>0) hits.
+            if (hit && rollSettings != null
+                && IsThinSealedFace(from, to, blockedMeters, rollSettings.PlayerFilterSealedBarrierThinFactor))
             {
-                transRoll = Math.Min(transRoll, 1f - Clamp01(rollSettings.PlayerEnvSealedBarrierLoss));
-                if (_envThinSealHits < long.MaxValue) _envThinSealHits++;
+                sample.ThinSeal01 = 1f;
+                if (rollSettings.PlayerEnvSealedBarrierLoss > 0f && _envThinSealHits < long.MaxValue)
+                    _envThinSealHits++;
             }
             sample.OpenWeight = sample.Weight * transRoll;
             return sample;
@@ -1578,12 +1604,9 @@ namespace RealisticSoundPlus.AudioEngineV2
                 weightedVoxelBlockedMeters += safeWeight * voxelMeters;
                 float transDir = CalculateThicknessTransmission(blockedMeters, thicknessScale);
                 RealisticSoundPlusSettings dirSettings = SettingsManager.Current;
-                if (dirSettings != null && dirSettings.PlayerEnvSealedBarrierLoss > 0f && hit
-                    && blockedMeters < thicknessScale * Math.Max(0.05f, dirSettings.PlayerFilterSealedBarrierThinFactor)
-                    && TryGetFirstGridHitFace(from, to, out VRage.Game.ModAPI.IMyCubeGrid sealDirGrid, out Vector3I sealDirCell)
-                    && V2GridStructureProbe.IsSealingBlockAtCell(sealDirGrid, sealDirCell))
+                if (hit && dirSettings != null
+                    && TryApplyThinSeal(from, to, blockedMeters, dirSettings.PlayerEnvSealedBarrierLoss, dirSettings.PlayerFilterSealedBarrierThinFactor, ref transDir))
                 {
-                    transDir = Math.Min(transDir, 1f - Clamp01(dirSettings.PlayerEnvSealedBarrierLoss));
                     if (_envThinSealHits < long.MaxValue) _envThinSealHits++;
                 }
                 openWeight += safeWeight * transDir;
@@ -1647,6 +1670,16 @@ namespace RealisticSoundPlus.AudioEngineV2
                 return -naturalGravity;
             }
 
+            // No natural gravity (deep space / no planet): use a stable BODY reference, not the camera. The camera
+            // up tracks free-look/aim, which would rotate the whole sealing dome with every mouse move. The player
+            // character's body up (= the seat/cockpit it occupies when piloting) holds steady as you look around.
+            Vector3D bodyUp = MyAPIGateway.Session?.Player?.Character?.WorldMatrix.Up ?? Vector3D.Zero;
+            if (bodyUp.IsValid() && bodyUp.LengthSquared() > 0.0001)
+            {
+                bodyUp.Normalize();
+                return bodyUp;
+            }
+
             Vector3D cameraUp = MyAPIGateway.Session?.Camera?.WorldMatrix.Up ?? Vector3D.Up;
             if (!cameraUp.IsValid() || cameraUp.LengthSquared() <= 0.0001)
                 return Vector3D.Up;
@@ -1694,9 +1727,18 @@ namespace RealisticSoundPlus.AudioEngineV2
                     }
 
                     object result = method.Invoke(physics, args);
+                    // IMyPhysics.CalculateNaturalGravityAt returns single-precision Vector3 (the out-param is the
+                    // float multiplier), so accept BOTH Vector3D and Vector3. The old Vector3D-only check never
+                    // matched the real return, which silently forced the camera-up fallback everywhere: the sealing
+                    // dome rotated with aim and the voxel sky-hemisphere tilted into the ground.
                     if (result is Vector3D resultGravity)
                     {
                         gravity = resultGravity;
+                        return gravity.IsValid();
+                    }
+                    if (result is Vector3 resultGravityF)
+                    {
+                        gravity = resultGravityF;
                         return gravity.IsValid();
                     }
 
@@ -1705,6 +1747,11 @@ namespace RealisticSoundPlus.AudioEngineV2
                         if (args[p] is Vector3D outGravity)
                         {
                             gravity = outGravity;
+                            return gravity.IsValid();
+                        }
+                        if (args[p] is Vector3 outGravityF)
+                        {
+                            gravity = outGravityF;
                             return gravity.IsValid();
                         }
                     }
@@ -1926,6 +1973,43 @@ namespace RealisticSoundPlus.AudioEngineV2
             blockedMeters = Math.Max(0f, blockedMeters);
             thicknessScale = Math.Max(0.1f, thicknessScale);
             return Clamp01((float)Math.Exp(-blockedMeters / thicknessScale));
+        }
+
+        // Thin-seal barrier loss. A SEALING face (full armour, glass canopy, single airtight plate) that is only
+        // about one block thick should muffle far more than its raw thickness implies. The crucial fix: "thin" is
+        // measured against the grid's BLOCK size (gridSize), NOT the acoustic thicknessScale. A single large-grid
+        // block is ~2.5 m of solid, but the old window was thicknessScale * thinFactor (~1.3 m), so NO normal wall
+        // ever qualified as thin and the knob looked completely dead. Now the crossing transmission is multiplied
+        // by (1 - loss) - a proportional cut that responds across the whole 0..1 range (the old Math.Min cap only
+        // bit at the extreme). Fires only for a thin SEALING face; thick walls, open gratings and voxel are left
+        // untouched. There is NO room-airtight gate, so it works in unpressurised builds too.
+        internal static bool TryApplyThinSeal(Vector3D from, Vector3D to, float blockedMeters, float barrierLoss, float thinBlocks, ref float transmission)
+        {
+            barrierLoss = Clamp01(barrierLoss);
+            if (barrierLoss <= 0f)
+                return false;
+            if (!IsThinSealedFace(from, to, blockedMeters, thinBlocks))
+                return false;
+
+            transmission *= 1f - barrierLoss;
+            return true;
+        }
+
+        // Geometry-only test (no transmission mutation, no loss gate): does this ray's FIRST grid face belong to a
+        // THIN SEALING block - a sealing surface (full armour, glass, plate, slope) whose crossed solid span is
+        // within MaxSpan grid blocks? Used both to apply the per-ray barrier loss above and, for the env muffle,
+        // to measure how much of the sky dome is a thin sealed shell (the dedicated muffle-authority term). Kept
+        // loss-independent so that coverage scales smoothly and "Max Span" alone changes which faces qualify.
+        internal static bool IsThinSealedFace(Vector3D from, Vector3D to, float blockedMeters, float thinBlocks)
+        {
+            if (!TryGetFirstGridHitFace(from, to, out VRage.Game.ModAPI.IMyCubeGrid grid, out Vector3I cell) || grid == null)
+                return false;
+            if (!V2GridStructureProbe.IsSealingBlockAtCell(grid, cell))
+                return false;
+
+            float gridSize = grid.GridSize > 0.1f ? grid.GridSize : 2.5f;
+            float thinThreshold = gridSize * Math.Max(1f, thinBlocks); // >= one block, tolerant of ray incidence
+            return blockedMeters <= thinThreshold;
         }
 
         // Builds the raw blocked intervals along a debug ray, split by what contributes the thickness:
@@ -2861,6 +2945,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             public bool EnvironmentAvailable;
             public bool EnvironmentBlocked;
             public float OpenWeight;
+            public float ThinSeal01;     // 1 when this direction's first face is a thin sealed face, else 0
             public float BlockedMeters;
             public float VoxelMeters;
             public Vector3D DebugFrom;

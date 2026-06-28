@@ -214,7 +214,8 @@ namespace RealisticSoundPlus
             AddSection(content, ref y, "Sealed Rooms");
             AddSlider(content, ref y, "Sealed Environment Factor", "sealedenv", 0f, 1f, 2, () => SettingsManager.Current.PlayerFilterEnvironmentSealedFactor, "Extra wind muffling in airtight rooms; higher quieter sealed interiors.");
             AddSlider(content, ref y, "Sealed Blocks Factor", "sealedblock", 0f, 1f, 2, () => SettingsManager.Current.PlayerFilterBlockSealedFactor, "Extra block muffling when you are OUTSIDE the source's sealed room; higher = stronger door/wall contrast.");
-            AddSlider(content, ref y, "Thin Wall Muffle", "thinsealmuffle", 0f, 1f, 2, () => SettingsManager.Current.PlayerFilterBlockSealedBarrierLoss, "One knob for blocks AND wind: extra muffling through a THIN sealed face (glass/plate). 0 = off, ~0.7 = strong. Thick walls and open gratings are unaffected.");
+            AddSlider(content, ref y, "Thin Wall Muffle", "thinsealmuffle", 0f, 1f, 2, () => SettingsManager.Current.PlayerFilterBlockSealedBarrierLoss, "How much THIN sealed walls/roof (armour/glass/plate) seal the OUTSIDE WIND out. 1 = thin shell fully blocks wind (default); LOWER and the wind leaks through the thin shell - brighter, airier. Scales with how much of the sky-dome is a thin sealed shell, so it has real two-way authority sealed or unsealed. Also muffles block sources behind thin sealed faces. Open gratings unaffected.");
+            AddSlider(content, ref y, "Thin Wall Max Span", "sealbarrierthin", 1f, 6f, 1, () => SettingsManager.Current.PlayerFilterSealedBarrierThinFactor, "How many blocks thick a SEALED wall can be and still get the Thin Wall Muffle bonus. 1 = single layer only; raise to also muffle 2-3 block sealed walls.");
 
             _currentAccent = EnvironmentPanel;
             // ENV MUFFLE PIPELINE: rays are cast over the sky dome; each direction is open (sky) or blocked (by
@@ -1105,9 +1106,8 @@ namespace RealisticSoundPlus
                 Vector2 size = Size;
                 Vector2 bottomRight = topLeft + size;
 
-                // Opaque backdrop so the grid mesh reads cleanly instead of being washed out by the
-                // semi-transparent menu panel showing through behind the chart.
-                MyGuiManager.DrawRectangle(topLeft, size, new Color(7, 10, 13, 255));
+                // No filled backdrop: the solid panel obscured visibility and was clipped by the menu top.
+                // The frame, grid, labels and response curve carry the chart on the transparent menu behind it.
                 DrawRect(topLeft, bottomRight, FrameColor);
                 DrawGrid(topLeft, size);
                 DrawResponse(topLeft, size);

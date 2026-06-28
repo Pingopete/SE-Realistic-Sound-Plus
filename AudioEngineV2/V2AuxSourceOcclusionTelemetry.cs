@@ -30,7 +30,25 @@ namespace RealisticSoundPlus.AudioEngineV2
         // Route hysteresis: re-run the flood-fill only when the listener has moved past this, or the route is
         // this old. Stops the discrete grid route flip-flopping when sub-cell jitter flips the listener cell.
         private const double AirPathRecomputeMovedSq = 0.4 * 0.4; // ~0.4 m
+        // Portal hold hysteresis: a freshly recomputed portal must be at least this much DEEPER (farther from the
+        // listener) than the held one to replace it; otherwise, while the held portal is still in sight, it stays.
+        private const double PortalHoldDepthEpsSq = 1.0 * 1.0; // ~1 m of "clearly deeper" before advancing
+        // The remembered aperture counts as "on the listener->source sightline" (we are threading the shaft, keep
+        // the route bridged) only within this distance of that line. Beyond it the source is directly visible and
+        // the occlusion clears immediately - no waiting for the 3 s aperture memory to lapse.
+        private const double StraightClearApertureOnLineM = 3.0;
         private static readonly TimeSpan AirPathRecomputeMaxAge = TimeSpan.FromMilliseconds(2500);
+        // Minimum wall-clock between full flood-fill recomputes for one source. The flood (structure discovery) is
+        // the only work that runs WHILE MOVING - every source recomputes on each 500 ms poll, and each flood
+        // allocates large search buffers, so a moving player triggers a synchronised GC/CPU spike every poll (the
+        // "heavy repeating frame drop on the move"). Between floods the cheap portal-slide already tracks your live
+        // position, so the route topology only needs an occasional refresh: gate the flood to this cadence.
+        private static readonly TimeSpan AirPathRecomputeMinInterval = TimeSpan.FromMilliseconds(750);
+        // How long the last open aperture (stairwell mouth) is remembered after the route last resolved through it.
+        // While fresh, the air-path/reposition feature is kept alive even if the straight physics ray momentarily
+        // reads clear (threading the open shaft as you cross the mouth) and the flood is anchored to that aperture -
+        // so the route survives the step from the stairwell onto the upper floor instead of collapsing there.
+        private static readonly TimeSpan ApertureMemory = TimeSpan.FromSeconds(3);
         private static readonly TimeSpan PathProbeLifetime = TimeSpan.FromSeconds(8);
         private static readonly TimeSpan OcclusionSmoothingResetGap = TimeSpan.FromSeconds(1.5);
         private const int MaxOcclusionSmoothing = 256;
@@ -106,7 +124,7 @@ namespace RealisticSoundPlus.AudioEngineV2
 
             // Move the live emitter to the weight-blended target (or ease it back to its block when not applied).
             // The matching attenuation already lives in sample.EstimatedGain (applied via VolumeMultiplier).
-            V2BlockEmitterReposition.Request(emitter, source, sample.RepositionTarget, sample.RepositionApplied, DateTime.UtcNow);
+            V2BlockEmitterReposition.Request(emitter, source, sample.RepositionTarget, sample.RepositionApplied, DateTime.UtcNow, cueName);
         }
 
         public static string FormatSummary()
@@ -343,6 +361,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             float totalWeight;
             float weightedBlockedMeters;
             bool mainRayBlocked;
+            bool rayMeasuredBlocked;
             Vector3D probeFrom = Vector3D.Zero;
             Vector3D probeTo = Vector3D.Zero;
             bool airPathAvailable;
@@ -358,7 +377,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             if (distance <= maxProbeMeters)
             {
                 ResolveSourceClearance(source, sourceEntityId, out long _, out float sourceClearRadius);
-                ProbePath(cueName, source, listener, sourceEntityId, settings, now, sourceClearRadius, out open, out blocked, out openWeight, out totalWeight, out weightedBlockedMeters, out mainRayBlocked, out airPathAvailable, out airPathLength, out portalWorld, out portalValid, out airRoute);
+                ProbePath(cueName, source, listener, sourceEntityId, settings, now, sourceClearRadius, out open, out blocked, out openWeight, out totalWeight, out weightedBlockedMeters, out mainRayBlocked, out rayMeasuredBlocked, out airPathAvailable, out airPathLength, out portalWorld, out portalValid, out airRoute);
                 if (settings.PlayerFilterPathDebugEnabled)
                 {
                     // Expose the exact probed sub-segment (after source-clearance and listener skips) so the
@@ -376,6 +395,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                 totalWeight = 1f;
                 weightedBlockedMeters = 0f;
                 mainRayBlocked = false;
+                rayMeasuredBlocked = false;
                 airPathAvailable = false;
                 airPathLength = 0f;
                 portalWorld = Vector3D.Zero;
@@ -446,7 +466,6 @@ namespace RealisticSoundPlus.AudioEngineV2
             if (mainRayBlocked && airPathAvailable)
             {
                 _airPathFound = SaturatingIncrement(_airPathFound);
-                float structMuffle = finalMuffling;
                 float structGainDist = EvaluateDistanceGain(distance, effectiveRange, settings.PlayerFilterBlockDistanceCurve);
                 float structTrans = V2PlayerEnvironmentTelemetry.CalculateThicknessTransmission(estimatedBlockedLength, blockThicknessScale);
                 float structGain = Clamp01(structGainDist * structTrans);
@@ -459,44 +478,45 @@ namespace RealisticSoundPlus.AudioEngineV2
                 airWeight = airGain;
                 structWeight = structGain;
 
-                float denom = airGain + structGain;
-                float mergedMuffle = denom <= 1e-3f
-                    ? structMuffle
-                    : (airGain * airMuffle + structGain * structMuffle) / denom;
-
-                float newContinuous = Math.Min(continuous, mergedMuffle);
-                if (newContinuous < continuous - 1e-4f)
-                {
-                    continuous = newContinuous;
-                    finalMuffling = Math.Min(finalMuffling, mergedMuffle);
-                    mergedFromAirPath = true;
-                    _airPathMerged = SaturatingIncrement(_airPathMerged);
-                    estimatedGain = CalculateEstimatedGain(continuous, sealedExtra, localAtmosphere, rangeCompensation);
-                    estimatedCutoff = BlendCutoff(settings.Filter2Frequency, settings.PlayerFilterBlockMuffledFrequency, finalMuffling);
-                }
+                // FULLY DECOUPLED muffle: once a source is in the air-path regime (straight ray blocked AND a bounded
+                // detour reaches the listener), the muffle is driven by the AIR leg ALONE - never merged with the
+                // straight-through-the-structure occlusion. That structure leg (openFraction -> continuous ->
+                // finalMuffling, fed by the block-thickness scale) is a DIFFERENT, weaker arrival path we no longer
+                // render: the emitter has been moved to the portal, so the sound localises at the air detour, not
+                // through the wall. Merging the two made the muffle LURCH as the listener crossed positions where the
+                // sightline (mis)aligned with the open shaft - and turning UP block thickness amplified the lurch,
+                // because a darker/quieter structure leg handed the loudness-weighted merge ever more weight to the
+                // bright air leg. So block thickness now only affects sources WITHOUT an air detour (true thin walls);
+                // for around-the-corner sources it touches the reposition DISTANCE blend (via structWeight) but never
+                // the tone. The air leg muffle already grades smoothly with detour length, so a long way around still
+                // arrives duller while a short hop stays bright, with zero dependence on the flipping straight ray.
+                continuous = airMuffle;
+                finalMuffling = ApplyOcclusionStrength(Clamp01(continuous + (1f - continuous) * sealedExtra), settings.PlayerFilterOcclusionStrength);
+                mergedFromAirPath = true;
+                _airPathMerged = SaturatingIncrement(_airPathMerged);
+                estimatedGain = CalculateEstimatedGain(continuous, sealedExtra, localAtmosphere, rangeCompensation);
+                estimatedCutoff = BlendCutoff(settings.Filter2Frequency, settings.PlayerFilterBlockMuffledFrequency, finalMuffling);
             }
 
             // ---- Emitter repositioning (Option B: position carries direction, gain carries distance) ----
-            // The emitter is moved toward the portal, but only as far as the air leg actually dominates: the
-            // target is lerp(realSource -> portal) weighted by airWeight/(airWeight+structWeight). A thick wall
-            // (little straight-through) pulls it to the doorway; a thin wall (lots of straight-through) leaves it
-            // near the block; partial blockage lands it in between - localisation tracks where the sound really
-            // comes from. The perceived distance is the matching blend of straight distance and air-path length;
-            // since the emitter now sits at the blended point the engine attenuates by that point's distance, so
-            // we net gain by gWant/gHave to land on the intended loudness.
+            // POSITION is the portal itself - the deepest path point you can still SEE toward the source (held stable
+            // by the portal hysteresis in ProbePath). It is deliberately NOT lerped by the straight-vs-air loudness
+            // ratio any more: that averaging made the emitter drift erratically and pull back toward the block. The
+            // loudness ratio is still computed, but only to set the perceived DISTANCE for gain - the sound localises
+            // cleanly at the visible portal while still attenuating as if it travelled the real (blended) path length.
             bool repositionApplied = false;
             Vector3D repositionTarget = source;
             float repositionBlend = 0f;
             if (settings.PlayerFilterBlockRepositionEnabled && mainRayBlocked && airPathAvailable && portalValid)
             {
                 repositionApplied = true;
-                // Bias the localisation toward the air-path portal. airBias > 1 weights the air leg up so the
-                // emitter sits closer to the doorway/stairwell even when the direct line still transmits.
+                // Loudness ratio (air vs straight-through leg, biased) - used ONLY for the perceived distance below,
+                // no longer for the position.
                 float airBias = Math.Max(0.01f, settings.PlayerFilterBlockRepositionAirBias);
                 float biasedAir = airWeight * airBias;
                 float wsum = biasedAir + structWeight;
                 repositionBlend = wsum > 1e-4f ? Clamp01(biasedAir / wsum) : 1f;
-                repositionTarget = Vector3D.Lerp(source, portalWorld, repositionBlend);
+                repositionTarget = portalWorld; // sit AT the visible portal, full stop
 
                 float repoCurve = Math.Max(0.1f, settings.PlayerFilterBlockDistanceCurve);
                 float effectiveDist = distance + (airPathLength - distance) * repositionBlend;
@@ -770,7 +790,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             return Clamp01(1f - (float)Math.Pow(normalized, curve));
         }
 
-        private static void ProbePath(string cueName, Vector3D source, Vector3D listener, long sourceEntityId, RealisticSoundPlusSettings settings, DateTime now, float sourceClearRadius, out int open, out int blocked, out float openWeight, out float totalWeight, out float weightedBlockedMeters, out bool mainRayBlocked, out bool airPathAvailable, out float airPathLength, out Vector3D portalWorld, out bool portalValid, out List<Vector3D> airRoute)
+        private static void ProbePath(string cueName, Vector3D source, Vector3D listener, long sourceEntityId, RealisticSoundPlusSettings settings, DateTime now, float sourceClearRadius, out int open, out int blocked, out float openWeight, out float totalWeight, out float weightedBlockedMeters, out bool mainRayBlocked, out bool rayMeasuredBlocked, out bool airPathAvailable, out float airPathLength, out Vector3D portalWorld, out bool portalValid, out List<Vector3D> airRoute)
         {
             string key = BuildPathProbeKey(cueName, source, sourceEntityId, settings);
             if (!PathProbeCache.TryGetValue(key, out PathProbeState state))
@@ -784,6 +804,15 @@ namespace RealisticSoundPlus.AudioEngineV2
                 PathProbeMeasurement measurement = ProbeSinglePath(source, listener, settings, settings.PlayerFilterBlockStructureThicknessScale, sourceClearRadius);
                 state = CreatePathProbeState(measurement, now);
 
+                // ---- air-path diagnostics (only when /rsp auxpathdebug is on; emitted on signature change) ----
+                bool measuredRayBlocked = state.MainRayBlocked; // BEFORE the aperture-memory override below
+                state.MeasuredRayBlocked = measuredRayBlocked;  // surfaced so the muffle can ignore a spuriously-
+                                                                // clear straight ray that only threaded an opening
+                string airDiagBranch = "gate-off";
+                bool airDiagAnchor = false;
+                int airDiagAttempts = 0;
+                bool airDiagHasHidden = false;
+
                 // Around-the-corner air-diffraction leg: only worth a flood-fill when the straight ray is
                 // actually blocked. The result rides in this same 250 ms probe cache, so the bounded BFS fires
                 // at most once per source per interval (and never for far/unblocked sources). The portal (the
@@ -793,7 +822,23 @@ namespace RealisticSoundPlus.AudioEngineV2
                 state.AirPathLength = 0f;
                 state.PortalWorld = Vector3D.Zero;
                 state.PortalValid = false;
+                state.PortalFirstHiddenWorld = Vector3D.Zero;
+                state.PortalHasHidden = false;
                 state.AirRoute = null;
+
+                // Carry the remembered aperture forward (it persists across probes even when THIS probe finds no
+                // route). If it is still fresh we are mid-bridge across the stairwell mouth: the straight ray can
+                // momentarily thread the open shaft and read clear (mainRayBlocked=false), which by itself switches
+                // the whole air-path/reposition feature off (it is gated on mainRayBlocked downstream) and wipes the
+                // anchor, so the search on the far side has nothing to localise to and the route collapses. While
+                // the aperture is fresh, force the gate on (the MEASURED occlusion weights/tone are left untouched -
+                // the merge only ever brightens) so reposition keeps running and the flood stays anchored to it.
+                state.ApertureWorld = prevState.ApertureWorld;
+                state.ApertureUtc = prevState.ApertureUtc;
+                bool recentAperture = prevState.ApertureUtc != DateTime.MinValue && now - prevState.ApertureUtc < ApertureMemory;
+                if (recentAperture)
+                    state.MainRayBlocked = true;
+
                 if (state.MainRayBlocked)
                 {
                     VRage.Game.ModAPI.IMyCubeGrid sourceGrid = ResolveSourceGrid(sourceEntityId);
@@ -802,7 +847,18 @@ namespace RealisticSoundPlus.AudioEngineV2
                     // direct line is genuinely clear of solid blocks, the source is unobstructed - drop the
                     // occlusion to open and skip the air path entirely so an in-room source is not wound onto a
                     // long detour and muffled, and the emitter is not repositioned.
-                    if (sourceGrid != null && V2GridStructureProbe.IsStraightPathOpen(sourceGrid, source, listener))
+                    //
+                    // This used to be blocked by a blunt TIME gate (!recentAperture), which is why the muffle hung
+                    // for ~1-2 s after you walked into the source's room: the aperture you refreshed on the stairs
+                    // stayed "fresh" for 3 s and suppressed the clear. Use a GEOMETRY gate instead: only suppress the
+                    // clear while the remembered aperture actually lies ON the listener->source line (the clear line
+                    // is threading the open stairwell shaft and we are still around the corner). Once you are in the
+                    // room the aperture (the stairwell mouth, now behind you) is far off that line, so we clear at
+                    // once. Behind-the-listener / beyond-the-source apertures fall out naturally (segment distance).
+                    bool apertureOnSightline = recentAperture
+                        && state.ApertureWorld != Vector3D.Zero
+                        && ApertureOnSightline(state.ApertureWorld, listener, source, StraightClearApertureOnLineM);
+                    if (!apertureOnSightline && sourceGrid != null && V2GridStructureProbe.IsStraightPathOpen(sourceGrid, source, listener))
                     {
                         state.Open = 1;
                         state.Blocked = 0;
@@ -812,6 +868,9 @@ namespace RealisticSoundPlus.AudioEngineV2
                         state.MainRayBlocked = false;
                         state.LastProbeUtc = now;
                         state.UpdatedUtc = now;
+                        if (settings.PlayerFilterPathDebugEnabled)
+                            LogAirPathDiag(key, cueName, "straight-open", measuredRayBlocked, false, recentAperture,
+                                ApertureAgeMs(prevState, now), false, false, false, 0, listener, source);
                         StorePathProbe(key, state, now);
                         open = state.Open;
                         blocked = state.Blocked;
@@ -819,6 +878,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                         totalWeight = state.TotalWeight;
                         weightedBlockedMeters = state.WeightedBlockedMeters;
                         mainRayBlocked = state.MainRayBlocked;
+                        rayMeasuredBlocked = state.MeasuredRayBlocked;
                         airPathAvailable = state.AirPathAvailable;
                         airPathLength = state.AirPathLength;
                         portalWorld = state.PortalWorld;
@@ -833,38 +893,86 @@ namespace RealisticSoundPlus.AudioEngineV2
                     // re-run the search when the listener has actually moved past a threshold (or the route is
                     // stale); otherwise reuse the previous route/portal unchanged.
                     bool listenerMoved = Vector3D.DistanceSquared(listener, prevState.AirPathListenerPos) > AirPathRecomputeMovedSq;
+                    bool intervalElapsed = now - prevState.AirPathComputeUtc >= AirPathRecomputeMinInterval;
                     bool routeStale = now - prevState.AirPathComputeUtc > AirPathRecomputeMaxAge;
-                    if (prevState.AirPathProbed && prevState.MainRayBlocked && !listenerMoved && !routeStale)
+                    // Full flood only when you've actually moved AND the rate-limit has elapsed (or the held route is
+                    // stale). Otherwise hold the topology and slide the portal - cheap, no flood, no GC spike.
+                    bool doRecompute = routeStale || (listenerMoved && intervalElapsed);
+                    if (prevState.AirPathProbed && prevState.MainRayBlocked && !doRecompute)
                     {
+                        airDiagBranch = "reuse";
                         state.AirPathAvailable = prevState.AirPathAvailable;
                         state.AirPathLength = prevState.AirPathLength;
-                        state.PortalWorld = prevState.PortalWorld;
                         state.PortalValid = prevState.PortalValid;
+                        state.PortalFirstHiddenWorld = prevState.PortalFirstHiddenWorld;
+                        state.PortalHasHidden = prevState.PortalHasHidden;
                         state.AirRoute = prevState.AirRoute;
                         state.AirPathListenerPos = prevState.AirPathListenerPos;
                         state.AirPathComputeUtc = prevState.AirPathComputeUtc;
+                        // Hold the portal FROZEN between recomputes (no slide). The portal is a stable world point at
+                        // the deepest cell you can see down the path; while you still have sight of it, it must not
+                        // move - the temporal EMA in the reposition manager handles any small settling.
+                        state.PortalWorld = prevState.PortalWorld;
+                        // A held hidden-route still goes through the aperture - keep it fresh so the memory does not
+                        // expire while you legitimately hold a route around the corner.
+                        if (prevState.PortalHasHidden && prevState.AirPathAvailable)
+                        {
+                            state.ApertureWorld = prevState.PortalFirstHiddenWorld;
+                            state.ApertureUtc = now;
+                        }
                     }
                     else
                     {
                         int baseReach = (int)Math.Max(1f, settings.PlayerFilterBlockAirPathReach);
                         int openBias = (int)Math.Max(0f, settings.PlayerFilterBlockAirPathOpenBias);
                         bool throughBlocks = settings.PlayerFilterBlockAirPathThroughBlocks;
+                        V2GridStructureProbe.SealDiagEnabled = settings.PlayerFilterPathDebugEnabled;
                         List<Vector3D> route = settings.PlayerFilterPathDebugEnabled ? new List<Vector3D>(32) : null;
+                        // Anchor the fresh search box to the LAST-KNOWN aperture (stairwell mouth) so it keeps
+                        // including the opening as you cross the upper floor away from it - otherwise the open route
+                        // up the side stairwell falls outside the tight source<->listener box and the recompute
+                        // collapses. ROOT FIX for "the route fails the moment I exit the top of the stairwell": the
+                        // old anchor was gated on the route CURRENTLY being available (recentAperture OR
+                        // prevState.AirPathAvailable). So a single miss made prevState.AirPathAvailable false, the
+                        // anchor evaporated, the bare box no longer contained the side stairwell, and EVERY following
+                        // recompute missed too (anch=False chained) until the listener happened to wander somewhere
+                        // the bare box re-included the stairs. state.ApertureWorld persists across probes once any
+                        // route has been found, so anchoring to it unconditionally keeps the stairwell in the box
+                        // through a momentary collapse. Safe with the A* flood: a larger box is not over-explored
+                        // (the search is goal-directed toward the listener), and a stale anchor is replaced the
+                        // moment a fresh route resolves a new aperture.
+                        Vector3D? boundsAnchor = state.ApertureWorld != Vector3D.Zero
+                            ? state.ApertureWorld
+                            : (Vector3D?)null;
+                        airDiagBranch = "recompute-miss";
+                        airDiagAnchor = boundsAnchor.HasValue;
                         if (sourceGrid != null)
                         {
                             // Adaptive reach: a sealed stairwell can sit outside the tight source<->listener box,
                             // so if no path is found, expand the search a couple of times before giving up.
                             for (int attempt = 0; attempt < 3; attempt++)
                             {
+                                airDiagAttempts = attempt + 1;
                                 int reach = Math.Min(16, baseReach << attempt);
                                 int budget = Math.Min(32768, Math.Max(4096, reach * reach * reach * 32));
-                                if (V2GridStructureProbe.TryFindAirPath(sourceGrid, source, listener, reach, budget, throughBlocks, openBias, route, out float airLen, out Vector3D portal, out bool portalOk))
+                                if (V2GridStructureProbe.TryFindAirPath(sourceGrid, source, listener, reach, budget, throughBlocks, openBias, boundsAnchor, route, out float airLen, out Vector3D portal, out bool portalOk, out Vector3D firstHidden, out bool hasHidden))
                                 {
+                                    airDiagBranch = "recompute-found";
+                                    airDiagHasHidden = hasHidden;
                                     state.AirPathAvailable = true;
                                     state.AirPathLength = airLen;
                                     state.PortalWorld = portal;
                                     state.PortalValid = portalOk;
+                                    state.PortalFirstHiddenWorld = firstHidden;
+                                    state.PortalHasHidden = hasHidden;
                                     state.AirRoute = route;
+                                    // Refresh the aperture memory whenever the route bends behind structure (it goes
+                                    // through a real opening) so it can anchor/bridge the next probes across the mouth.
+                                    if (hasHidden)
+                                    {
+                                        state.ApertureWorld = firstHidden;
+                                        state.ApertureUtc = now;
+                                    }
                                     break;
                                 }
                                 if (reach >= 16)
@@ -874,11 +982,65 @@ namespace RealisticSoundPlus.AudioEngineV2
                         state.AirPathListenerPos = listener;
                         state.AirPathComputeUtc = now;
                     }
+
+                    // ---- Portal hysteresis: hold the emitter at the deepest point you can SEE down the path ----
+                    // In an open top room the flood keeps finding slightly different shortest routes, so a freshly
+                    // recomputed portal hops between them and the emitter jitters near the stairwell mouth. Resolve
+                    // it by REFUSING to retreat: while the listener still has direct sight of the previously held
+                    // portal, the portal may only ADVANCE deeper (toward the source) or stay put - it never jumps
+                    // back to a shallower point. It is released to the fresh portal only when sight of the held
+                    // point is actually lost (you rounded a corner) or no route is available.
+                    if (state.AirPathAvailable && state.PortalValid
+                        && prevState.PortalValid && prevState.PortalWorld != Vector3D.Zero
+                        && prevState.PortalWorld != state.PortalWorld)
+                    {
+                        bool heldStillVisible = V2GridStructureProbe.HasDirectSight(sourceGrid, listener, prevState.PortalWorld);
+                        bool newIsDeeper = Vector3D.DistanceSquared(listener, state.PortalWorld)
+                                         > Vector3D.DistanceSquared(listener, prevState.PortalWorld) + PortalHoldDepthEpsSq;
+                        if (heldStillVisible && !newIsDeeper)
+                        {
+                            // Held portal is still in sight and the new one is not deeper -> keep the held point.
+                            state.PortalWorld = prevState.PortalWorld;
+                            state.PortalFirstHiddenWorld = prevState.PortalFirstHiddenWorld;
+                            state.PortalHasHidden = prevState.PortalHasHidden;
+                        }
+                    }
                 }
 
                 state.LastProbeUtc = now;
                 state.UpdatedUtc = now;
                 StorePathProbe(key, state, now);
+
+                if (settings.PlayerFilterPathDebugEnabled)
+                {
+                    bool ranFlood = airDiagBranch == "recompute-found" || airDiagBranch == "recompute-miss";
+                    bool frontierEmpty = ranFlood && V2GridStructureProbe.LastFloodFrontierEmpty;
+                    bool wrote = LogAirPathDiag(key, cueName, airDiagBranch, measuredRayBlocked, state.MainRayBlocked, recentAperture,
+                        ApertureAgeMs(prevState, now), airDiagAnchor, state.AirPathAvailable, state.PortalHasHidden,
+                        airDiagAttempts, listener, source,
+                        ranFlood ? V2GridStructureProbe.LastFloodCells : -1,
+                        ranFlood && V2GridStructureProbe.LastFloodBudgetHit,
+                        frontierEmpty,
+                        ranFlood ? V2GridStructureProbe.LastFloodBoxVolume : -1);
+
+                    // On a FRESH frontier-empty miss, dump the blocks sealing the two open-air regions apart so we
+                    // can identify a stairwell/opening block wrongly classified as sealing. Tied to the throttled
+                    // diag write so it appears once per transition, not every probe.
+                    if (wrote && frontierEmpty)
+                    {
+                        VRage.Game.ModAPI.IMyCubeGrid g = ResolveSourceGrid(sourceEntityId);
+                        string nullSeals = V2GridStructureProbe.LastFloodSealTypes.Count > 0
+                            ? string.Join(",", V2GridStructureProbe.LastFloodSealTypes)
+                            : "(none)";
+                        V2DebugLog.WriteEvent("air-path-seal", string.Format(CultureInfo.InvariantCulture,
+                            "cue={0} | NULLSEAL-WALLS {1} | SRC {2} | ANCHOR {3} | LISTENER {4}",
+                            cueName ?? "?",
+                            nullSeals,
+                            V2GridStructureProbe.DescribeCellsAround(g, source, 1),
+                            V2GridStructureProbe.DescribeCellsAround(g, state.ApertureWorld, 1),
+                            V2GridStructureProbe.DescribeCellsAround(g, listener, 1)));
+                    }
+                }
             }
             else
             {
@@ -893,11 +1055,73 @@ namespace RealisticSoundPlus.AudioEngineV2
             totalWeight = state.TotalWeight;
             weightedBlockedMeters = state.WeightedBlockedMeters;
             mainRayBlocked = state.MainRayBlocked;
+            rayMeasuredBlocked = state.MeasuredRayBlocked;
             airPathAvailable = state.AirPathAvailable;
             airPathLength = state.AirPathLength;
             portalWorld = state.PortalWorld;
             portalValid = state.PortalValid;
             airRoute = state.AirRoute;
+        }
+
+        // ---- air-path diagnostics ---------------------------------------------------------------------------
+        // Per-source last-emitted signature so the log only records the MOMENT something changes (e.g. crossing
+        // from the stairwell into the top floor) instead of one line every probe. Keyed by the same probe key.
+        private static readonly Dictionary<string, string> AirPathDiagLast = new Dictionary<string, string>();
+
+        private static double ApertureAgeMs(PathProbeState prevState, DateTime now)
+        {
+            return prevState.ApertureUtc == DateTime.MinValue ? -1.0 : (now - prevState.ApertureUtc).TotalMilliseconds;
+        }
+
+        // True only when the aperture lies in the INTERIOR of the listener->source line AND within maxPerpM of it -
+        // i.e. it is genuinely BETWEEN you and the source (you are still upstairs threading the open stairwell shaft
+        // down toward it). It deliberately does NOT count an aperture whose nearest point is an endpoint: once you
+        // walk through the mouth into the source's room the aperture falls BEHIND the listener (projection t <= 0),
+        // so this returns false and the "source directly visible -> clear" fires AT ONCE instead of hanging until the
+        // 3 s aperture memory expires. The small positive t-floor keeps an aperture sitting right at the listener
+        // (you are standing in the doorway) from re-arming the suppression as you cross the threshold.
+        private static bool ApertureOnSightline(Vector3D aperture, Vector3D listener, Vector3D source, double maxPerpM)
+        {
+            Vector3D ls = source - listener;
+            double lsLenSq = ls.LengthSquared();
+            if (lsLenSq < 1e-9)
+                return false;
+            double t = Vector3D.Dot(aperture - listener, ls) / lsLenSq;
+            if (t <= 0.05 || t >= 1.0)   // behind/at the listener, or beyond the source -> not between us
+                return false;
+            Vector3D proj = listener + ls * t;
+            return Vector3D.DistanceSquared(aperture, proj) < maxPerpM * maxPerpM;
+        }
+
+        // Records WHY the air path is/ isn't available this probe: which branch ran (gate-off / straight-open /
+        // reuse / recompute-found / recompute-miss), the MEASURED ray-blocked flag vs the post-aperture-override
+        // gate, whether the aperture memory is still bridging, whether the flood had a bounds anchor, and the
+        // listener->source separation. Emits only on signature change so the collapse transition stands out.
+        private static bool LogAirPathDiag(string key, string cueName, string branch, bool measuredRayBlocked,
+            bool gateOn, bool recentAperture, double apertureAgeMs, bool anchor, bool airAvailable,
+            bool portalHasHidden, int attempts, Vector3D listener, Vector3D source,
+            int floodCells = -1, bool budgetHit = false, bool frontierEmpty = false, long boxVolume = -1)
+        {
+            // Categorical fields only in the signature (cell counts jitter every probe and would spam): the failure
+            // REASON (budgetHit/frontierEmpty) is what we want to see change.
+            string sig = string.Format(CultureInfo.InvariantCulture,
+                "{0}|gate{1}|avail{2}|hid{3}|anch{4}|recap{5}|meas{6}|bud{7}|fe{8}",
+                branch, gateOn ? 1 : 0, airAvailable ? 1 : 0, portalHasHidden ? 1 : 0,
+                anchor ? 1 : 0, recentAperture ? 1 : 0, measuredRayBlocked ? 1 : 0,
+                budgetHit ? 1 : 0, frontierEmpty ? 1 : 0);
+            string last;
+            if (AirPathDiagLast.TryGetValue(key, out last) && last == sig)
+                return false;
+            AirPathDiagLast[key] = sig;
+
+            double dist = Vector3D.Distance(listener, source);
+            double dy = listener.Y - source.Y;
+            V2DebugLog.WriteEvent("air-path-diag", string.Format(CultureInfo.InvariantCulture,
+                "cue={0} branch={1} measRayBlk={2} gateOn={3} recentAp={4} apAgeMs={5:F0} anchor={6} airAvail={7} hasHidden={8} attempts={9} dist={10:F1} dy={11:F1} fail={12} cells={13} box={14}",
+                cueName ?? "?", branch, measuredRayBlocked, gateOn, recentAperture, apertureAgeMs,
+                anchor, airAvailable, portalHasHidden, attempts, dist, dy,
+                budgetHit ? "BUDGET" : (frontierEmpty ? "FRONTIER_EMPTY" : "-"), floodCells, boxVolume));
+            return true;
         }
 
         // The source's owning grid, for the open-air flood-fill. Mirrors ResolveSourceClearance's entity
@@ -1014,12 +1238,8 @@ namespace RealisticSoundPlus.AudioEngineV2
                 // AND the crossing is thin, cap transmission at a thickness-independent STC floor. Min() means
                 // thick sealed walls (already below the ceiling) and open gratings/voxel are unchanged.
                 float transA = V2PlayerEnvironmentTelemetry.CalculateThicknessTransmission(blockedMeters, blockThicknessScale);
-                float lossA = Clamp01(settings.PlayerFilterBlockSealedBarrierLoss);
-                if (lossA > 0f && hit && blockedMeters < blockThicknessScale * Math.Max(0.05f, settings.PlayerFilterSealedBarrierThinFactor)
-                    && V2PlayerEnvironmentTelemetry.TryGetFirstGridHitFace(from, to, out VRage.Game.ModAPI.IMyCubeGrid sealGrid, out Vector3I sealCell)
-                    && V2GridStructureProbe.IsSealingBlockAtCell(sealGrid, sealCell))
+                if (hit && V2PlayerEnvironmentTelemetry.TryApplyThinSeal(from, to, blockedMeters, settings.PlayerFilterBlockSealedBarrierLoss, settings.PlayerFilterSealedBarrierThinFactor, ref transA))
                 {
-                    transA = Math.Min(transA, 1f - lossA);
                     _thinSealHits = SaturatingIncrement(_thinSealHits);
                 }
 
@@ -1275,11 +1495,19 @@ namespace RealisticSoundPlus.AudioEngineV2
             public float TotalWeight;
             public float WeightedBlockedMeters;
             public bool MainRayBlocked;
+            public bool MeasuredRayBlocked;         // the PHYSICS ray result BEFORE the aperture bridge override.
+                                                    // false while MainRayBlocked is true = bridged: the straight
+                                                    // line threaded an opening, so the measured occlusion is bright
+                                                    // and must NOT drive the muffle (use the air-path leg instead).
             public bool AirPathAvailable;
             public float AirPathLength;
             public bool AirPathProbed;
             public Vector3D PortalWorld;
             public bool PortalValid;
+            public Vector3D PortalFirstHiddenWorld; // route bend cell; held route -> portal slides toward it
+            public bool PortalHasHidden;            // whether the route bends behind structure (portal is a graze)
+            public Vector3D ApertureWorld;          // last open aperture (stairwell mouth); remembered across probes
+            public DateTime ApertureUtc;            // when ApertureWorld was last refreshed by a routed flood
             public List<Vector3D> AirRoute;
             public Vector3D AirPathListenerPos; // listener position when the route was last (re)computed
             public DateTime AirPathComputeUtc;  // when the route was last (re)computed

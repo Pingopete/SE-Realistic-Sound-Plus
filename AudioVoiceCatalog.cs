@@ -12,7 +12,10 @@ namespace RealisticSoundPlus
 {
     internal static class AudioVoiceCatalog
     {
-        private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(500);
+        // Re-records every live voice (and thus re-issues V2BlockEmitterReposition.Request for every block
+        // emitter) on this cadence - NOT every frame. V2BlockEmitterReposition derives its target-hold windows
+        // from this value, so they always exceed the rate at which fresh targets actually arrive.
+        internal static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(500);
         private static readonly TimeSpan LogInterval = TimeSpan.FromSeconds(10);
         private static readonly Dictionary<string, Entry> Entries = new Dictionary<string, Entry>(StringComparer.OrdinalIgnoreCase);
         private static DateTime _lastPollUtc = DateTime.MinValue;

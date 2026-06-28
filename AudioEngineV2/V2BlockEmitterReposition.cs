@@ -31,12 +31,21 @@ namespace RealisticSoundPlus.AudioEngineV2
             public bool Placed;             // Current has been seeded (snap-on-first)
             public DateTime LastTargetUtc;  // last active (valid-target) request
             public DateTime LastRequestUtc; // last time the voice was seen at all
+            public string Name;             // cue name, for the debug overlay label
         }
 
         private const double FrameMs = 1000.0 / 60.0;
         private const double ReleaseEpsilonSq = 0.05 * 0.05;            // 5 cm "eased home" threshold
-        private static readonly TimeSpan TargetHold = TimeSpan.FromMilliseconds(400); // debounce window
-        private static readonly TimeSpan StaleAfter = TimeSpan.FromMilliseconds(800);  // voice gone
+
+        // ROOT CAUSE of the ~500 ms synchronised snap-to-origin: this manager is fed by AudioVoiceCatalog.Update(),
+        // which re-records every live voice (re-issuing Request for every block emitter) on a fixed 500 ms POLL -
+        // not every frame. So a fresh target only arrives every ~500 ms, in lockstep across all emitters. If the
+        // "target held" window were shorter than that poll interval, the target would lapse in the gap, the
+        // emitter would ease toward its origin block, then snap back when the next poll re-issued the target: a
+        // 500 ms, perfectly synchronised rubberband on EVERY emitter, independent of motion (the old 400 ms hold
+        // did exactly this). The hold windows MUST exceed the poll cadence, so derive them from it directly.
+        private static readonly TimeSpan TargetHold = TimeSpan.FromTicks(AudioVoiceCatalog.PollInterval.Ticks * 3 / 2);  // 1.5 polls: bridges the gap + one inactive blip
+        private static readonly TimeSpan StaleAfter = TimeSpan.FromTicks(AudioVoiceCatalog.PollInterval.Ticks * 5 / 2);  // 2.5 polls: release only after ~2 missed polls
         private static readonly TimeSpan ReleaseGrace = TimeSpan.FromMilliseconds(250);
 
         private static readonly Dictionary<MyEntity3DSoundEmitter, State> Tracked =
@@ -51,7 +60,7 @@ namespace RealisticSoundPlus.AudioEngineV2
 
         // Called from the aux apply path whenever a block source is (re)evaluated. realSource is the live block
         // position; active+target register the blended reposition point.
-        public static void Request(MyEntity3DSoundEmitter emitter, Vector3D realSource, Vector3D target, bool active, DateTime now)
+        public static void Request(MyEntity3DSoundEmitter emitter, Vector3D realSource, Vector3D target, bool active, DateTime now, string name = null)
         {
             if (emitter == null)
                 return;
@@ -66,6 +75,8 @@ namespace RealisticSoundPlus.AudioEngineV2
 
             state.RealSource = realSource;
             state.LastRequestUtc = now;
+            if (!string.IsNullOrEmpty(name))
+                state.Name = name;
             if (active)
             {
                 state.Target = target;
@@ -165,6 +176,8 @@ namespace RealisticSoundPlus.AudioEngineV2
                 if (!s.Placed)
                     continue;
                 MyRenderProxy.DebugDrawSphere(s.Current, 0.20f, PortalSymbolColor, 0.95f, false, false, false, false);
+                if (!string.IsNullOrEmpty(s.Name))
+                    MyRenderProxy.DebugDrawText3D(s.Current + Vector3D.Up * 0.30, s.Name, PortalSymbolColor, 0.55f, false);
             }
         }
 

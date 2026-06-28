@@ -62,9 +62,14 @@ namespace RealisticSoundPlus
         public float PlayerEnvSealOpenThreshold { get; set; } = 0f;
         public float PlayerFilterEnvironmentSealedFactor { get; set; } = 0f;
         public float PlayerFilterBlockSealedFactor { get; set; } = 0f;
-        public float PlayerFilterBlockSealedBarrierLoss { get; set; } = 0f;
-        public float PlayerEnvSealedBarrierLoss { get; set; } = 0f;
-        public float PlayerFilterSealedBarrierThinFactor { get; set; } = 0.6f;
+        // Thin-wall WIND SEALING (the "Thin Wall Muffle" knob), now BIDIRECTIONAL: 1 = thin sealed walls/roof fully
+        // seal the wind out (today's behaviour, the default), lower = wind leaks through the thin shell (brighter).
+        public float PlayerFilterBlockSealedBarrierLoss { get; set; } = 1f;
+        public float PlayerEnvSealedBarrierLoss { get; set; } = 1f;
+        // Max barrier thickness, in GRID BLOCKS, that still counts as a "thin" sealed face for the Thin Wall
+        // Muffle bonus. 1 = single sealing layer only; higher also catches 2-3 block sealed walls. (Was a
+        // fraction of the acoustic thickness scale, which never caught a normal large-grid block.)
+        public float PlayerFilterSealedBarrierThinFactor { get; set; } = 1.5f;
         // Air (around-corner) leg brightness FLOOR for blocked block sources: the muffle at zero detour length
         // (brightest, short path). Lower = brighter. 0.08 = prior hardcoded value.
         public float PlayerFilterBlockAirBrightness { get; set; } = 0.08f;
@@ -1662,6 +1667,11 @@ namespace RealisticSoundPlus
             Current.PlayerFilterBlockSealedFactor = Clamp(Current.PlayerFilterBlockSealedFactor, 0f, 1f);
             Current.PlayerFilterBlockSealedBarrierLoss = Clamp(Current.PlayerFilterBlockSealedBarrierLoss, 0f, 1f);
             Current.PlayerEnvSealedBarrierLoss = Clamp(Current.PlayerEnvSealedBarrierLoss, 0f, 1f);
+            // Thin factor is now measured in grid blocks (>= 1). Migrate legacy sub-block values (old default 0.6,
+            // a fraction of thickness scale) up to the working default so the bonus can actually catch one block.
+            if (Current.PlayerFilterSealedBarrierThinFactor < 1f)
+                Current.PlayerFilterSealedBarrierThinFactor = 1.5f;
+            Current.PlayerFilterSealedBarrierThinFactor = Clamp(Current.PlayerFilterSealedBarrierThinFactor, 1f, 6f);
             Current.PlayerFilterBlockAirBrightness = Clamp(Current.PlayerFilterBlockAirBrightness, 0f, 1f);
             Current.PlayerFilterBlockAirLengthMuffle = Clamp(Current.PlayerFilterBlockAirLengthMuffle, 0f, 0.1f);
             Current.PlayerFilterBlockRepositionSlewMs = Clamp(Current.PlayerFilterBlockRepositionSlewMs, 1f, 2000f);
