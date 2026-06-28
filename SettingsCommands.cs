@@ -210,6 +210,11 @@ namespace RealisticSoundPlus
                     case "drylevel":
                         SetBlockDryLevel(parts);
                         break;
+                    case "blockwet":
+                    case "blockwetlevel":
+                    case "wetlevel":
+                        SetBlockWetLevel(parts);
+                        break;
                     case "reverbroute":
                     case "reverbmode":
                     case "reverbbus":
@@ -388,6 +393,21 @@ namespace RealisticSoundPlus
             SettingsManager.Save();
             V2DebugLog.WriteEvent("command", "block dry level " + level.ToString("0.00", CultureInfo.InvariantCulture));
             Notify("Block dry level " + level.ToString("0.00", CultureInfo.InvariantCulture) + ". " + V2GlobalReverbRuntime.FormatBlockSplitStatus());
+        }
+
+        private static void SetBlockWetLevel(string[] parts)
+        {
+            if (parts.Length < 2 || !float.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out float level))
+            {
+                Notify("Usage: /rsp blockwet <0..1>");
+                return;
+            }
+
+            level = level < 0f ? 0f : (level > 1f ? 1f : level);
+            SettingsManager.Current.BlockWetLevel = level;
+            SettingsManager.Save();
+            V2DebugLog.WriteEvent("command", "block wet level " + level.ToString("0.00", CultureInfo.InvariantCulture));
+            Notify("Block wet (reverb) level " + level.ToString("0.00", CultureInfo.InvariantCulture) + ". " + V2GlobalReverbRuntime.FormatBlockSplitStatus());
         }
 
         private static void SetGlobalReverbRoute(string[] parts)

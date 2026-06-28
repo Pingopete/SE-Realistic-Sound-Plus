@@ -24,6 +24,7 @@ namespace RealisticSoundPlus.AudioEngineV2
         private static Type _audioType;
         private static Type _myAudioType;
         private static Type _submixVoiceType;
+        private static Type _submixVoiceFlagsType;
         private static Type _voiceSendDescriptorType;
         private static Type _reverbParametersType;
         private static Type _sharpReverbType;
@@ -623,9 +624,11 @@ namespace RealisticSoundPlus.AudioEngineV2
         // rejected the send on the processing-stage rule), so block dry currently bypasses the inline reverb.
         // ===================================================================================================
         private static readonly Dictionary<IMySourceVoice, BlockSplitRoute> BlockSplitRoutes = new Dictionary<IMySourceVoice, BlockSplitRoute>();
-        private static object _blockSplitSubmix;
-        private static object _blockSplitOutputTarget;   // what the split submix forwards to (game or master)
-        private static string _blockSplitTargetName = "?";
+        private static object _blockSplitSubmix;   // fan-out: block voices route here, sends (unity) to dry + reverb buses
+        private static object _blockDrySubmix;     // dry leg: volume = D (drops with occlusion) -> master
+        private static object _blockReverbBus;     // wet leg: volume = W (held), carries the wet-only reverb -> master
+        private static object _blockReverbEffect;  // V2LiveReverbPocProcessor (wet-only) attached to _blockReverbBus
+        private static string _blockSplitGraph = "?";   // describes which routes the XAudio2 stage rules accepted
         private static bool _blockSplitDisabledForSession;
         private static string _blockSplitStatus = "blocksplit=off";
         private static DateTime _lastBlockSplitLogUtc = DateTime.MinValue;
@@ -683,9 +686,12 @@ namespace RealisticSoundPlus.AudioEngineV2
                 return;
             }
 
-            // Dry-level knob: scales everything flowing through the split submix. (Reverb persistence comes later
-            // when this submix also feeds a held wet bus; for now this just proves independent dry control.)
-            TrySetVoiceVolume(_blockSplitSubmix, Clamp(settings.BlockDryLevel, 0f, 1f), out _);
+            // Independent dry/wet via the two child-bus VOLUMES (the split submix stays at unity and just fans out):
+            //   dry submix volume = D  (drops with occlusion)   ;   reverb bus volume = W  (held / rises with occlusion)
+            TrySetVoiceVolume(_blockSplitSubmix, 1f, out _);
+            TrySetVoiceVolume(_blockDrySubmix, Clamp(settings.BlockDryLevel, 0f, 1f), out _);
+            TrySetVoiceVolume(_blockReverbBus, Clamp(settings.BlockWetLevel, 0f, 1f), out _);
+            (_blockReverbEffect as V2LiveReverbPocProcessor)?.UpdateFromSettings(settings);
 
             MaintainBlockSplitTargets(gameVoice);
         }
@@ -790,7 +796,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                         added++;
                         active++;
                         onSplit++;
-                        V2DebugLog.WriteEvent("block-split", "initial-route " + Trim(cue, 28) + " -> split/" + _blockSplitTargetName);
+                        V2DebugLog.WriteEvent("block-split", "initial-route " + Trim(cue, 28) + " -> split");
                     }
                 }
 
@@ -798,8 +804,8 @@ namespace RealisticSoundPlus.AudioEngineV2
                 _blockSplitReheals += reheal;
                 _blockSplitStatus = string.Format(
                     CultureInfo.InvariantCulture,
-                    "blocksplit=on/{0} active={1} onSplit={2} added={3} reheal={4} totalReheal={5}{6}",
-                    _blockSplitTargetName,
+                    "blocksplit=on [{0}] active={1} onSplit={2} added={3} reheal={4} totalReheal={5}{6}",
+                    _blockSplitGraph,
                     active,
                     onSplit,
                     added,
@@ -820,15 +826,24 @@ namespace RealisticSoundPlus.AudioEngineV2
             }
         }
 
+        // Build the dry/wet graph once:  split (stage 0, unity fan-out)  ->  { dry submix (vol D), reverb bus (vol W) }
+        // -> master.  The dry/reverb buses are at a HIGHER processing stage so the split is allowed to send to them
+        // (the stage rule that rejected split->game earlier); both then feed the mastering voice (no stage limit).
         private static bool EnsureBlockSplitSubmix(object device, object gameVoice, object masterVoice, out string status)
         {
             if (_blockSplitSubmix != null)
             {
-                status = "blocksplit=submix-ready/" + _blockSplitTargetName;
+                status = "blocksplit=graph-ready [" + _blockSplitGraph + "]";
                 return true;
             }
 
-            object submix = null;
+            if (masterVoice == null)
+            {
+                status = "blocksplit=master-missing";
+                return false;
+            }
+
+            object split = null, dry = null, reverb = null, reverbEffect = null;
             try
             {
                 int channels = Math.Max(1, ResolveSourceInputChannelCount(gameVoice));
@@ -837,51 +852,93 @@ namespace RealisticSoundPlus.AudioEngineV2
                     sampleRate = ResolveVoiceInputSampleRate(masterVoice);
                 if (sampleRate <= 0)
                     sampleRate = 48000;
+                sampleRate = Math.Max(8000, sampleRate);
 
-                submix = Activator.CreateInstance(_submixVoiceType, device, channels, Math.Max(8000, sampleRate));
-
-                // Prefer forwarding through the game submix so block dry keeps the inline reverb + game volume. A
-                // submix can only send to another submix at a HIGHER processing stage, so this may be rejected;
-                // fall back to the mastering voice (bypasses the inline reverb but still proves the routing path).
-                MethodInfo setOutput = ResolveSourceSetOutputVoicesMethod(submix.GetType());
-                object target = null;
-                string targetName = "default-master";
-                if (setOutput != null)
+                dry = CreateSubmixAtStage(device, channels, sampleRate, 1);
+                reverb = CreateSubmixAtStage(device, channels, sampleRate, 1);
+                split = CreateSubmixAtStage(device, channels, sampleRate, 0);
+                if (dry == null || reverb == null || split == null)
                 {
-                    if (TrySetSubmixOutput(submix, setOutput, gameVoice))
+                    DisposeComObject(reverb); DisposeComObject(dry); DisposeComObject(split);
+                    status = "blocksplit=submix-create-failed";
+                    V2DebugLog.WriteEvent("block-split", status);
+                    return false;
+                }
+
+                // Wet-ONLY reverb on the reverb bus (it carries reflections only; the dry leg goes direct to master).
+                string verbStatus = "verb=skip";
+                MethodInfo setChain = ResolveSourceSetEffectChainMethod(reverb.GetType());
+                if (setChain != null && _effectDescriptorType != null)
+                {
+                    reverbEffect = new V2LiveReverbPocProcessor(channels, sampleRate, true);
+                    (reverbEffect as V2LiveReverbPocProcessor)?.UpdateFromSettings(SettingsManager.Current);
+                    verbStatus = TrySetSourceReverbEffectChain(reverb, setChain, reverbEffect, out string cs) ? "verb=on" : ("verb=" + cs);
+                    if (verbStatus != "verb=on")
                     {
-                        target = gameVoice;
-                        targetName = "game";
-                    }
-                    else if (masterVoice != null && TrySetSubmixOutput(submix, setOutput, masterVoice))
-                    {
-                        target = masterVoice;
-                        targetName = "master";
+                        DisposeComObject(reverbEffect);
+                        reverbEffect = null;
                     }
                 }
 
-                _blockSplitSubmix = submix;
-                _blockSplitOutputTarget = target;
-                _blockSplitTargetName = targetName;
-                status = "blocksplit=submix-created/" + targetName;
-                V2DebugLog.WriteEvent("block-split", status + " ch=" + channels.ToString(CultureInfo.InvariantCulture) + " rate=" + sampleRate.ToString(CultureInfo.InvariantCulture));
+                bool dryToMaster = TrySetSubmixOutputs(dry, masterVoice);
+                bool verbToMaster = TrySetSubmixOutputs(reverb, masterVoice);
+                bool splitToChildren = TrySetSubmixOutputs(split, dry, reverb);
+
+                _blockSplitSubmix = split;
+                _blockDrySubmix = dry;
+                _blockReverbBus = reverb;
+                _blockReverbEffect = reverbEffect;
+                _blockSplitGraph = string.Format(
+                    CultureInfo.InvariantCulture,
+                    "{0}ch/{1}Hz dry->m={2} verb->m={3} split->dw={4} {5}",
+                    channels, sampleRate, dryToMaster ? "Y" : "N", verbToMaster ? "Y" : "N", splitToChildren ? "Y" : "N", verbStatus);
+                status = "blocksplit=graph-built [" + _blockSplitGraph + "]";
+                V2DebugLog.WriteEvent("block-split", status);
                 return true;
             }
             catch (Exception ex)
             {
-                DisposeComObject(submix);
+                DisposeComObject(reverbEffect); DisposeComObject(reverb); DisposeComObject(dry); DisposeComObject(split);
                 _blockSplitDisabledForSession = true;
-                status = "blocksplit=submix-failed:" + ex.GetType().Name;
+                status = "blocksplit=graph-failed:" + ex.GetType().Name;
                 V2DebugLog.WriteEvent("block-split", status + " " + ex.Message);
                 return false;
             }
         }
 
-        private static bool TrySetSubmixOutput(object submix, MethodInfo setOutput, object target)
+        private static object CreateSubmixAtStage(object device, int channels, int sampleRate, int stage)
         {
+            channels = Math.Max(1, channels);
+            sampleRate = Math.Max(8000, sampleRate);
+            if (stage > 0 && _submixVoiceFlagsType != null)
+            {
+                try
+                {
+                    object flagsNone = Enum.ToObject(_submixVoiceFlagsType, 0);
+                    return Activator.CreateInstance(_submixVoiceType, device, channels, sampleRate, flagsNone, stage);
+                }
+                catch (Exception ex)
+                {
+                    V2DebugLog.WriteEvent("block-split", "staged-submix-failed stage=" + stage + " " + ex.GetType().Name + ": " + ex.Message);
+                }
+            }
+
+            try { return Activator.CreateInstance(_submixVoiceType, device, channels, sampleRate); }
+            catch { return null; }
+        }
+
+        private static bool TrySetSubmixOutputs(object submix, params object[] targets)
+        {
+            if (submix == null || targets == null || targets.Length == 0)
+                return false;
+
+            MethodInfo setOutput = ResolveSourceSetOutputVoicesMethod(submix.GetType());
+            if (setOutput == null)
+                return false;
+
             try
             {
-                object descriptorArray = CreateVoiceSendDescriptorArray(target);
+                object descriptorArray = CreateVoiceSendDescriptorArray(targets);
                 if (descriptorArray == null)
                     return false;
 
@@ -949,10 +1006,16 @@ namespace RealisticSoundPlus.AudioEngineV2
                     RestoreBlockSplitVoice(voices[i], reason);
             }
 
+            // Voices are restored to the game submix above; now tear the graph down (split first — it feeds the others).
             DisposeComObject(_blockSplitSubmix);
+            DisposeComObject(_blockDrySubmix);
+            DisposeComObject(_blockReverbBus);
+            DisposeComObject(_blockReverbEffect);
             _blockSplitSubmix = null;
-            _blockSplitOutputTarget = null;
-            _blockSplitTargetName = "?";
+            _blockDrySubmix = null;
+            _blockReverbBus = null;
+            _blockReverbEffect = null;
+            _blockSplitGraph = "?";
             _blockSplitStatus = "blocksplit=restored:" + reason;
             V2DebugLog.WriteEvent("block-split", _blockSplitStatus);
         }
@@ -980,6 +1043,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             _applyReverbField = type.GetField("m_applyReverb", InstanceMembers);
             _enableReverbField = type.GetField("m_enableReverb", InstanceMembers);
             _submixVoiceType = ResolveType("SharpDX.XAudio2.SubmixVoice");
+            _submixVoiceFlagsType = ResolveType("SharpDX.XAudio2.SubmixVoiceFlags");
             _voiceSendDescriptorType = ResolveType("SharpDX.XAudio2.VoiceSendDescriptor");
             _reverbParametersType = ResolveType("SharpDX.XAudio2.Fx.ReverbParameters");
             _sharpReverbType = ResolveType("SharpDX.XAudio2.Fx.Reverb");
