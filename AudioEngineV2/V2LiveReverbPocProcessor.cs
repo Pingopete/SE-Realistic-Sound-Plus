@@ -49,6 +49,10 @@ namespace RealisticSoundPlus.AudioEngineV2
         private float _echoFeedback;
         private float _lowPassA;
         private float _wetScale;
+        // Block dry/wet split: independent dry-passthrough and wet (reverb) gains. Default 1/1 leaves the inline
+        // reverb instance untouched; the block reverb instance drives these from occlusion (dry down, wet up).
+        private volatile float _blockDryGain = 1f;
+        private volatile float _blockWetMix = 1f;
         private float _tailEnergy;
         private float _lastRoomSize;
         private float _lastRadius;
@@ -160,6 +164,14 @@ namespace RealisticSoundPlus.AudioEngineV2
                     _lastRamp,
                     _lastFormatStatus);
             }
+        }
+
+        // Sets the block dry/wet split gains (non-wet-only instances). dryGain scales the direct passthrough,
+        // wetMix scales the reverb. Occluded -> low dry / high wet so the source reads mostly as its reverb tail.
+        public void SetBlockDryWet(float dryGain, float wetMix)
+        {
+            _blockDryGain = dryGain < 0f ? 0f : dryGain;
+            _blockWetMix = wetMix < 0f ? 0f : wetMix;
         }
 
         public void UpdateFromSettings(RealisticSoundPlusSettings settings)
@@ -395,7 +407,7 @@ namespace RealisticSoundPlus.AudioEngineV2
                     float wet = channels == 1
                         ? (earlyL + earlyR + lateL + lateR) * 0.5f + echo
                         : (ch == 0 ? earlyL + lateL : earlyR + lateR) + echo;
-                    float mixed = _wetOnly ? wet : source + wet;
+                    float mixed = _wetOnly ? wet : _blockDryGain * source + _blockWetMix * wet;
                     mixed = ClampOutput(SoftLimit(mixed));
                     outSamples[frameBase + ch] = mixed;
 
