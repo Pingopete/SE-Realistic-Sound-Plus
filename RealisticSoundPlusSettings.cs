@@ -135,6 +135,10 @@ namespace RealisticSoundPlus
         public bool FilterOverlayEnabled { get; set; } = false;
         public bool V2DebugLogEnabled { get; set; } = true;
         public bool GlobalReverbEnabled { get; set; } = true;
+        // Experimental block dry/wet split: reroute block (SoundBlock/jukebox) voices onto an RSP-owned submix so
+        // the DRY component can be pulled down independently of the reverb. Default OFF until the routing is proven.
+        public bool BlockDryWetSplitEnabled { get; set; } = false;
+        public float BlockDryLevel { get; set; } = 1f; // 0..1 level of the rerouted block dry submix (1 = unchanged)
         public string GlobalReverbRoute { get; set; } = "custommaster";
         public float GlobalReverbDiffusion { get; set; } = 0.419590652f;
         public float GlobalReverbRoomSize { get; set; } = 1f;

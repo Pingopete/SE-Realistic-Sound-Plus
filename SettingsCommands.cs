@@ -200,6 +200,16 @@ namespace RealisticSoundPlus
                     case "reverbtest":
                         SetGlobalReverb(parts);
                         break;
+                    case "blocksplit":
+                    case "blockdrywet":
+                    case "drywet":
+                        SetBlockDryWetSplit(parts);
+                        break;
+                    case "blockdry":
+                    case "blockdrylevel":
+                    case "drylevel":
+                        SetBlockDryLevel(parts);
+                        break;
                     case "reverbroute":
                     case "reverbmode":
                     case "reverbbus":
@@ -346,6 +356,38 @@ namespace RealisticSoundPlus
 
             V2DebugLog.WriteEvent("command", "global reverb " + (SettingsManager.Current.GlobalReverbEnabled ? "on" : "off"));
             Notify(SettingsManager.Summary());
+        }
+
+        private static void SetBlockDryWetSplit(string[] parts)
+        {
+            string arg = parts.Length < 2 ? null : parts[1].Trim().ToLowerInvariant();
+            bool on = arg == "on" || arg == "1" || arg == "true" || arg == "enable" || arg == "enabled";
+            bool off = arg == "off" || arg == "0" || arg == "false" || arg == "disable" || arg == "disabled";
+            if (!on && !off)
+            {
+                Notify("Usage: /rsp blocksplit <on|off>");
+                return;
+            }
+
+            SettingsManager.Current.BlockDryWetSplitEnabled = on;
+            SettingsManager.Save();
+            V2DebugLog.WriteEvent("command", "block dry/wet split " + (on ? "on" : "off"));
+            Notify("Block dry/wet split " + (on ? "ON" : "OFF") + ". " + V2GlobalReverbRuntime.FormatBlockSplitStatus());
+        }
+
+        private static void SetBlockDryLevel(string[] parts)
+        {
+            if (parts.Length < 2 || !float.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out float level))
+            {
+                Notify("Usage: /rsp blockdry <0..1>");
+                return;
+            }
+
+            level = level < 0f ? 0f : (level > 1f ? 1f : level);
+            SettingsManager.Current.BlockDryLevel = level;
+            SettingsManager.Save();
+            V2DebugLog.WriteEvent("command", "block dry level " + level.ToString("0.00", CultureInfo.InvariantCulture));
+            Notify("Block dry level " + level.ToString("0.00", CultureInfo.InvariantCulture) + ". " + V2GlobalReverbRuntime.FormatBlockSplitStatus());
         }
 
         private static void SetGlobalReverbRoute(string[] parts)

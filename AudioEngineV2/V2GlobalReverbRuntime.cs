@@ -603,6 +603,330 @@ namespace RealisticSoundPlus.AudioEngineV2
             return false;
         }
 
+        // ===================================================================================================
+        // Block dry/wet split PROBE (experimental, default OFF — gated on settings.BlockDryWetSplitEnabled)
+        // ---------------------------------------------------------------------------------------------------
+        // Goal: pull a block sound's DRY path onto an RSP-owned submix so we can attenuate it independently of
+        // the reverb (so an occluded jukebox upstairs reads mostly as its reverb tail). The load-bearing unknown
+        // is whether REPLACING a live 3D voice's single output send (game submix -> our submix) is stable. The
+        // per-source APPEND the old global-bus route used crashed because the engine's per-frame Apply3D calls
+        // SetOutputMatrix(null,..) assuming exactly ONE destination; a 2nd send makes null ambiguous. A single-
+        // destination REPLACE preserves that one-destination invariant, so this probe tests it empirically with
+        // heavy logging + a hard panic-restore, scoped to SoundBlock/jukebox cues only for the first pass.
+        //   - Enabling at BlockDryLevel = 1 should be INAUDIBLE (the split submix forwards transparently).
+        //   - Lowering BlockDryLevel should drop only block sounds (proves independent dry control).
+        //   - The log channel "block-split" records routed/reverted counts: if "reverted" climbs every frame the
+        //     engine is re-asserting the destination in Apply3D and replace does NOT stick.
+        // ===================================================================================================
+        private static readonly Dictionary<IMySourceVoice, BlockSplitRoute> BlockSplitRoutes = new Dictionary<IMySourceVoice, BlockSplitRoute>();
+        private static object _blockSplitSubmix;
+        private static object _blockSplitOutputTarget;   // what the split submix forwards to (game or master)
+        private static string _blockSplitTargetName = "?";
+        private static bool _blockSplitDisabledForSession;
+        private static string _blockSplitStatus = "blocksplit=off";
+        private static DateTime _lastBlockSplitLogUtc = DateTime.MinValue;
+        private static int _blockSplitReversions;
+
+        private sealed class BlockSplitRoute
+        {
+            public object NativeSourceVoice;
+            public object OriginalOutputVoices;   // saved VoiceSendDescriptor[] to restore the voice's dry route
+            public DateTime LastSeenUtc;
+            public string CueName;
+        }
+
+        public static string FormatBlockSplitStatus()
+        {
+            return _blockSplitStatus;
+        }
+
+        public static void UpdateBlockDryWetSplit()
+        {
+            object audio = MyAudio.Static;
+            if (audio == null)
+                return;
+
+            Resolve(audio.GetType());
+
+            RealisticSoundPlusSettings settings = SettingsManager.Current;
+            if (settings == null || !settings.BlockDryWetSplitEnabled || _blockSplitDisabledForSession)
+            {
+                if (BlockSplitRoutes.Count > 0 || _blockSplitSubmix != null)
+                    RestoreBlockSplit(_blockSplitDisabledForSession ? "session-disabled" : "disabled");
+                return;
+            }
+
+            if (_submixVoiceType == null || _voiceSendDescriptorType == null)
+            {
+                _blockSplitStatus = "blocksplit=types-missing";
+                return;
+            }
+
+            object gameVoice = _gameAudioVoiceField?.GetValue(audio);
+            object masterVoice = _masterVoiceField?.GetValue(audio);
+            object device = ResolveAudioEngine(audio) ?? ResolveSourceVoiceDevice(gameVoice) ?? ResolveSourceVoiceDevice(masterVoice);
+            if (gameVoice == null || device == null)
+            {
+                _blockSplitStatus = "blocksplit=device-missing";
+                return;
+            }
+
+            if (!EnsureBlockSplitSubmix(device, gameVoice, masterVoice, out string ensureStatus))
+            {
+                _blockSplitStatus = ensureStatus;
+                return;
+            }
+
+            // Dry-level knob: scales everything flowing through the split submix. (Reverb persistence comes later
+            // when this submix also feeds a held wet bus; for now this just proves independent dry control.)
+            TrySetVoiceVolume(_blockSplitSubmix, Clamp(settings.BlockDryLevel, 0f, 1f), out _);
+
+            RouteBlockVoicesToSplit(gameVoice);
+        }
+
+        private static bool EnsureBlockSplitSubmix(object device, object gameVoice, object masterVoice, out string status)
+        {
+            if (_blockSplitSubmix != null)
+            {
+                status = "blocksplit=submix-ready/" + _blockSplitTargetName;
+                return true;
+            }
+
+            object submix = null;
+            try
+            {
+                int channels = Math.Max(1, ResolveSourceInputChannelCount(gameVoice));
+                int sampleRate = ResolveVoiceInputSampleRate(gameVoice);
+                if (sampleRate <= 0)
+                    sampleRate = ResolveVoiceInputSampleRate(masterVoice);
+                if (sampleRate <= 0)
+                    sampleRate = 48000;
+
+                submix = Activator.CreateInstance(_submixVoiceType, device, channels, Math.Max(8000, sampleRate));
+
+                // Prefer forwarding through the game submix so block dry keeps the inline reverb + game volume. A
+                // submix can only send to another submix at a HIGHER processing stage, so this may be rejected;
+                // fall back to the mastering voice (bypasses the inline reverb but still proves the routing path).
+                MethodInfo setOutput = ResolveSourceSetOutputVoicesMethod(submix.GetType());
+                object target = null;
+                string targetName = "default-master";
+                if (setOutput != null)
+                {
+                    if (TrySetSubmixOutput(submix, setOutput, gameVoice))
+                    {
+                        target = gameVoice;
+                        targetName = "game";
+                    }
+                    else if (masterVoice != null && TrySetSubmixOutput(submix, setOutput, masterVoice))
+                    {
+                        target = masterVoice;
+                        targetName = "master";
+                    }
+                }
+
+                _blockSplitSubmix = submix;
+                _blockSplitOutputTarget = target;
+                _blockSplitTargetName = targetName;
+                status = "blocksplit=submix-created/" + targetName;
+                V2DebugLog.WriteEvent("block-split", status + " ch=" + channels.ToString(CultureInfo.InvariantCulture) + " rate=" + sampleRate.ToString(CultureInfo.InvariantCulture));
+                return true;
+            }
+            catch (Exception ex)
+            {
+                DisposeComObject(submix);
+                _blockSplitDisabledForSession = true;
+                status = "blocksplit=submix-failed:" + ex.GetType().Name;
+                V2DebugLog.WriteEvent("block-split", status + " " + ex.Message);
+                return false;
+            }
+        }
+
+        private static bool TrySetSubmixOutput(object submix, MethodInfo setOutput, object target)
+        {
+            try
+            {
+                object descriptorArray = CreateVoiceSendDescriptorArray(target);
+                if (descriptorArray == null)
+                    return false;
+
+                setOutput.Invoke(submix, new[] { descriptorArray });
+                return true;
+            }
+            catch (Exception ex)
+            {
+                V2DebugLog.WriteEvent("block-split", "submix-output-failed " + ex.GetType().Name + ": " + ex.Message);
+                return false;
+            }
+        }
+
+        private static void RouteBlockVoicesToSplit(object gameVoice)
+        {
+            if (_blockSplitSubmix == null || MyAudio.Static == null)
+                return;
+
+            DateTime now = DateTime.UtcNow;
+            int routed = 0, reverted = 0, active = 0;
+            string lastFail = null;
+
+            try
+            {
+                MyPlayedSounds played = MyAudio.Static.GetCurrentlyPlayedSounds();
+                List<IMySourceVoice> voices = played.Sound;
+
+                if (voices != null)
+                {
+                    for (int i = 0; i < voices.Count; i++)
+                    {
+                        IMySourceVoice voice = voices[i];
+                        if (voice == null || !voice.IsValid || !voice.IsPlaying)
+                            continue;
+
+                        string cue = voice.CueEnum.ToString();
+                        if (!V2AuxCueClassifier.IsSoundBlockCue(cue))
+                            continue;
+
+                        object[] descriptors = ResolveOutputVoiceDescriptors(voice);
+                        if (descriptors == null)
+                            continue;
+
+                        bool tracked = BlockSplitRoutes.TryGetValue(voice, out BlockSplitRoute route);
+                        bool onSplit = DescriptorsContainOutputVoice(descriptors, _blockSplitSubmix);
+
+                        if (tracked && onSplit)
+                        {
+                            route.LastSeenUtc = now;
+                            active++;
+                            continue;
+                        }
+
+                        // Only reroute voices currently feeding the game submix (leave HUD/music/foreign routes).
+                        if (!onSplit && !DescriptorsContainOutputVoice(descriptors, gameVoice))
+                            continue;
+
+                        if (tracked && !onSplit)
+                            reverted++; // engine reset our output back to game in Apply3D — re-apply and count it
+
+                        if (!RspDynamicAudioFilters.TryResolveNativeSourceVoice(voice, out object sourceVoice) || sourceVoice == null)
+                            continue;
+
+                        MethodInfo setOutput = ResolveSourceSetOutputVoicesMethod(sourceVoice.GetType());
+                        if (setOutput == null)
+                            continue;
+
+                        object original = tracked ? route.OriginalOutputVoices : CreateVoiceSendDescriptorArrayFromDescriptors(descriptors);
+                        object replacement = CreateVoiceSendDescriptorArray(_blockSplitSubmix);
+                        if (original == null || replacement == null)
+                            continue;
+
+                        try
+                        {
+                            setOutput.Invoke(sourceVoice, new[] { replacement });
+                            BlockSplitRoutes[voice] = new BlockSplitRoute
+                            {
+                                NativeSourceVoice = sourceVoice,
+                                OriginalOutputVoices = original,
+                                LastSeenUtc = now,
+                                CueName = cue
+                            };
+                            routed++;
+                            active++;
+                        }
+                        catch (Exception ex)
+                        {
+                            lastFail = ex.GetType().Name;
+                            V2DebugLog.WriteEvent("block-split", "route-failed " + Trim(cue, 28) + " " + ex.GetType().Name + ": " + ex.Message);
+                        }
+                    }
+                }
+
+                PurgeStaleBlockSplitRoutes(now);
+                _blockSplitReversions += reverted;
+                _blockSplitStatus = string.Format(
+                    CultureInfo.InvariantCulture,
+                    "blocksplit=on/{0} active={1} routed={2} reverted={3} totalRev={4}{5}",
+                    _blockSplitTargetName,
+                    active,
+                    routed,
+                    reverted,
+                    _blockSplitReversions,
+                    lastFail == null ? string.Empty : " lastFail=" + lastFail);
+
+                if (routed > 0 || reverted > 0 || now - _lastBlockSplitLogUtc > TimeSpan.FromSeconds(2))
+                {
+                    _lastBlockSplitLogUtc = now;
+                    V2DebugLog.WriteEvent("block-split", _blockSplitStatus);
+                }
+            }
+            catch (Exception ex)
+            {
+                _blockSplitStatus = "blocksplit=scan-failed:" + ex.GetType().Name;
+                V2DebugLog.WriteEvent("block-split", _blockSplitStatus + " " + ex.Message);
+            }
+        }
+
+        private static void PurgeStaleBlockSplitRoutes(DateTime now)
+        {
+            if (BlockSplitRoutes.Count == 0)
+                return;
+
+            List<IMySourceVoice> remove = null;
+            foreach (KeyValuePair<IMySourceVoice, BlockSplitRoute> pair in BlockSplitRoutes)
+            {
+                IMySourceVoice voice = pair.Key;
+                if (voice == null || !voice.IsValid || !voice.IsPlaying || now - pair.Value.LastSeenUtc > TimeSpan.FromSeconds(2))
+                {
+                    if (remove == null)
+                        remove = new List<IMySourceVoice>();
+                    remove.Add(voice);
+                }
+            }
+
+            if (remove == null)
+                return;
+
+            for (int i = 0; i < remove.Count; i++)
+                RestoreBlockSplitVoice(remove[i], "stale");
+        }
+
+        private static void RestoreBlockSplitVoice(IMySourceVoice voice, string reason)
+        {
+            if (voice == null || !BlockSplitRoutes.TryGetValue(voice, out BlockSplitRoute route))
+                return;
+
+            BlockSplitRoutes.Remove(voice);
+
+            // Only touch the live voice while it is still valid; a stopped voice has already been recycled.
+            if (voice.IsValid && route.NativeSourceVoice != null && route.OriginalOutputVoices != null)
+            {
+                try
+                {
+                    MethodInfo setOutput = ResolveSourceSetOutputVoicesMethod(route.NativeSourceVoice.GetType());
+                    setOutput?.Invoke(route.NativeSourceVoice, new[] { route.OriginalOutputVoices });
+                }
+                catch (Exception ex)
+                {
+                    V2DebugLog.WriteEvent("block-split", "restore-failed " + reason + " " + ex.GetType().Name + ": " + ex.Message);
+                }
+            }
+        }
+
+        public static void RestoreBlockSplit(string reason)
+        {
+            if (BlockSplitRoutes.Count > 0)
+            {
+                List<IMySourceVoice> voices = new List<IMySourceVoice>(BlockSplitRoutes.Keys);
+                for (int i = 0; i < voices.Count; i++)
+                    RestoreBlockSplitVoice(voices[i], reason);
+            }
+
+            DisposeComObject(_blockSplitSubmix);
+            _blockSplitSubmix = null;
+            _blockSplitOutputTarget = null;
+            _blockSplitTargetName = "?";
+            _blockSplitStatus = "blocksplit=restored:" + reason;
+            V2DebugLog.WriteEvent("block-split", _blockSplitStatus);
+        }
+
         private static bool CanApply => _applyReverbProperty != null && _enableReverbProperty != null && _setReverbParametersMethod != null;
 
         private static void Resolve(Type type)

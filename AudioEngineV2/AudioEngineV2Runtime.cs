@@ -136,6 +136,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             V2PlayerEnvironmentTelemetry.Update(_listener);
             V2PlayerFilterRuntime.Update();
             V2AuxSourceOcclusionTelemetry.Update();
+            V2GlobalReverbRuntime.UpdateBlockDryWetSplit();
             LogListenerTransitionIfChanged(_listener);
             if (_listener.VanillaFallback)
             {
