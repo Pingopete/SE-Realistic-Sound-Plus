@@ -5,3 +5,7 @@ obj/
 *.suo
 *.cache
 *.log
+
+# Local-only staging area and editor workspace (never commit)
+staged_mods/
+Realistic Sound Plus.code-workspace
