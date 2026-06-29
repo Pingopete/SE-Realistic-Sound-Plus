@@ -107,6 +107,38 @@ namespace RealisticSoundPlus.AudioEngineV2
             }
         }
 
+        // Lightweight name check: is the block at this cell a window or panel? Used by the env sky-probe to boost the
+        // muffle of thin sealed glazing/panels (a closed pane seals far more than its geometric thinness implies).
+        public static bool IsWindowOrPanelAtCell(IMyCubeGrid grid, Vector3I cell)
+        {
+            return IsWindowOrPanelSubtype(GetSubtypeAtCell(grid, cell));
+        }
+
+        // The block subtype name at a cell (or null). Exposed so callers can diagnose what a ray actually hit.
+        public static string GetSubtypeAtCell(IMyCubeGrid grid, Vector3I cell)
+        {
+            if (grid == null)
+                return null;
+            try
+            {
+                IMySlimBlock slim = grid.GetCubeBlock(cell);
+                Sandbox.Definitions.MyCubeBlockDefinition def = slim?.BlockDefinition as Sandbox.Definitions.MyCubeBlockDefinition;
+                return def?.Id.SubtypeName;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        public static bool IsWindowOrPanelSubtype(string subtype)
+        {
+            if (string.IsNullOrEmpty(subtype))
+                return false;
+            return subtype.IndexOf("window", StringComparison.OrdinalIgnoreCase) >= 0
+                || subtype.IndexOf("panel", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
         // Resolves the airtight room containing a cell and returns its world-space geometry, cached by room
         // identity (rooms are stable objects between topology changes) with a short TTL and a block-count
         // invalidation so a remodelled room is recomputed.
@@ -419,7 +451,7 @@ namespace RealisticSoundPlus.AudioEngineV2
 
                         // EXIT face: if the cell we are leaving is itself an occupied block, sound can only pass to
                         // `next` if that block is NOT airtight on its face toward next (next - current).
-                        if (currentSlim != null && IsFaceAirtight(currentSlim, next - current))
+                        if (currentSlim != null && IsFaceAirtight(currentSlim, current, next - current))
                             continue;
 
                         // Directional sealing: the block at `next` blocks entry only if airtight on the face toward
@@ -773,7 +805,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             if (!throughBlocks)
                 return -1;
 
-            if (IsFaceAirtight(slim, towardOpenNormal))
+            if (IsFaceAirtight(slim, cell, towardOpenNormal))
                 return -1; // this block's face toward the open cell is airtight -> blocks the path
 
             return 1 + (openBias < 0 ? 0 : openBias);
@@ -785,7 +817,7 @@ namespace RealisticSoundPlus.AudioEngineV2
         // orientation) and look up IsCubePressurized. 1x1 blocks (every fragmenting culprit here) key the table at
         // local (0,0,0); multi-cell blocks fall back to "any airtight face" to avoid a risky per-cell offset
         // transform. No data for the face -> open (a non-structural block, sound passes).
-        private static bool IsFaceAirtight(IMySlimBlock slim, Vector3I gridNormal)
+        private static bool IsFaceAirtight(IMySlimBlock slim, Vector3I cell, Vector3I gridNormal)
         {
             try
             {
@@ -797,23 +829,51 @@ namespace RealisticSoundPlus.AudioEngineV2
                 if (airtight.HasValue)
                     return airtight.Value;
 
-                if (IsKnownOpenBlockType(def))
-                    return false; // stairs/catwalks/etc. always pass
+                // Solid functional machinery (air vents, gas generators, etc.) is solid to SOUND regardless of the
+                // game's room-pressurization table - which only marks such a block's mount face airtight and leaves
+                // the rest "open", so the flood used to treat an air vent as a 1-cell air gap and route sound
+                // straight through it. Seal all such machinery here (doors are excluded - their open/closed state is
+                // handled by the caller). This fixes the vent leak broadly, without naming individual subtypes.
+                if (IsSolidFunctionalBlock(slim))
+                    return true;
 
+                bool knownOpen = IsKnownOpenBlockType(def);
                 var table = def.IsCubePressurized;
-                if (table == null)
-                    return false; // no pressurization data -> not a sealing structural block
 
                 if (def.Size != Vector3I.One)
-                    return HasAnyAirtightFace(def); // multi-cell: conservative omnidirectional fallback
+                {
+                    // Multi-cell open block (e.g. a 2-high stairwell): use the game's PER-CELL, per-face
+                    // pressurization data so the block passes only through its genuine openings - not
+                    // omnidirectionally, and crucially not from beneath. Resolving which local cell `cell` maps to
+                    // lets the bottom cell's downward face stay sealed while the internal face between the two
+                    // cells stays open for the climb. Falls back to the previous behaviour (whitelist -> open, else
+                    // any-airtight-face) if the cell mapping can't be resolved, so it can never regress.
+                    if (table != null
+                        && TryResolveLocalCellOffset(slim, def, cell, out Vector3I localOffset)
+                        && table.TryGetValue(localOffset, out var perCellFaces)
+                        && perCellFaces != null)
+                    {
+                        Vector3I localNormalMulti = ToLocalNormal(slim, gridNormal);
+                        Sandbox.Definitions.MyCubeBlockDefinition.MyCubePressurizationMark markMulti;
+                        if (perCellFaces.TryGetValue(localNormalMulti, out markMulti))
+                            return markMulti != Sandbox.Definitions.MyCubeBlockDefinition.MyCubePressurizationMark.NotPressurized;
+                        return false; // no entry for this face -> open
+                    }
+
+                    return knownOpen ? false : HasAnyAirtightFace(def);
+                }
+
+                // 1x1 block.
+                if (knownOpen)
+                    return false; // small open structural families (catwalk/railing/passage) pass on all faces - unchanged
+                if (table == null)
+                    return false; // no pressurization data -> not a sealing structural block
 
                 // Grid-space face normal (a unit axis: current - next) -> the block's LOCAL face normal, using the
                 // engine's own orientation mapping. Convention-proof: TransformDirectionInverse(gridDir) gives the
                 // local direction directly, so there is no hand-rolled matrix transpose to get the sign/axis wrong
                 // (which previously read solid floor faces as open and let the route punch through the floor).
-                Base6Directions.Direction gridDir = Base6Directions.GetDirection(gridNormal);
-                Base6Directions.Direction localDir = slim.Orientation.TransformDirectionInverse(gridDir);
-                Vector3I localNormal = Base6Directions.GetIntVector(localDir);
+                Vector3I localNormal = ToLocalNormal(slim, gridNormal);
 
                 Dictionary<Vector3I, Sandbox.Definitions.MyCubeBlockDefinition.MyCubePressurizationMark> faces;
                 if (!table.TryGetValue(Vector3I.Zero, out faces) || faces == null)
@@ -827,6 +887,73 @@ namespace RealisticSoundPlus.AudioEngineV2
             {
                 return true; // can't read it -> seal conservatively
             }
+        }
+
+        // A grid-space face normal -> the block's LOCAL face normal via the engine's own orientation mapping.
+        private static Vector3I ToLocalNormal(IMySlimBlock slim, Vector3I gridNormal)
+        {
+            Base6Directions.Direction gridDir = Base6Directions.GetDirection(gridNormal);
+            Base6Directions.Direction localDir = slim.Orientation.TransformDirectionInverse(gridDir);
+            return Base6Directions.GetIntVector(localDir);
+        }
+
+        // True if the block carries a functional machinery component (air vent, gas generator, assembler, ...).
+        // Such blocks are solid to sound even though the oxygen pressurization table marks most of their faces
+        // "open" (it only seals the mount face). Doors are NOT functional-sealed here: their open/closed state is
+        // resolved by the caller, so a closed door seals and an open one passes.
+        private static bool IsSolidFunctionalBlock(IMySlimBlock slim)
+        {
+            var fat = slim.FatBlock;
+            if (fat == null)
+                return false; // no machinery -> a slim structural/decorative block; let the table decide
+            if (fat is Sandbox.ModAPI.Ingame.IMyDoor)
+                return false;
+            return fat is Sandbox.ModAPI.Ingame.IMyFunctionalBlock;
+        }
+
+        // Map a grid cell occupied by a multi-cell block to that block's LOCAL cell offset (the outer key of the
+        // pressurization table). Rotates each local cell by the block's orientation and anchors the rotated set to
+        // the block's grid AABB min, so it is convention-proof (no hand-rolled transpose). Returns false if no
+        // local cell lands on `cell`, in which case the caller falls back to the omnidirectional behaviour.
+        private static bool TryResolveLocalCellOffset(IMySlimBlock slim, Sandbox.Definitions.MyCubeBlockDefinition def, Vector3I cell, out Vector3I localOffset)
+        {
+            localOffset = Vector3I.Zero;
+            try
+            {
+                Matrix rotation;
+                slim.Orientation.GetMatrix(out rotation); // local -> grid (pure rotation)
+                Vector3I size = def.Size;
+
+                Vector3I rotatedMin = new Vector3I(int.MaxValue, int.MaxValue, int.MaxValue);
+                for (int x = 0; x < size.X; x++)
+                    for (int y = 0; y < size.Y; y++)
+                        for (int z = 0; z < size.Z; z++)
+                            rotatedMin = Vector3I.Min(rotatedMin, RotateOffset(x, y, z, rotation));
+
+                for (int x = 0; x < size.X; x++)
+                    for (int y = 0; y < size.Y; y++)
+                        for (int z = 0; z < size.Z; z++)
+                        {
+                            Vector3I gridCell = slim.Min + (RotateOffset(x, y, z, rotation) - rotatedMin);
+                            if (gridCell == cell)
+                            {
+                                localOffset = new Vector3I(x, y, z);
+                                return true;
+                            }
+                        }
+
+                return false;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static Vector3I RotateOffset(int x, int y, int z, Matrix rotation)
+        {
+            Vector3 r = Vector3.TransformNormal(new Vector3(x, y, z), rotation);
+            return new Vector3I((int)Math.Round(r.X), (int)Math.Round(r.Y), (int)Math.Round(r.Z));
         }
 
         // Whether an occupied cell's block fully seals air (full armour cube, solid wall/floor). Uses the block

@@ -53,6 +53,13 @@ namespace RealisticSoundPlus
         public int PlayerEnvMapRaysPerUpdate { get; set; } = 16;
         public float PlayerFilterStructureThicknessScale { get; set; } = 1.15048516f;
         public float PlayerEnvStructureThicknessScale { get; set; } = 2.838953f;
+        // Window/panel wind-muffle boost: when a sky-probe ray's first hit is a window/panel block, its measured
+        // thickness is multiplied by (1 + this) before the transmission, so thin sealed glazing muffles like a real
+        // pane. 0 = use the true raycast thickness (no boost); higher = thicker = more muffle.
+        public float PlayerEnvWindowPanelBoost { get; set; } = 0f;
+        // Block-source equivalent of PlayerEnvWindowPanelBoost: thickens window/panel hits on the straight line to a
+        // block source so a window between you and it muffles like solid wall. Separate scalar from the env one.
+        public float PlayerFilterBlockWindowPanelBoost { get; set; } = 0f;
         public float PlayerFilterBlockStructureThicknessScale { get; set; } = 2.08563447f;
         public float PlayerFilterBlockOcclusionCurve { get; set; } = 0.429020733f;
         public float PlayerFilterBlockOcclusionSmoothingMs { get; set; } = 300f;
@@ -122,7 +129,12 @@ namespace RealisticSoundPlus
         public float V2SoftFadeRatio { get; set; } = 0.05477318f;
         public bool V2DetailEnabled { get; set; } = true;
         public bool V2DetailIdleEnabled { get; set; } = true;
-        public bool V2Detail2DPositionalTest { get; set; } = true;
+        // Default OFF: when ON (and inside a ship) this swaps the spatial 6-axis thruster detail emitters for a "local"
+        // 2D-positional cue variant played at the listener, which collapses all thruster sound to the centre of the
+        // ship. The spatial 3D emitters at the per-axis average thrust positions are the intended behaviour; this stays
+        // available as an experiment via the chat command but no longer overrides the default. (V2State2DPositionalTest
+        // below was already false - this just brings detail into line.)
+        public bool V2Detail2DPositionalTest { get; set; } = false;
         public bool V2StateEnabled { get; set; } = false;
         public bool V2State2DPositionalTest { get; set; } = false;
         public float V2DetailGain { get; set; } = 2.4459064f;
@@ -138,8 +150,18 @@ namespace RealisticSoundPlus
         // Experimental block dry/wet split: reroute block (SoundBlock/jukebox) voices onto an RSP-owned submix so
         // the DRY component can be pulled down independently of the reverb. Default OFF until the routing is proven.
         public bool BlockDryWetSplitEnabled { get; set; } = false;
-        public float BlockDryLevel { get; set; } = 1f; // 0..1 level of the rerouted block DRY submix (1 = unchanged)
-        public float BlockWetLevel { get; set; } = 0.6f; // 0..1 level of the block's held reverb (wet) bus
+        // Experimental per-VOICE block reverb test: attach the dry/wet reverb XAPO directly onto each block source
+        // voice's own effect chain (not a submix). Decisive question: does the source voice deliver its own audio to
+        // our XAPO (rawIn>0)? If yes, this sidesteps the hand-created-effect-submix wall. Default OFF.
+        public bool BlockSourceReverbEnabled { get; set; } = false;
+        public float BlockDryLevel { get; set; } = 1f; // dry CEILING (LOS, m=0): dryGain = BlockDryLevel * clamp01(1 - m*DryFalloffScale)
+        public float BlockWetLevel { get; set; } = 0.6f; // wet CEILING (fully occluded, m=1): wetGain = BlockWetLevel * m
+        // How much faster the dry fades than the air-path muffle (m). 1 = dry tracks the muffle exactly; >1 = dry drops
+        // off faster so the source collapses to reverb before it is fully muffled. dry hits 0 at m = 1/DryFalloffScale.
+        public float BlockDryFalloffScale { get; set; } = 2f;
+        // Per-block reverb present even in clear line of sight (0 = none, in-room reverb is the global system's job;
+        // 1 = full ceiling already in the room). The reverb crossfades from this floor up to full as the source occludes.
+        public float BlockWetInRoom { get; set; } = 0f;
         public string GlobalReverbRoute { get; set; } = "custommaster";
         public float GlobalReverbDiffusion { get; set; } = 0.419590652f;
         public float GlobalReverbRoomSize { get; set; } = 1f;
@@ -441,6 +463,11 @@ namespace RealisticSoundPlus
                 case "envthickness":
                 case "skythickness":
                 case "windthickness": value = settings.PlayerEnvStructureThicknessScale; return true;
+                case "envwindowpanel":
+                case "windowpanel":
+                case "windowmuffle": value = settings.PlayerEnvWindowPanelBoost; return true;
+                case "blockwindowpanel":
+                case "blockwindowmuffle": value = settings.PlayerFilterBlockWindowPanelBoost; return true;
                 case "playerfilterblockstructurethicknessscale":
                 case "blockstructurethickness":
                 case "blockthickness":
@@ -617,6 +644,14 @@ namespace RealisticSoundPlus
                 case "reverbroom": value = settings.GlobalReverbRoomSize; return true;
                 case "reverbwet":
                 case "reverbwetsend": value = settings.GlobalReverbWetSend; return true;
+                case "blockdry":
+                case "blockdrylevel": value = settings.BlockDryLevel; return true;
+                case "blockwet":
+                case "blockwetlevel": value = settings.BlockWetLevel; return true;
+                case "blockdryfalloff":
+                case "blockfalloff": value = settings.BlockDryFalloffScale; return true;
+                case "blockwetinroom":
+                case "blockinroom": value = settings.BlockWetInRoom; return true;
                 case "reverbdecay":
                 case "reverbdecayseconds": value = settings.GlobalReverbDecaySeconds; return true;
                 case "reverbearlydb":
@@ -831,6 +866,15 @@ namespace RealisticSoundPlus
                 case "skythickness":
                 case "windthickness":
                     Current.PlayerEnvStructureThicknessScale = value;
+                    break;
+                case "envwindowpanel":
+                case "windowpanel":
+                case "windowmuffle":
+                    Current.PlayerEnvWindowPanelBoost = value < 0f ? 0f : (value > 20f ? 20f : value);
+                    break;
+                case "blockwindowpanel":
+                case "blockwindowmuffle":
+                    Current.PlayerFilterBlockWindowPanelBoost = value < 0f ? 0f : (value > 20f ? 20f : value);
                     break;
                 case "playerfilterblockstructurethicknessscale":
                 case "blockstructurethickness":
@@ -1088,6 +1132,22 @@ namespace RealisticSoundPlus
                 case "globalreverbwet":
                 case "globalreverbwetsend":
                     Current.GlobalReverbWetSend = value;
+                    break;
+                case "blockdry":
+                case "blockdrylevel":
+                    Current.BlockDryLevel = value < 0f ? 0f : (value > 1f ? 1f : value);
+                    break;
+                case "blockwet":
+                case "blockwetlevel":
+                    Current.BlockWetLevel = value < 0f ? 0f : (value > 1f ? 1f : value);
+                    break;
+                case "blockdryfalloff":
+                case "blockfalloff":
+                    Current.BlockDryFalloffScale = value < 0.1f ? 0.1f : (value > 8f ? 8f : value);
+                    break;
+                case "blockwetinroom":
+                case "blockinroom":
+                    Current.BlockWetInRoom = value < 0f ? 0f : (value > 1f ? 1f : value);
                     break;
                 case "reverbdecay":
                 case "reverbdecayseconds":
@@ -1642,7 +1702,7 @@ namespace RealisticSoundPlus
             Current.EngineFilterHullRange = Clamp(Current.EngineFilterHullRange, 1f, 1000f);
             Current.EngineFilterHullDistanceCurve = Clamp(Current.EngineFilterHullDistanceCurve, 0.1f, 5f);
             Current.EngineFilterHullQ = Clamp(Current.EngineFilterHullQ, AudioEngineV2.RspDynamicAudioFilters.MinFilterQ, AudioEngineV2.RspDynamicAudioFilters.MaxFilterQ);
-            Current.EngineFilterAirEnvironmentOcclusionContribution = Clamp(Current.EngineFilterAirEnvironmentOcclusionContribution, 0f, 1f);
+            Current.EngineFilterAirEnvironmentOcclusionContribution = Clamp(Current.EngineFilterAirEnvironmentOcclusionContribution, 0f, 8f);
             Current.EngineFilterInteriorMaxFrequency = Clamp(Current.EngineFilterInteriorMaxFrequency, AudioEngineV2.RspDynamicAudioFilters.MinFilterFrequency, AudioEngineV2.RspDynamicAudioFilters.MaxFilterFrequency);
             Current.EngineFilterVacuumContactFrequency = Clamp(Current.EngineFilterVacuumContactFrequency, AudioEngineV2.RspDynamicAudioFilters.MinFilterFrequency, AudioEngineV2.RspDynamicAudioFilters.MaxFilterFrequency);
             Current.PlayerEnvRayLength = Clamp(Current.PlayerEnvRayLength, 5f, 1000f);

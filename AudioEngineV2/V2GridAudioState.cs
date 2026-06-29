@@ -262,8 +262,6 @@ namespace RealisticSoundPlus.AudioEngineV2
 
             bool hasCurrentOutput = TryReadCurrentThrustPercentage(thruster, out float currentPercentage);
             float currentOutput = hasCurrentOutput ? Clamp01(currentPercentage) : 0f;
-            bool hasForceOutput = TryReadPhysicalThrustPercentage(thruster, out float forcePercentage);
-            float forceOutput = hasForceOutput ? Clamp01(forcePercentage) : 0f;
 
             if (listener.HasMoveInput)
             {
@@ -275,12 +273,13 @@ namespace RealisticSoundPlus.AudioEngineV2
             }
 
             float outputThreshold = listener.SeatedInShip ? CurrentOutputAudibleThreshold : CurrentOutputNonSeatThreshold;
-            float actualOutput = Math.Max(currentOutput, forceOutput);
-            if (actualOutput > outputThreshold)
-            {
-                string source = forceOutput > currentOutput + 0.01f ? "force" : (listener.SeatedInShip ? "dmp" : "out");
-                return new DetailLoadSample(actualOutput, source);
-            }
+            // Drive the audio purely from CurrentThrustPercentage - the live commanded thrust (player input AND dampener
+            // correction), which is 0 when idle and rises with real firing. The old physical-force path is GONE:
+            // thrust-diag proved MyThrust.ThrustForceLength reports the thruster's RATED max force (a CONSTANT - forceLen
+            // == maxThr == maxEffectiveThrust even at curPct=0), so ThrustForceLength/max pinned to 1.00 and made every
+            // thruster roar at full while idle, ignoring throttle/dampener entirely.
+            if (currentOutput > outputThreshold)
+                return new DetailLoadSample(currentOutput, listener.SeatedInShip ? "dmp" : "out");
 
             return new DetailLoadSample(0f, thruster.IsWorking ? "idle" : "off");
         }
@@ -388,11 +387,31 @@ namespace RealisticSoundPlus.AudioEngineV2
 
         private static float GetMaxForce(MyThrust thruster)
         {
-            float maxForce = thruster?.BlockDefinition != null ? thruster.BlockDefinition.ForceMagnitude : 0f;
-            if (maxForce <= 0f && thruster != null)
-                maxForce = Math.Max(thruster.ThrustForceLength, 1f);
+            if (thruster == null)
+                return 1f;
 
-            return Math.Max(maxForce, 1f);
+            // Use the thruster's ACTUAL current max thrust (which includes thrust-upgrade multipliers and atmosphere/
+            // conveyor effects), NOT the base BlockDefinition.ForceMagnitude. With the base value, an upgraded
+            // thruster's real applied force (ThrustForceLength) EXCEEDS the denominator, so ThrustForceLength/base
+            // saturates to 1.00 even at partial thrust - the active layer then roars at a constant FLAT max and never
+            // tracks firing strength (the dampener-held axes pinned at raw=1.00 while CurrentThrustPercentage reads ~0).
+            // MaxEffectiveThrust is the true denominator, so the ratio is a real 0..1 thrust fraction again.
+            if (thruster is Sandbox.ModAPI.Ingame.IMyThrust ingame)
+            {
+                float effective = ingame.MaxEffectiveThrust;
+                if (effective > 1f)
+                    return effective;
+
+                float max = ingame.MaxThrust;
+                if (max > 1f)
+                    return max;
+            }
+
+            float baseForce = thruster.BlockDefinition != null ? thruster.BlockDefinition.ForceMagnitude : 0f;
+            if (baseForce <= 0f)
+                baseForce = Math.Max(thruster.ThrustForceLength, 1f);
+
+            return Math.Max(baseForce, 1f);
         }
 
         private static float CalculateThrusterPresence(float maxForce, RealisticSoundPlusSettings settings)
@@ -1142,6 +1161,21 @@ namespace RealisticSoundPlus.AudioEngineV2
                 Position = position;
                 Emitter.SetPosition(position);
                 AudioEngineV2Runtime.SetEmitterPosition(Emitter, position);
+
+                // A live voice only needs to be stopped/restarted ("rebound") when something XAudio2 fixes at voice
+                // creation actually changes: the cue, the 2D/3D mode, or the bound filter EFFECT SUBTYPE. The filter
+                // ROUTE flipping Internal<->External (entering/leaving a seat, hull contact, 1st<->3rd person) does NOT
+                // change the bound effect - Internal and External resolve to the SAME subtype and differ only in the
+                // live cutoff target, which the de-zippered SetFilterParameters path sweeps every frame WITHOUT a
+                // restart. Rebinding on a route-only change hard-stopped and replayed all 12 thruster voices at once;
+                // that simultaneous stop/restart was the "bang" on transitions. So pre-mute only for a genuine swap.
+                bool willSwap = IsPlaying
+                    && (_force2D != force2D
+                        || _force3D != force3D
+                        || !string.Equals(_cueName, cueName, StringComparison.OrdinalIgnoreCase));
+                if (willSwap)
+                    MuteBeforeRebind();
+
                 LastStage = "force-flags";
                 Emitter.Force2D = force2D;
                 Emitter.Force3D = force3D;
@@ -1154,7 +1188,10 @@ namespace RealisticSoundPlus.AudioEngineV2
                 LastStage = "effect-signature";
                 string filterEffectSignature = AudioEngineV2Runtime.GetEngineFilterEffectSignature(Emitter) ?? filterEffectSubtype;
                 int bindingGeneration = AudioEngineV2Runtime.EmitterBindingGeneration;
-                bool filterChanged = _filterRoute != filterRoute || !string.Equals(_filterEffectSubtype, filterEffectSubtype, StringComparison.OrdinalIgnoreCase);
+                // Only an effect-SUBTYPE change forces a rebind (the effect is bound at voice creation and cannot be
+                // swapped on a live voice). A route-only change (Internal<->External resolving to the same subtype) is
+                // applied live by the cutoff path and must NOT restart the voice - that restart was the transition bang.
+                bool filterChanged = !string.Equals(_filterEffectSubtype, filterEffectSubtype, StringComparison.OrdinalIgnoreCase);
                 bool bindingChanged = _bindingGeneration != bindingGeneration;
                 bool needsRebind = !IsPlaying
                     || !string.Equals(_cueName, cueName, StringComparison.OrdinalIgnoreCase)
@@ -1209,6 +1246,9 @@ namespace RealisticSoundPlus.AudioEngineV2
                 }
 
                 _filterEffectSignature = filterEffectSignature;
+                // Track the live route even on the no-rebind path so the cached field never goes stale (the runtime
+                // route dictionary is already refreshed every frame by RegisterEmitter above; this just mirrors it).
+                _filterRoute = filterRoute;
 
                 LastStage = "set-volume";
                 SetVolume(volume);

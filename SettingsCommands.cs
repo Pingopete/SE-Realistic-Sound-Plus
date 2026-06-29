@@ -205,6 +205,11 @@ namespace RealisticSoundPlus
                     case "drywet":
                         SetBlockDryWetSplit(parts);
                         break;
+                    case "blocksource":
+                    case "blocksourcereverb":
+                    case "sourcereverb":
+                        SetBlockSourceReverb(parts);
+                        break;
                     case "blockdry":
                     case "blockdrylevel":
                     case "drylevel":
@@ -214,6 +219,11 @@ namespace RealisticSoundPlus
                     case "blockwetlevel":
                     case "wetlevel":
                         SetBlockWetLevel(parts);
+                        break;
+                    case "blockdryfalloff":
+                    case "dryfalloff":
+                    case "blockfalloff":
+                        SetBlockDryFalloff(parts);
                         break;
                     case "reverbroute":
                     case "reverbmode":
@@ -380,6 +390,38 @@ namespace RealisticSoundPlus
             Notify("Block dry/wet split " + (on ? "ON" : "OFF") + ". " + V2GlobalReverbRuntime.FormatBlockSplitStatus());
         }
 
+        private static void SetBlockSourceReverb(string[] parts)
+        {
+            string arg = parts.Length < 2 ? null : parts[1].Trim().ToLowerInvariant();
+            bool on = arg == "on" || arg == "1" || arg == "true" || arg == "enable" || arg == "enabled";
+            bool off = arg == "off" || arg == "0" || arg == "false" || arg == "disable" || arg == "disabled";
+            if (!on && !off)
+            {
+                Notify("Usage: /rsp blocksource <on|off>");
+                return;
+            }
+
+            SettingsManager.Current.BlockSourceReverbEnabled = on;
+            SettingsManager.Save();
+            V2DebugLog.WriteEvent("command", "block source reverb " + (on ? "on" : "off"));
+            Notify("Block per-voice reverb " + (on ? "ON" : "OFF") + ". " + V2GlobalReverbRuntime.FormatBlockSourceStatus());
+        }
+
+        private static void SetBlockDryFalloff(string[] parts)
+        {
+            if (parts.Length < 2 || !float.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out float scale))
+            {
+                Notify("Usage: /rsp blockdryfalloff <0.5..6>  (how much faster dry fades than the muffle; dry hits 0 at m=1/scale)");
+                return;
+            }
+
+            scale = scale < 0.1f ? 0.1f : (scale > 8f ? 8f : scale);
+            SettingsManager.Current.BlockDryFalloffScale = scale;
+            SettingsManager.Save();
+            V2DebugLog.WriteEvent("command", "block dry falloff scale " + scale.ToString("0.00", CultureInfo.InvariantCulture));
+            Notify("Block dry falloff x" + scale.ToString("0.00", CultureInfo.InvariantCulture) + " (dry->0 at muffle " + (1f / scale).ToString("0.00", CultureInfo.InvariantCulture) + "). " + V2GlobalReverbRuntime.FormatBlockSourceStatus());
+        }
+
         private static void SetBlockDryLevel(string[] parts)
         {
             if (parts.Length < 2 || !float.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out float level))
@@ -392,7 +434,7 @@ namespace RealisticSoundPlus
             SettingsManager.Current.BlockDryLevel = level;
             SettingsManager.Save();
             V2DebugLog.WriteEvent("command", "block dry level " + level.ToString("0.00", CultureInfo.InvariantCulture));
-            Notify("Block dry level " + level.ToString("0.00", CultureInfo.InvariantCulture) + ". " + V2GlobalReverbRuntime.FormatBlockSplitStatus());
+            Notify("Block dry level " + level.ToString("0.00", CultureInfo.InvariantCulture) + ". " + V2GlobalReverbRuntime.FormatBlockSplitStatus() + " " + V2GlobalReverbRuntime.FormatBlockSourceStatus());
         }
 
         private static void SetBlockWetLevel(string[] parts)
@@ -407,7 +449,7 @@ namespace RealisticSoundPlus
             SettingsManager.Current.BlockWetLevel = level;
             SettingsManager.Save();
             V2DebugLog.WriteEvent("command", "block wet level " + level.ToString("0.00", CultureInfo.InvariantCulture));
-            Notify("Block wet (reverb) level " + level.ToString("0.00", CultureInfo.InvariantCulture) + ". " + V2GlobalReverbRuntime.FormatBlockSplitStatus());
+            Notify("Block wet (reverb) level " + level.ToString("0.00", CultureInfo.InvariantCulture) + ". " + V2GlobalReverbRuntime.FormatBlockSplitStatus() + " " + V2GlobalReverbRuntime.FormatBlockSourceStatus());
         }
 
         private static void SetGlobalReverbRoute(string[] parts)

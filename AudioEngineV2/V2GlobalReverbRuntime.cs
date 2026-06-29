@@ -261,7 +261,11 @@ namespace RealisticSoundPlus.AudioEngineV2
 
             try
             {
-                bool wasActive = _globalBusVoice != null;
+                // Active-route test must cover the inline routes too: custom-inline/master attach to _customInlineEffect,
+                // NOT _globalBusVoice. Using only _globalBusVoice made wasActive=false every frame on the inline route,
+                // so LogGlobalBusStatus(!wasActive) forced a write each frame and bypassed its 1 s throttle - ~50 fat
+                // lines/sec of disk I/O. Now steady-state inline logs once per second; the first activation still forces.
+                bool wasActive = _globalBusVoice != null || _customInlineEffect != null;
                 string routeStatus;
                 if (!EnsureGlobalBusRoute(audio, settings, out routeStatus))
                 {
@@ -1098,6 +1102,433 @@ namespace RealisticSoundPlus.AudioEngineV2
             _blockSplitGraph = "?";
             _blockSplitStatus = "blocksplit=restored:" + reason;
             V2DebugLog.WriteEvent("block-split", _blockSplitStatus);
+        }
+
+        // ===================================================================================================
+        // Block per-VOICE reverb test (experimental, default OFF — gated on settings.BlockSourceReverbEnabled)
+        // ---------------------------------------------------------------------------------------------------
+        // The submix wall: attaching the reverb XAPO to any HAND-CREATED submix makes the engine deliver ZERO audio
+        // to it (rawIn=0). A SOURCE voice is different — it's the engine's own voice and already carries its own
+        // playback audio (RSP's per-voice biquad muffle, applied via SetFilterParameters, proves per-voice DSP on
+        // these voices works and sticks). So this test attaches the dry/wet reverb XAPO DIRECTLY onto each block
+        // source voice's own effect chain (SetEffectChain on the native SourceVoice) and reads rawIn.
+        //
+        //   * rawIn > 0  => the source voice feeds its own audio into our XAPO -> the wall is sidestepped, and the
+        //                   in-place dry/wet split (SetBlockDryWet) becomes viable with no extra voices, no submix,
+        //                   and no Apply3D reroute.
+        //   * rawIn == 0 => the same delivery problem reaches source voices too; the avenue is dead.
+        //
+        // The XAPO chain is independent of the SetFilterParameters biquad, so the existing muffle keeps working.
+        // ===================================================================================================
+        private static readonly Dictionary<IMySourceVoice, BlockSourceReverbState> BlockSourceReverbs = new Dictionary<IMySourceVoice, BlockSourceReverbState>();
+        // Per-voice air-path muffle pushed in by V2PlayerFilterRuntime (which already computes it for the biquad each
+        // 50ms). We reuse that exact value rather than recomputing raycasts here. Default 0 (no occlusion) if absent.
+        private static readonly Dictionary<IMySourceVoice, BlockMuffleSample> BlockMuffleByVoice = new Dictionary<IMySourceVoice, BlockMuffleSample>();
+        private const float BlockMuffleStaleSeconds = 2.5f;
+        private const float BlockDryWetGlide = 0.12f; // per-update lerp toward the muffle-driven target (de-zipper)
+        // Wet-vs-occlusion-volume compensation. The block voice's volume is pulled DOWN by the muffle (models the
+        // DIRECT sound dying through the wall); our reverb sits upstream of that, so it would sink with it. We divide
+        // the wet by that muffle volume gain to hold the reverb at its in-room level while the dry collapses. Floor
+        // caps the boost (1/floor) so a near-total seal still tapers the reverb to silence instead of exploding.
+        private const float BlockWetCompFloor = 0.2f;  // max compensation = 1/0.2 = 5x
+        private const float BlockWetMixMax = 4f;        // absolute ceiling on the wet mix into the XAPO
+        // Hard cap on how many sound-block voices carry their own reverb XAPO at once. Each XAPO is a full delay-line
+        // reverb running at the device rate, so a room packed with speakers/jukeboxes would spin up dozens of heavy
+        // processors - audio-thread load that can starve voices and glitch the whole mix ("distortion builds then
+        // cuts out when lots of loud blocks play"). Already-attached voices keep their slot; once the cap is reached
+        // further block voices simply play dry (exactly as before this feature existed) until a slot frees. <=0 = off.
+        private const int MaxBlockSourceReverbVoices = 8;
+        private static bool _blockSourceDisabledForSession;
+        private static string _blockSourceStatus = "blocksource=off";
+        private static string _blockSourceVerb = string.Empty;
+        private static DateTime _lastBlockSourceLogUtc = DateTime.MinValue;
+
+        private struct BlockMuffleSample
+        {
+            public float Muffle;
+            public float VolGain;   // the muffle-driven VOLUME gain applied to the voice (1 = clear, ->0 = occluded)
+            public DateTime Utc;
+        }
+
+        private sealed class BlockSourceReverbState
+        {
+            public object NativeSourceVoice;            // the SharpDX SourceVoice our XAPO chain is attached to
+            public V2LiveReverbPocProcessor Processor;  // the in-place dry/wet reverb XAPO
+            public DateTime LastSeenUtc;
+            public string CueName;
+            public string Attach;
+            public float CurrentDry;                    // smoothed gains actually pushed to the processor
+            public float CurrentWet;
+            public float LastMuffle;
+            public float LastVolGain;                   // last muffle volume gain (for status/diagnostics)
+            public bool Initialized;                    // false until the first apply snaps the gains to target
+        }
+
+        // Called by V2PlayerFilterRuntime once it has the per-voice block muffle and the muffle-driven volume gain
+        // (the same values that drive the biquad and the voice volume). volGain is the MUFFLE component only
+        // (CalculateMuffleVolumeGain), NOT the distance gain — so we compensate the wet for occlusion but not distance.
+        public static void ReportBlockMuffle(IMySourceVoice voice, float muffle, float volGain)
+        {
+            if (voice == null)
+                return;
+
+            BlockMuffleByVoice[voice] = new BlockMuffleSample
+            {
+                Muffle = Clamp(muffle, 0f, 1f),
+                VolGain = Clamp(volGain, 0f, 1f),
+                Utc = DateTime.UtcNow
+            };
+        }
+
+        // muffle (0..1) and the muffle volume gain (1 = clear, ->0 = occluded). Defaults to clear if no fresh sample.
+        private static void ResolveBlockMuffle(IMySourceVoice voice, DateTime now, out float muffle, out float volGain)
+        {
+            if (voice != null && BlockMuffleByVoice.TryGetValue(voice, out BlockMuffleSample sample)
+                && (now - sample.Utc).TotalSeconds <= BlockMuffleStaleSeconds)
+            {
+                muffle = sample.Muffle;
+                volGain = sample.VolGain;
+                return;
+            }
+
+            muffle = 0f;   // no fresh occlusion data -> treat as in-the-clear (dry full, wet silent)
+            volGain = 1f;  // ...and not volume-attenuated, so no wet compensation
+        }
+
+        // dry fades with the air-path muffle but FASTER (scale); wet is governed by the same muffle envelope AND is
+        // compensated for the muffle-driven voice-volume drop so the reverb keeps its in-room level while only the
+        // dry collapses. The gains glide toward target each update so a 50ms muffle step doesn't click.
+        private static void ApplyBlockSourceDryWet(IMySourceVoice voice, BlockSourceReverbState state, RealisticSoundPlusSettings settings, DateTime now)
+        {
+            if (state == null || state.Processor == null)
+                return;
+
+            ResolveBlockMuffle(voice, now, out float m, out float volGain);
+            float dryCeil = Clamp(settings.BlockDryLevel, 0f, 1f);
+            float wetCeil = Clamp(settings.BlockWetLevel, 0f, 2f);
+            float scale = Clamp(settings.BlockDryFalloffScale, 0.1f, 8f);
+
+            float targetDry = dryCeil * Clamp(1f - m * scale, 0f, 1f);
+
+            // Reverb CROSSFADES in as the dry collapses and PLATEAUS at full once the dry is gone (occShape reaches 1
+            // at m = 1/scale, the same point dry hits 0) — so moderate occlusion already yields full reverb instead of
+            // the old slow linear-with-muffle ramp. An optional in-room floor keeps some reverb present in line of
+            // sight. Then divide by the muffle volume gain so the level reaching the listener holds as the voice is
+            // turned down: only the DIRECT path should take the occlusion volume loss; reverb leaks through openings.
+            float inRoom = Clamp(settings.BlockWetInRoom, 0f, 1f);
+            float occShape = Clamp(m * scale, 0f, 1f);
+            float wetShape = inRoom + (1f - inRoom) * occShape;
+            float comp = 1f / Math.Max(BlockWetCompFloor, volGain);
+            float targetWet = Clamp(wetCeil * wetShape * comp, 0f, BlockWetMixMax);
+
+            state.LastVolGain = volGain;
+
+            if (!state.Initialized)
+            {
+                state.CurrentDry = targetDry;
+                state.CurrentWet = targetWet;
+                state.Initialized = true;
+            }
+            else
+            {
+                state.CurrentDry += (targetDry - state.CurrentDry) * BlockDryWetGlide;
+                state.CurrentWet += (targetWet - state.CurrentWet) * BlockDryWetGlide;
+            }
+
+            state.LastMuffle = m;
+            state.Processor.UpdateFromSettings(settings);
+            state.Processor.SetBlockDryWet(state.CurrentDry, state.CurrentWet);
+        }
+
+        public static string FormatBlockSourceStatus()
+        {
+            return string.IsNullOrEmpty(_blockSourceVerb) ? _blockSourceStatus : _blockSourceStatus + " | verb " + _blockSourceVerb;
+        }
+
+        public static void UpdateBlockSourceReverb()
+        {
+            object audio = MyAudio.Static;
+            if (audio == null)
+                return;
+
+            Resolve(audio.GetType());
+
+            RealisticSoundPlusSettings settings = SettingsManager.Current;
+            if (settings == null || !settings.BlockSourceReverbEnabled || _blockSourceDisabledForSession)
+            {
+                if (BlockSourceReverbs.Count > 0)
+                    RestoreBlockSourceReverb(_blockSourceDisabledForSession ? "session-disabled" : "disabled");
+                return;
+            }
+
+            if (_effectDescriptorType == null)
+            {
+                _blockSourceStatus = "blocksource=types-missing";
+                return;
+            }
+
+            MaintainBlockSourceReverbTargets(settings);
+        }
+
+        // Scan: adopt SoundBlock voices and attach the dry/wet reverb XAPO to each voice's OWN effect chain (once).
+        // For voices already adopted, keep dry/wet + room params live and read back rawIn (the decisive measurement).
+        private static void MaintainBlockSourceReverbTargets(RealisticSoundPlusSettings settings)
+        {
+            if (MyAudio.Static == null)
+                return;
+
+            DateTime now = DateTime.UtcNow;
+            int added = 0, active = 0, attached = 0, capped = 0;
+            float reprMuffle = 0f, reprDry = -1f, reprWet = -1f, reprVolGain = 1f;
+            string lastFail = null;
+            V2LiveReverbPocProcessor representative = null;
+
+            try
+            {
+                MyPlayedSounds played = MyAudio.Static.GetCurrentlyPlayedSounds();
+                List<IMySourceVoice> voices = played.Sound;
+
+                if (voices != null)
+                {
+                    for (int i = 0; i < voices.Count; i++)
+                    {
+                        IMySourceVoice voice = voices[i];
+                        if (voice == null || !voice.IsValid || !voice.IsPlaying)
+                            continue;
+
+                        string cue = voice.CueEnum.ToString();
+                        if (!V2AuxCueClassifier.IsSoundBlockCue(cue))
+                            continue;
+
+                        if (BlockSourceReverbs.TryGetValue(voice, out BlockSourceReverbState existing))
+                        {
+                            existing.LastSeenUtc = now;
+                            active++;
+                            if (existing.Processor != null)
+                            {
+                                attached++;
+                                ApplyBlockSourceDryWet(voice, existing, settings, now);
+                                representative = existing.Processor;
+                                reprMuffle = existing.LastMuffle;
+                                reprDry = existing.CurrentDry;
+                                reprWet = existing.CurrentWet;
+                                reprVolGain = existing.LastVolGain;
+                            }
+                            continue;
+                        }
+
+                        if (MaxBlockSourceReverbVoices > 0 && attached >= MaxBlockSourceReverbVoices)
+                        {
+                            // At the concurrency cap: leave this voice dry rather than spinning up another reverb XAPO.
+                            capped++;
+                            continue;
+                        }
+
+                        if (!TryAttachBlockSourceReverb(voice, cue, settings, out BlockSourceReverbState state, out string attachStatus))
+                        {
+                            lastFail = attachStatus;
+                            // A hard XAPO/effect-chain rejection won't recover this session — stop hammering every
+                            // block voice every frame; tear down and report so the test result is unambiguous.
+                            if (IsSourceReverbAttachFailure(attachStatus))
+                            {
+                                _blockSourceDisabledForSession = true;
+                                V2DebugLog.WriteEvent("block-source", "session-disabled (hard attach failure): " + attachStatus);
+                                RestoreBlockSourceReverb("attach-rejected");
+                                _blockSourceStatus = "blocksource=attach-rejected " + attachStatus;
+                                return;
+                            }
+                            continue;
+                        }
+
+                        BlockSourceReverbs[voice] = state;
+                        added++;
+                        active++;
+                        attached++;
+                        ApplyBlockSourceDryWet(voice, state, settings, now);
+                        representative = state.Processor;
+                        reprMuffle = state.LastMuffle;
+                        reprDry = state.CurrentDry;
+                        reprWet = state.CurrentWet;
+                        reprVolGain = state.LastVolGain;
+                        V2DebugLog.WriteEvent("block-source", "attach " + Trim(cue, 28) + " " + attachStatus);
+                    }
+                }
+
+                PurgeStaleBlockSourceReverbs(now);
+
+                _blockSourceStatus = string.Format(
+                    CultureInfo.InvariantCulture,
+                    "blocksource=on active={0} attached={1}/{11} added={2} capped={12} muffle={3:0.00} vol={4:0.00} dry={5:0.00} wet={6:0.00} (ceil {7:0.00}/{8:0.00} x{9:0.00}){10}",
+                    active, attached, added, reprMuffle, reprVolGain, reprDry, reprWet,
+                    Clamp(settings.BlockDryLevel, 0f, 1f), Clamp(settings.BlockWetLevel, 0f, 2f), Clamp(settings.BlockDryFalloffScale, 0.1f, 8f),
+                    lastFail == null ? string.Empty : " lastFail=" + lastFail,
+                    MaxBlockSourceReverbVoices, capped);
+                _blockSourceVerb = representative != null ? representative.DiagnosticStatus : string.Empty;
+
+                if (added > 0 || now - _lastBlockSourceLogUtc > TimeSpan.FromSeconds(2))
+                {
+                    _lastBlockSourceLogUtc = now;
+                    V2DebugLog.WriteEvent("block-source", FormatBlockSourceStatus());
+                }
+            }
+            catch (Exception ex)
+            {
+                _blockSourceStatus = "blocksource=scan-failed:" + ex.GetType().Name;
+                V2DebugLog.WriteEvent("block-source", _blockSourceStatus + " " + ex.Message);
+            }
+        }
+
+        private static bool TryAttachBlockSourceReverb(IMySourceVoice voice, string cue, RealisticSoundPlusSettings settings, out BlockSourceReverbState state, out string status)
+        {
+            state = null;
+            status = "blocksource=attach-failed";
+
+            if (!RspDynamicAudioFilters.TryResolveNativeSourceVoice(voice, out object sourceVoice) || sourceVoice == null)
+            {
+                status = "blocksource=native-missing";
+                return false;
+            }
+
+            MethodInfo setChain = ResolveSourceSetEffectChainMethod(sourceVoice.GetType());
+            if (setChain == null)
+            {
+                status = "blocksource=set-chain-missing";
+                return false;
+            }
+
+            int channels = Math.Max(1, ResolveSourceInputChannelCount(sourceVoice));
+            int sampleRate = ResolveVoiceInputSampleRate(sourceVoice);
+            if (sampleRate <= 0)
+                sampleRate = 48000;
+            sampleRate = Math.Max(8000, sampleRate);
+
+            V2LiveReverbPocProcessor processor = null;
+            try
+            {
+                // wetOnly=false -> the processor does the in-place dry/wet mix (BlockDryGain*source + BlockWetMix*wet).
+                // Initial gains are set by ApplyBlockSourceDryWet right after a successful attach (muffle-driven).
+                processor = new V2LiveReverbPocProcessor(channels, sampleRate, false);
+                processor.UpdateFromSettings(settings);
+
+                if (!TrySetSourceReverbEffectChain(sourceVoice, setChain, processor, out string chainStatus))
+                {
+                    status = "blocksource=" + chainStatus;
+                    // Do NOT dispose the managed XAPO here — XAudio2 may already hold a ref mid-attach; dropping the
+                    // reference is safe (and a failed test attach leaking one processor is acceptable).
+                    return false;
+                }
+
+                ResolveSourceEnableEffectMethod(sourceVoice.GetType())?.Invoke(sourceVoice, new object[] { SourceReverbEffectIndex });
+
+                state = new BlockSourceReverbState
+                {
+                    NativeSourceVoice = sourceVoice,
+                    Processor = processor,
+                    LastSeenUtc = DateTime.UtcNow,
+                    CueName = cue,
+                    Attach = chainStatus
+                };
+                status = string.Format(CultureInfo.InvariantCulture, "blocksource=attached {0} {1}ch/{2}Hz", chainStatus, channels, sampleRate);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Exception inner = (ex as TargetInvocationException)?.InnerException ?? ex;
+                status = "blocksource=attach-failed:" + inner.GetType().Name;
+                V2DebugLog.WriteEvent("block-source", status + " " + inner.Message);
+                return false;
+            }
+        }
+
+        private static void PurgeStaleBlockSourceReverbs(DateTime now)
+        {
+            PruneBlockMuffleCache(now);
+
+            if (BlockSourceReverbs.Count == 0)
+                return;
+
+            List<IMySourceVoice> remove = null;
+            foreach (KeyValuePair<IMySourceVoice, BlockSourceReverbState> pair in BlockSourceReverbs)
+            {
+                IMySourceVoice voice = pair.Key;
+                if (voice == null || !voice.IsValid || !voice.IsPlaying || now - pair.Value.LastSeenUtc > TimeSpan.FromSeconds(2))
+                {
+                    if (remove == null)
+                        remove = new List<IMySourceVoice>();
+                    remove.Add(voice);
+                }
+            }
+
+            if (remove == null)
+                return;
+
+            for (int i = 0; i < remove.Count; i++)
+                DetachBlockSourceReverb(remove[i], "stale");
+        }
+
+        private static void PruneBlockMuffleCache(DateTime now)
+        {
+            if (BlockMuffleByVoice.Count == 0)
+                return;
+
+            List<IMySourceVoice> remove = null;
+            foreach (KeyValuePair<IMySourceVoice, BlockMuffleSample> pair in BlockMuffleByVoice)
+            {
+                IMySourceVoice voice = pair.Key;
+                if (voice == null || !voice.IsValid || (now - pair.Value.Utc).TotalSeconds > BlockMuffleStaleSeconds)
+                {
+                    if (remove == null)
+                        remove = new List<IMySourceVoice>();
+                    remove.Add(voice);
+                }
+            }
+
+            if (remove == null)
+                return;
+
+            for (int i = 0; i < remove.Count; i++)
+                BlockMuffleByVoice.Remove(remove[i]);
+        }
+
+        // Detach: clear our XAPO chain off the native voice ONLY while the voice is still valid (a recycled voice has
+        // already moved on). We drop the processor reference without disposing it — once SetEffectChain(null) returns,
+        // XAudio2 has released its ref; an explicit managed dispose risks racing the audio thread, so we let GC handle it.
+        private static void DetachBlockSourceReverb(IMySourceVoice voice, string reason)
+        {
+            if (voice == null || !BlockSourceReverbs.TryGetValue(voice, out BlockSourceReverbState state))
+                return;
+
+            BlockSourceReverbs.Remove(voice);
+
+            object sourceVoice = state.NativeSourceVoice;
+            if (sourceVoice != null && voice.IsValid)
+            {
+                try
+                {
+                    ResolveSourceDisableEffectMethod(sourceVoice.GetType())?.Invoke(sourceVoice, new object[] { SourceReverbEffectIndex });
+                    ResolveSourceSetEffectChainMethod(sourceVoice.GetType())?.Invoke(sourceVoice, new object[] { null });
+                }
+                catch (Exception ex)
+                {
+                    Exception inner = (ex as TargetInvocationException)?.InnerException ?? ex;
+                    V2DebugLog.WriteEvent("block-source", "detach-failed " + reason + " " + inner.GetType().Name + ": " + inner.Message);
+                }
+            }
+        }
+
+        public static void RestoreBlockSourceReverb(string reason)
+        {
+            if (BlockSourceReverbs.Count > 0)
+            {
+                List<IMySourceVoice> voices = new List<IMySourceVoice>(BlockSourceReverbs.Keys);
+                for (int i = 0; i < voices.Count; i++)
+                    DetachBlockSourceReverb(voices[i], reason);
+            }
+
+            BlockMuffleByVoice.Clear();
+            _blockSourceStatus = "blocksource=restored:" + reason;
+            _blockSourceVerb = string.Empty;
+            V2DebugLog.WriteEvent("block-source", _blockSourceStatus);
         }
 
         private static bool CanApply => _applyReverbProperty != null && _enableReverbProperty != null && _setReverbParametersMethod != null;

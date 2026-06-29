@@ -276,6 +276,34 @@ namespace RealisticSoundPlus.AudioEngineV2
             return applied;
         }
 
+        // Apply the muffle filter to a voice the instant it is bound to its emitter (SetSound), BEFORE the voice's
+        // first audio frame, so a cold voice never plays an unfiltered full-volume burst (the "first time a sound
+        // plays" pop). Routes to the same target the reactive paths would pick a frame later: the engine filter for
+        // engine/thruster voices (target derives from listener state, always computable here) and the player/aux
+        // filter for everything else. Best-effort and fully guarded - on any miss the reactive path still catches up.
+        public static bool TryPreFilterNewVoice(MyEntity3DSoundEmitter emitter, IMySourceVoice voice, RealisticSoundPlusSettings settings)
+        {
+            if (emitter == null || voice == null || settings == null)
+                return false;
+
+            try
+            {
+                if (IsLiveCustomFilterTarget(emitter))
+                {
+                    string subtype = AudioEngineV2Runtime.GetEngineFilterEffectSubtype(emitter);
+                    if (IsCustomFilterSubtype(subtype))
+                        return TryApplyLiveCustomFilter(voice, subtype, settings, emitter);
+                    return false;
+                }
+
+                return V2PlayerFilterRuntime.TryPreFilterNewVoice(voice, settings);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         private static bool IsLiveCustomFilterTarget(MyEntity3DSoundEmitter emitter)
         {
             return emitter != null

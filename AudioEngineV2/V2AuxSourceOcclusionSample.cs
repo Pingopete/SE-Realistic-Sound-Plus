@@ -10,6 +10,7 @@ namespace RealisticSoundPlus.AudioEngineV2
         public string Kind;
         public string ClassName;
         public float Score;
+        public long SourceEntityId;       // owning block entity (0 if unknown); lets caches/overlay key grid-stably
         public Vector3D SourcePosition;
         public Vector3D ListenerPosition;
         public Vector3D ProbeFrom;

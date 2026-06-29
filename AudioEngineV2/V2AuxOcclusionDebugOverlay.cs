@@ -320,6 +320,12 @@ namespace RealisticSoundPlus.AudioEngineV2
 
         private static string BuildKey(V2AuxSourceOcclusionSample sample)
         {
+            // Key the overlay's per-source path cache by the owning block ENTITY (+ cue) when known, so a moving grid
+            // keeps ONE entry per source instead of leaving a trail of stale position-keyed entries strung out behind
+            // the ship (the "elements flying off behind us"). Fall back to the world position for entity-less sources.
+            if (sample.SourceEntityId != 0L)
+                return "ent:" + sample.SourceEntityId.ToString(CultureInfo.InvariantCulture) + ":" + (sample.CueName ?? "?");
+
             Vector3D source = sample.SourcePosition;
             return string.Format(
                 CultureInfo.InvariantCulture,

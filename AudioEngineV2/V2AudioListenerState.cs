@@ -3,6 +3,7 @@ using System.Reflection;
 using RealisticSoundPlus.Patches;
 using Sandbox.Game.Entities;
 using Sandbox.ModAPI;
+using VRage.ModAPI;
 using VRageMath;
 
 namespace RealisticSoundPlus.AudioEngineV2
@@ -17,6 +18,12 @@ namespace RealisticSoundPlus.AudioEngineV2
         private static DateTime _lastReliableUtc = DateTime.MinValue;
 
         public Vector3D Position;
+        // The listener position expressed in its OWN grid's local frame (grid-relative). On a moving/flying grid the
+        // world Position changes every frame even while seated still; GridLocalPosition stays constant, so movement
+        // detection (env stability, air-path recompute) can ask "did I move RELATIVE to the ship?" instead of
+        // "did my world coordinate change?" - which is what stops the constant re-probe/flood storm on moving grids.
+        // Equals Position when the listener is not on a grid (on foot in the world).
+        public Vector3D GridLocalPosition;
         public float Atmosphere;
         public bool InsideShip;
         public bool SeatedInShip;
@@ -71,9 +78,12 @@ namespace RealisticSoundPlus.AudioEngineV2
                 ? (seatedInteriorCamera ? "inside-seat" : "inside-room")
                 : (controlledShip ? "outside-seat-camera" : (characterGridContact ? "outside-grid-contact-" + contactSource : "vanilla-fallback"));
 
+            Vector3D gridLocalPosition = ResolveGridLocal(gridEntityId, position);
+
             V2AudioListenerState raw = new V2AudioListenerState
             {
                 Position = position,
+                GridLocalPosition = gridLocalPosition,
                 Atmosphere = ExteriorSoundTransmission.GetAtmosphericPressure(position),
                 InsideShip = insideShip,
                 SeatedInShip = controlledShip,
@@ -89,6 +99,41 @@ namespace RealisticSoundPlus.AudioEngineV2
             };
 
             return Stabilize(raw);
+        }
+
+        // Transform a world position into the given grid's local frame. A point fixed to the grid (e.g. a seated
+        // listener, or a block) has constant local coordinates regardless of how fast the grid flies/rotates, so a
+        // grid-local comparison answers "moved relative to the ship?" rather than "world coordinate changed?".
+        private static Vector3D ResolveGridLocal(long gridEntityId, Vector3D world)
+        {
+            if (gridEntityId == 0L)
+                return world;
+
+            try
+            {
+                return ToGridLocal(MyAPIGateway.Entities?.GetEntityById(gridEntityId), world);
+            }
+            catch
+            {
+                return world;
+            }
+        }
+
+        // Public so the block-occlusion probe can re-use the same grid-local transform against a source grid it has
+        // already resolved (a source may be on a different grid than the listener). Returns world unchanged if null.
+        public static Vector3D ToGridLocal(IMyEntity grid, Vector3D world)
+        {
+            if (grid == null)
+                return world;
+
+            try
+            {
+                return Vector3D.Transform(world, grid.WorldMatrixNormalizedInv);
+            }
+            catch
+            {
+                return world;
+            }
         }
 
         private static V2AudioListenerState Stabilize(V2AudioListenerState raw)

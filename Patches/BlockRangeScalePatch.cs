@@ -23,6 +23,14 @@ namespace RealisticSoundPlus.Patches
         private static void Postfix(MyEntity3DSoundEmitter __instance, IMySourceVoice __0)
         {
             RspDynamicAudioFilters.RecordEmitterVoiceBinding(__instance, __0);
+            // Pre-apply RSP's muffle filter to the freshly-bound voice BEFORE its first audio frame. The live
+            // filter is otherwise only applied REACTIVELY - the engine path on the next MyEffectInstance.UpdateFilter
+            // pass, the block/aux path on the next 50ms ProcessVoices pass - both of which land a frame or more
+            // AFTER the voice has already started. So a cold voice's first frames play UNFILTERED at full volume,
+            // and that one-time bright burst is the "first time a sound plays" pop (doors, cockpit seat, world load).
+            // This is the single broad choke point that closes the window for every filtered voice; it's additive
+            // (the reactive paths still run and refine the cutoff) and never targets specific block types.
+            RspDynamicAudioFilters.TryPreFilterNewVoice(__instance, __0, SettingsManager.Current);
         }
     }
 

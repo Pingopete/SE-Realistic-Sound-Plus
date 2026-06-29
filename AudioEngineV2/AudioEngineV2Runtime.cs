@@ -137,6 +137,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             V2PlayerFilterRuntime.Update();
             V2AuxSourceOcclusionTelemetry.Update();
             V2GlobalReverbRuntime.UpdateBlockDryWetSplit();
+            V2GlobalReverbRuntime.UpdateBlockSourceReverb();
             LogListenerTransitionIfChanged(_listener);
             if (_listener.VanillaFallback)
             {
@@ -360,6 +361,9 @@ namespace RealisticSoundPlus.AudioEngineV2
             };
         }
 
+        private static DateTime _lastVanillaNonFallbackUtc = DateTime.MinValue;
+        private static readonly TimeSpan VanillaFallbackSuppressHold = TimeSpan.FromMilliseconds(400);
+
         public static bool ShouldSuppressVanillaShipCue(MyEntity3DSoundEmitter emitter, string cueName)
         {
             if (emitter == null || string.IsNullOrWhiteSpace(cueName))
@@ -375,7 +379,17 @@ namespace RealisticSoundPlus.AudioEngineV2
             _hasListener = true;
             LogListenerTransitionIfChanged(_listener);
 
-            if (_listener.VanillaFallback)
+            // Bridge a TRANSIENT VanillaFallback. During a transition (seat in/out, hull contact, 1st<->3rd person) the
+            // listener state briefly drops to fallback for a few frames, which un-suppresses the raw vanilla thruster
+            // audio - a loud unfiltered BURST (the "bang" / pop). Keep suppressing through a short hold after the last
+            // active state so a momentary fallback can't leak vanilla; only release once genuinely away for the hold.
+            bool vanillaFallback = _listener.VanillaFallback;
+            if (!vanillaFallback)
+                _lastVanillaNonFallbackUtc = DateTime.UtcNow;
+            else if (DateTime.UtcNow - _lastVanillaNonFallbackUtc < VanillaFallbackSuppressHold)
+                vanillaFallback = false;
+
+            if (vanillaFallback)
                 return false;
 
             if (!SettingsManager.Current.V2DetailEnabled && !SettingsManager.Current.V2StateEnabled)

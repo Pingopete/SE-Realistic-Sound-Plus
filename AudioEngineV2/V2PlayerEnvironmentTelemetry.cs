@@ -46,6 +46,8 @@ namespace RealisticSoundPlus.AudioEngineV2
         private static readonly List<VRage.Game.ModAPI.IHitInfo> DirectRayHits = new List<VRage.Game.ModAPI.IHitInfo>(16);
         private static readonly List<VRage.Game.ModAPI.IHitInfo> ThicknessRayHits = new List<VRage.Game.ModAPI.IHitInfo>(32);
         private static readonly List<float> ThicknessHitDistances = new List<float>(32);
+        private static readonly List<VRage.Game.ModAPI.IHitInfo> WindowPanelRayHits = new List<VRage.Game.ModAPI.IHitInfo>(16);
+        private static readonly List<VRage.Game.ModAPI.IMyCubeGrid> MarchGrids = new List<VRage.Game.ModAPI.IMyCubeGrid>(4);
         private static readonly List<ThicknessInterval> _thicknessStructureMeters = new List<ThicknessInterval>(16);
         private static DateTime _lastUpdateUtc = DateTime.MinValue;
         private static DateTime _lastPressureRefreshUtc = DateTime.MinValue;
@@ -210,7 +212,11 @@ namespace RealisticSoundPlus.AudioEngineV2
             if (listener.Position == Vector3D.Zero || _lastSampleListenerPosition == Vector3D.Zero)
                 return false;
 
-            if (Vector3D.DistanceSquared(listener.Position, _lastSampleListenerPosition) > StableListenerMoveMetersSquared)
+            // Measure movement in the listener's GRID-LOCAL frame, not world space. A player seated still in a ship
+            // flying at 96 m/s has a constant grid-local position, so this now reads "stable" and the env probe backs
+            // off to its slow cadence - instead of forcing the fast cadence every frame purely because the world
+            // coordinate is sliding with the ship. (On foot, GridLocalPosition == Position, so behaviour is unchanged.)
+            if (Vector3D.DistanceSquared(listener.GridLocalPosition, _lastSampleListenerPosition) > StableListenerMoveMetersSquared)
                 return false;
 
             if (listener.GridEntityId != _lastSampleGridId || listener.ContactGridEntityId != _lastSampleContactGridId)
@@ -224,7 +230,8 @@ namespace RealisticSoundPlus.AudioEngineV2
 
         private static void RememberSampleListener(V2AudioListenerState listener)
         {
-            _lastSampleListenerPosition = listener.Position;
+            // Store the grid-local position so the stability check above compares like-for-like (grid-relative).
+            _lastSampleListenerPosition = listener.GridLocalPosition;
             _lastSampleGridId = listener.GridEntityId;
             _lastSampleContactGridId = listener.ContactGridEntityId;
             _lastSampleInsideShip = listener.InsideShip;
@@ -259,7 +266,8 @@ namespace RealisticSoundPlus.AudioEngineV2
             return summary + string.Format(
                 CultureInfo.InvariantCulture,
                 " room={0} r={1:0.0}m med={2:0.0}m hit={3}/{4} decay={5:0.0}s pre={6:0}ms"
-                + " envmap={7}/{8}/{9} min={10} fb={11} thinSeal={12} tscov={13:0.00}",
+                + " envmap={7}/{8}/{9} min={10} fb={11} thinSeal={12} tscov={13:0.00} wp={14}/{15}/{16} wpLast={17}"
+                + " thickProbe=hits{18}/grids{19}/{20:0.00}m",
                 sample.ReverbRoomAvailable ? sample.ReverbRoomSource ?? "ray" : "none",
                 sample.ReverbRoomEquivalentRadius,
                 sample.ReverbRoomMedianDistance,
@@ -273,7 +281,14 @@ namespace RealisticSoundPlus.AudioEngineV2
                 _envMapDiagMinCoverage,
                 _envMapDiagFallback ? "Y" : "N",
                 _envThinSealHits,
-                _envThinSealCoverage);
+                _envThinSealCoverage,
+                _envWpProbed,
+                _envWpGridHit,
+                _envWpNameHit,
+                Trim(_envWpLastSubtype, 28),
+                _thickProbeRawHits,
+                _thickProbeGrids,
+                _thickProbeMeters);
         }
 
         public static string FormatDetails()
@@ -452,20 +467,14 @@ namespace RealisticSoundPlus.AudioEngineV2
             bool sealedEstimate = oxygenSealed;
             string sealedSource = oxygenSealed ? "oxygen-room" : "none";
             float sealedExtra = sealedEstimate ? settings.PlayerFilterEnvironmentSealedFactor : 0f;
-            // Base wind muffle from structure occlusion + the pressurised-room seal (no thin-shell term yet).
+            // Base wind muffle from structure occlusion + the pressurised-room seal. The window/panel muffle boost is
+            // now folded directly into each ray's transmission (it thickens window/panel hits BEFORE exp(-d/scale)),
+            // so it already lives inside structuralOcclusion above - no separate dome-coverage leak term is applied
+            // here. thinSealedCoverage is retained purely as the diagnostic dome-fraction-of-boosted-panels (tscov).
             float baseMuffling = Clamp01(continuousMuffling + (1f - continuousMuffling) * sealedExtra);
-            // Thin-sealed-shell WIND SEALING - the env "Thin Wall Muffle" knob, now BIDIRECTIONAL. thinSealedCoverage
-            // is how much of the sky dome is a thin sealed shell (thin roof/walls). The knob is how much that shell
-            // SEALS the wind out: 1 = fully sealed (the thin shell muffles wind like the rest of the structure -
-            // today's behaviour, and the default), 0 = the thin shell is acoustically OPEN and the wind leaks
-            // straight through it (bright/airy). So lowering the knob brightens by the LEAKING thin fraction. The
-            // old additive boost could only ever pile a few percent of extra muffle onto an already-saturated dome
-            // (1-(1-a)(1-b) caps out near 1), which is why it was inaudible; multiplying in the leak instead gives
-            // the knob real two-way authority and a clearly audible effect when you move it.
             float thinSealedCoverage = totalWeight > 0.001f ? Clamp01(thinSealedWeight / totalWeight) : 0f;
             _envThinSealCoverage = thinSealedCoverage;
-            float thinLeak = Clamp01(thinSealedCoverage * (1f - Clamp01(settings.PlayerEnvSealedBarrierLoss)));
-            float finalMuffling = ApplyOcclusionStrength(Clamp01(baseMuffling * (1f - thinLeak)), settings.PlayerFilterOcclusionStrength);
+            float finalMuffling = ApplyOcclusionStrength(baseMuffling, settings.PlayerFilterOcclusionStrength);
             float windExposure = Clamp01(1f - finalMuffling);
             RoomAcousticEstimate roomAcoustics = CalculateRoomAcoustics(roomProbe, oxygenProbe, rayLength, settings);
 
@@ -1156,6 +1165,13 @@ namespace RealisticSoundPlus.AudioEngineV2
         private static bool _envMapDiagFallback;
         private static long _envThinSealHits;
         private static float _envThinSealCoverage; // last-evaluated thin-sealed dome fraction (0..1), for diagnostics
+        private static long _envWpProbed;   // sky rays that hit AND ran the window/panel check (boost>0)
+        private static long _envWpGridHit;  // ...of those, how many resolved a named grid block on the ray
+        private static long _envWpNameHit;  // ...of those, how many were a window/panel (boost actually applied)
+        private static string _envWpLastSubtype = "none"; // last grid block subtype the sky probe hit
+        private static int _thickProbeRawHits;  // physics CastRay hit count on the most recent thickness probe
+        private static int _thickProbeGrids;    // distinct grids the ray crossed (marched path); -1 = hit-list fallback
+        private static float _thickProbeMeters; // resulting measured thickness (m)
 
         private static void EnsureEnvMap(int cellCount)
         {
@@ -1302,17 +1318,24 @@ namespace RealisticSoundPlus.AudioEngineV2
                 sampledCells++;
                 totalWeight += 1f;
                 thinSealedWeight += Clamp01(c.ThinSeal01); // dome fraction that is thin sealed shell (muffle authority)
+
+                // Drive openFraction from the SMOOTHED per-cell transmission (the exact value the debug map draws),
+                // NOT the latest unsmoothed EnvironmentBlocked flag. The old branch added a full +1 (fully open) for
+                // any cell whose latest ray missed - so rays flickering through grate/stair gaps spiked openFraction
+                // and the muffle stayed low while every tile was drawn red, then snapped (with an audible filter
+                // jump) a few cm later when the flags flipped. OpenWeight01 already encodes exp(-thickness/scale)
+                // transmission (1 for open sky, <1 for blocked) and is EMA-smoothed, so this matches the map and
+                // grades continuously. The blocked/open COUNTS + meters are kept as-is for the other diagnostics.
+                openWeight += Clamp01(c.OpenWeight01);
                 if (c.EnvironmentBlocked)
                 {
                     blocked++;
                     weightedBlockedMeters += c.BlockedMeters;
                     weightedVoxelBlockedMeters += c.VoxelMeters;
-                    openWeight += c.OpenWeight01;
                 }
                 else
                 {
                     open++;
-                    openWeight += 1f;
                 }
             }
 
@@ -1390,6 +1413,10 @@ namespace RealisticSoundPlus.AudioEngineV2
             _envMapDiagFallback = false;
             _envThinSealHits = 0L;
             _envThinSealCoverage = 0f;
+            _envWpProbed = 0L;
+            _envWpGridHit = 0L;
+            _envWpNameHit = 0L;
+            _envWpLastSubtype = "none";
         }
 
         private struct EnvMapCell
@@ -1531,20 +1558,36 @@ namespace RealisticSoundPlus.AudioEngineV2
                 blockedMeters = hit ? Math.Max(MinStructuralHitThicknessMeters, thicknessScale) : voxelMeters;
 
             sample.BlockedMeters = blockedMeters;
-            float transRoll = CalculateThicknessTransmission(blockedMeters, thicknessScale);
             RealisticSoundPlusSettings rollSettings = SettingsManager.Current;
-            // The thin sealed shell no longer just nudges this direction's transmission - the open apertures
-            // dominate the aperture fraction, so that lever was nearly dead. Instead we MEASURE whether this
-            // direction is a thin sealed face (ThinSeal01) and apply a dedicated muffle boost at the final
-            // assembly, where loss x dome-coverage has real authority. Geometry-only here, so the coverage is
-            // independent of the loss knob and scales smoothly; the hit counter still tracks active (loss>0) hits.
-            if (hit && rollSettings != null
-                && IsThinSealedFace(from, to, blockedMeters, rollSettings.PlayerFilterSealedBarrierThinFactor))
+
+            // Window/panel muffle boost (replaces the old thin-sealed-shell leak). A closed window/panel is
+            // geometrically THIN, so exp(-thickness/scale) would read it as leaky - but it is a continuous sealed
+            // pane that blocks far more wind than its depth implies. When this ray's first grid hit is a window/panel
+            // block, multiply its measured thickness BEFORE the transmission so it muffles like a real pane. Boost 0
+            // = true measured thickness (no change); higher = thicker = more muffle. Only does the (lightweight)
+            // first-hit block-name check on rays that actually HIT and only while the boost is engaged, so there is
+            // no added cost at the default (0) and at most one first-hit resolution per hit ray otherwise.
+            float effectiveThickness = blockedMeters;
+            float windowBoost = rollSettings != null ? rollSettings.PlayerEnvWindowPanelBoost : 0f;
+            if (hit && windowBoost > 0f)
             {
-                sample.ThinSeal01 = 1f;
-                if (rollSettings.PlayerEnvSealedBarrierLoss > 0f && _envThinSealHits < long.MaxValue)
-                    _envThinSealHits++;
+                if (_envWpProbed < long.MaxValue) _envWpProbed++;
+                bool isWindowPanel = TryRayHitsWindowOrPanel(from, to, out string wpSubtype);
+                if (!string.IsNullOrEmpty(wpSubtype))
+                {
+                    if (_envWpGridHit < long.MaxValue) _envWpGridHit++;
+                    _envWpLastSubtype = wpSubtype;
+                }
+                if (isWindowPanel)
+                {
+                    effectiveThickness = blockedMeters * (1f + windowBoost);
+                    sample.ThinSeal01 = 1f; // diagnostic: dome fraction that is a boosted window/panel face (tscov)
+                    if (_envWpNameHit < long.MaxValue) _envWpNameHit++;
+                    if (_envThinSealHits < long.MaxValue) _envThinSealHits++;
+                }
             }
+
+            float transRoll = CalculateThicknessTransmission(effectiveThickness, thicknessScale);
             sample.OpenWeight = sample.Weight * transRoll;
             return sample;
         }
@@ -1764,12 +1807,114 @@ namespace RealisticSoundPlus.AudioEngineV2
             return false;
         }
 
+        // Measures the SOLID (sealing) grid depth a ray crosses by walking the grid cells along the ray and summing
+        // the path length inside sealing cells. The penetrating cast is used ONLY to identify which grids the ray
+        // crosses and the structure span (so we march just the span, not the whole ray); depth itself comes from the
+        // cell traversal, so it is correct regardless of how Havok reports hits. Non-sealing cells (gratings/
+        // catwalks/open doors) are skipped, consistent with the rest of the occlusion model.
+        private static float EstimateGridBlockedLengthMarched(Vector3D from, Vector3D to)
+        {
+            try
+            {
+                if (MyAPIGateway.Physics == null)
+                    return 0f;
+                Vector3D ray = to - from;
+                double rayLenSq = ray.LengthSquared();
+                float rayLen = (float)Math.Sqrt(rayLenSq);
+                if (rayLen <= 0.05f || rayLenSq <= 0.0001)
+                    return 0f;
+                Vector3D dir = ray / rayLen;
+
+                ThicknessRayHits.Clear();
+                MyAPIGateway.Physics.CastRay(from, to, ThicknessRayHits, 0);
+                int rawHits = ThicknessRayHits.Count;
+                if (rawHits == 0)
+                {
+                    _thickProbeRawHits = 0;
+                    _thickProbeGrids = 0;
+                    _thickProbeMeters = 0f;
+                    return 0f;
+                }
+
+                MarchGrids.Clear();
+                float minD = rayLen, maxD = 0f, gridSizeMin = 2.5f;
+                for (int i = 0; i < rawHits; i++)
+                {
+                    VRage.Game.ModAPI.IHitInfo h = ThicknessRayHits[i];
+                    VRage.Game.ModAPI.IMyCubeGrid grid = h?.HitEntity as VRage.Game.ModAPI.IMyCubeGrid;
+                    if (grid == null)
+                        continue;
+                    if (!MarchGrids.Contains(grid))
+                    {
+                        MarchGrids.Add(grid);
+                        if (grid.GridSize > 0.1f && grid.GridSize < gridSizeMin)
+                            gridSizeMin = grid.GridSize;
+                    }
+                    float d = Clamp((float)(Vector3D.Dot(h.Position - from, ray) / rayLenSq * rayLen), 0f, rayLen);
+                    if (d < minD) minD = d;
+                    if (d > maxD) maxD = d;
+                }
+
+                _thickProbeRawHits = rawHits;
+                _thickProbeGrids = MarchGrids.Count;
+                if (MarchGrids.Count == 0)
+                {
+                    _thickProbeMeters = 0f;
+                    return 0f; // hit only voxels/other entities - leave grid depth to the voxel path / fallback
+                }
+
+                // March just the structure span (first->last grid hit, padded one cell each side).
+                float startD = Math.Max(0f, minD - gridSizeMin);
+                float endD = Math.Min(rayLen, maxD + gridSizeMin);
+                float span = endD - startD;
+                if (span <= 0.01f)
+                {
+                    _thickProbeMeters = 0f;
+                    return 0f;
+                }
+
+                float step = Math.Max(0.1f, gridSizeMin * 0.5f); // half-cell: every solid cell sampled at least once
+                int steps = Math.Min(400, Math.Max(1, (int)Math.Ceiling(span / step)));
+                step = span / steps;
+
+                float solid = 0f;
+                for (int s = 0; s <= steps; s++)
+                {
+                    Vector3D p = from + dir * (startD + step * s);
+                    for (int g = 0; g < MarchGrids.Count; g++)
+                    {
+                        VRage.Game.ModAPI.IMyCubeGrid grid = MarchGrids[g];
+                        if (V2GridStructureProbe.IsSealingBlockAtCell(grid, grid.WorldToGridInteger(p)))
+                        {
+                            solid += step;
+                            break; // one sealing grid at this point is enough
+                        }
+                    }
+                }
+
+                solid = Math.Min(solid, rayLen);
+                _thickProbeMeters = solid;
+                return solid;
+            }
+            catch
+            {
+                return 0f;
+            }
+        }
+
         public static float EstimateBlockedLength(Vector3D from, Vector3D to, float segmentLength, int maxSegments)
         {
             Vector3D path = to - from;
             double length = path.Length();
             if (length <= 0.05)
                 return 0f;
+
+            // Primary: walk the grid cells the ray crosses and sum the path length through SEALING cells = the true
+            // wall depth. Independent of how many physics hits Havok reports per body, so a 1m wall reads ~1m instead
+            // of collapsing to the 0.08m entry-only floor (which made the sky tiles stay green until scale hit 0.1).
+            float marched = EstimateGridBlockedLengthMarched(from, to);
+            if (marched > 0.001f)
+                return marched;
 
             if (TryEstimateBlockedLengthFromHitList(from, to, Math.Max(1, maxSegments), out float hitListBlockedLength))
                 return hitListBlockedLength;
@@ -1829,9 +1974,15 @@ namespace RealisticSoundPlus.AudioEngineV2
                 if (ThicknessHitDistances.Count == 0)
                     return true;
 
+                int rawHits = ThicknessRayHits.Count;
                 ThicknessHitDistances.Sort();
                 MergeCloseHitDistances(ThicknessHitDistances);
                 blockedLength = SumPairedHitThickness(ThicknessHitDistances, (float)rayLength);
+
+                // (diagnostic) Fallback path (the marched cell-walk found no grids). Record it as grids=-1.
+                _thickProbeRawHits = rawHits;
+                _thickProbeGrids = -1;
+                _thickProbeMeters = blockedLength;
                 return true;
             }
             catch (Exception ex)
@@ -2486,6 +2637,50 @@ namespace RealisticSoundPlus.AudioEngineV2
             {
                 distance = 0.0;
                 block = null;
+                return false;
+            }
+        }
+
+        // Does this ray's first solid GRID block read as a window/panel? Resolves the block from the SAME penetrating
+        // physics raycast everything blocks against (so it sees whatever grid actually stopped the ray), not the
+        // single pre-guessed grid in TryGetFirstGridHitFace (which silently misses other grids - the reason the old
+        // thin-seal never fired, tscov=0). `subtype` returns the first named grid block hit, for diagnostics.
+        internal static bool TryRayHitsWindowOrPanel(Vector3D from, Vector3D to, out string subtype)
+        {
+            subtype = null;
+            try
+            {
+                if (MyAPIGateway.Physics == null)
+                    return false;
+                Vector3D dir = to - from;
+                if (dir.LengthSquared() < 1e-6)
+                    return false;
+                dir.Normalize();
+
+                WindowPanelRayHits.Clear();
+                MyAPIGateway.Physics.CastRay(from, to, WindowPanelRayHits, 0);
+                for (int i = 0; i < WindowPanelRayHits.Count; i++)
+                {
+                    VRage.Game.ModAPI.IHitInfo h = WindowPanelRayHits[i];
+                    VRage.Game.ModAPI.IMyCubeGrid grid = h?.HitEntity as VRage.Game.ModAPI.IMyCubeGrid;
+                    if (grid == null)
+                        continue;
+
+                    // Nudge from the surface hit point into the block so WorldToGridInteger lands in the right cell.
+                    Vector3D inside = h.Position + dir * (Math.Max(0.5f, grid.GridSize) * 0.25);
+                    Vector3I cell = grid.WorldToGridInteger(inside);
+                    string s = V2GridStructureProbe.GetSubtypeAtCell(grid, cell);
+                    if (string.IsNullOrEmpty(s))
+                        continue; // hit a grid but no block resolved at the nudged cell - try the next crossing
+
+                    subtype = s; // first named solid grid block on the ray
+                    return V2GridStructureProbe.IsWindowOrPanelSubtype(s);
+                }
+
+                return false;
+            }
+            catch
+            {
                 return false;
             }
         }

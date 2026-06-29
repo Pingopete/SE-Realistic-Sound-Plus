@@ -102,6 +102,12 @@ namespace RealisticSoundPlus.AudioEngineV2
             int block = 0;
             int local = 0;
             float strongest = 0f;
+            // Aggregate block-bus level: sum and peak of the per-voice effective output across all block voices. The
+            // individual reverb/filter paths are each clamped, so an overload ("distortion builds, then cuts out with
+            // lots of loud blocks") can only come from many voices SUMMING. blkSum >> 1 = level-driven (the sum is
+            // clipping the shared bus); a high block COUNT with a modest blkSum points at voice/CPU starvation instead.
+            float blockSum = 0f;
+            float blockPeak = 0f;
             V2PlayerFilterSample strongestSample = default(V2PlayerFilterSample);
 
             foreach (V2PlayerFilterSample sample in Samples.Values)
@@ -109,7 +115,14 @@ namespace RealisticSoundPlus.AudioEngineV2
                 switch (sample.Category)
                 {
                     case "env": env++; break;
-                    case "block": block++; break;
+                    case "block":
+                        block++;
+                        float output = sample.EffectiveOutput;
+                        if (output > 0f)
+                            blockSum += output;
+                        if (output > blockPeak)
+                            blockPeak = output;
+                        break;
                     case "local": local++; break;
                 }
 
@@ -126,7 +139,7 @@ namespace RealisticSoundPlus.AudioEngineV2
             RealisticSoundPlusSettings settings = SettingsManager.Current;
             return string.Format(
                 CultureInfo.InvariantCulture,
-                "env={0} block={1} local={2} auxAtm={3} envFloor={4:0.00} envCut={14:0}Hz smooth={15:0}ms volW={11:0.00}/{12:0.00}/{13:0.00} strongest={5}/{6} muff={7:0.00} freq={8:0}Hz q={9:0.00} gain={10:0.00}",
+                "env={0} block={1} local={2} blkOut={16:0.00}sum/{17:0.00}pk auxAtm={3} envFloor={4:0.00} envCut={14:0}Hz smooth={15:0}ms volW={11:0.00}/{12:0.00}/{13:0.00} strongest={5}/{6} muff={7:0.00} freq={8:0}Hz q={9:0.00} gain={10:0.00}",
                 env,
                 block,
                 local,
@@ -142,7 +155,9 @@ namespace RealisticSoundPlus.AudioEngineV2
                 settings.PlayerFilterBlockVolumeMuffleWeight,
                 settings.PlayerFilterLocalVolumeMuffleWeight,
                 settings.PlayerFilterEnvironmentMuffledFrequency,
-                settings.PlayerFilterSmoothingMs);
+                settings.PlayerFilterSmoothingMs,
+                blockSum,
+                blockPeak);
         }
 
         public static string FormatSources(int maxLines)
@@ -249,6 +264,11 @@ namespace RealisticSoundPlus.AudioEngineV2
                 sample.VoiceVolume = voice.Volume;
                 sample.VoiceMultiplier = voice.VolumeMultiplier;
                 sample.UpdatedUtc = now;
+                // Feed the block per-voice muffle AND the muffle-driven volume gain to the per-voice reverb (block-
+                // source feature) so its dry/wet split rides the SAME air-path muffle envelope as the biquad, and its
+                // wet can be compensated for the occlusion volume drop (distance gain is intentionally excluded).
+                if (string.Equals(sample.Category, "block", StringComparison.OrdinalIgnoreCase))
+                    V2GlobalReverbRuntime.ReportBlockMuffle(voice, sample.Muffle, CalculateMuffleVolumeGain(sample.Muffle, settings.PlayerFilterBlockVolumeMuffleWeight));
                 if (sample.Muffle > FilterBypassMuffle)
                     sample.Applied = ApplyFilterIfChanged(voice, settings.Filter2Type, sample.Frequency, sample.Q, sample.Category);
                 else if (LastVoiceSignatures.ContainsKey(voice))
@@ -771,6 +791,32 @@ namespace RealisticSoundPlus.AudioEngineV2
             return builder.Length == 0 ? "none" : builder.ToString();
         }
 
+        // Pre-apply the per-voice block/aux muffle to a freshly-bound voice BEFORE its first audio frame. ProcessVoices
+        // runs at most every 50ms and only sees a voice once it IsPlaying, so a cold block voice (a door opening, a
+        // cockpit cue) plays UNFILTERED for up to a frame or two - a bright full-volume burst that is the "first time
+        // this sound plays" pop. Running the SAME classify+apply once at bind time closes that window with the SAME
+        // occlusion-driven target (no per-block special-casing). Only applies when the target is actually muffled; an
+        // unmuffled voice is correct unfiltered, so it is left alone. The 50ms ProcessVoices pass still refines it.
+        public static bool TryPreFilterNewVoice(IMySourceVoice voice, RealisticSoundPlusSettings settings)
+        {
+            if (voice == null || settings == null || !settings.PlayerFilterEnabled || !voice.IsValid)
+                return false;
+
+            string cueName = voice.CueEnum.ToString();
+            if (string.IsNullOrWhiteSpace(cueName) || cueName == "NullOrEmpty")
+                return false;
+
+            // Volume isn't established at bind, so pass a nominal score: classification only needs the cue + physical
+            // source to derive the cutoff target. We apply ONLY the filter here, never the volume.
+            if (!TryClassifyAndCalculate(voice, cueName, 1f, settings, out V2PlayerFilterSample sample))
+                return false;
+
+            if (sample.Muffle <= FilterBypassMuffle)
+                return false;
+
+            return ApplyFilterIfChanged(voice, settings.Filter2Type, sample.Frequency, sample.Q, sample.Category);
+        }
+
         private static bool ApplyFilterIfChanged(IMySourceVoice voice, string filterType, float frequency, float q, string category)
         {
             if (voice == null || !voice.IsValid)
@@ -1060,6 +1106,9 @@ namespace RealisticSoundPlus.AudioEngineV2
 
         private static float GetEffectiveAtmosphere(float realAtmosphere, RealisticSoundPlusSettings settings)
         {
+            // Manual override is used verbatim (it's a direct test value). The real atmosphere already arrives blended
+            // (physical density + synthetic altitude ramp) from GetAtmosphericPressure, so the gradual entry/exit
+            // easing is baked in - just clamp it here.
             if (settings != null && settings.PlayerFilterAtmosphereOverrideEnabled)
                 return Clamp01(settings.PlayerFilterAtmosphereOverride);
 

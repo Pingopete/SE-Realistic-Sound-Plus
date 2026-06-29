@@ -30,8 +30,14 @@ namespace RealisticSoundPlus.AudioEngineV2
             bool fallback = listener.VanillaFallback;
             float listenerAtmosphere = ResolveCameraAtmosphere(listenerPosition);
             float sourceAtmosphere = ExteriorSoundTransmission.GetAtmosphericPressure(sourcePosition);
+            // Both reads come from GetAtmosphericPressure, which already blends physical density with the synthetic
+            // altitude ramp, so the gradual entry/exit easing is baked in here - no separate shaping needed.
             float airPressure = Clamp01(Math.Min(listenerAtmosphere, sourceAtmosphere));
             float airTransmission = ResolveEnvironmentAirTransmission(settings, sourceAtmosphere, airPressure, out float airEnvironmentOcclusion, out bool airEnvironmentOcclusionActive);
+            // Additional engine-air muffle driven directly by the player-position env probe (FinalMuffling) x menu scalar.
+            float engineEnvMuffle = ResolveEngineEnvMuffle(settings, airPressure, out bool engineEnvMuffleActive);
+            airEnvironmentOcclusion = engineEnvMuffle;
+            airEnvironmentOcclusionActive = engineEnvMuffleActive;
 
             float airCutoff = DistanceCutoff(
                 settings.EngineFilterAirNearFrequency,
@@ -46,13 +52,17 @@ namespace RealisticSoundPlus.AudioEngineV2
                 settings.EngineFilterHullDistanceCurve,
                 distance);
 
-            if (airPressure <= 0.01f)
-                airCutoff = settings.EngineFilterVacuumContactFrequency;
+            // Darken the air cutoff CONTINUOUSLY toward the vacuum frequency as pressure falls (was a binary <=0.01
+            // step). Outside the ship the cutoff blend reduces to airCutoff, so this makes the external / 3rd-person
+            // engine tone lose its highs gradually with pressure - not just fade in volume. Log-space so the sweep is
+            // perceptually even; at full pressure airCutoff is unchanged, at vacuum it lands on the vacuum frequency.
+            airCutoff = LogLerpFrequency(settings.EngineFilterVacuumContactFrequency, airCutoff, airPressure);
 
             CalculatePathWeights(airPressure, airTransmission, contact, out float airWeight, out float hullWeight);
             bool fallbackAirRecovered = fallback && airWeight > 0.001f;
 
             float finalCutoff = BlendCutoffs(airCutoff, airWeight, hullCutoff, hullWeight, settings.EngineFilterVacuumContactFrequency);
+            finalCutoff = ApplyEngineEnvMuffle(finalCutoff, settings, engineEnvMuffle);
             float hullShare = (airWeight + hullWeight) <= 0.001f ? 1f : hullWeight / (airWeight + hullWeight);
             float finalQ = Lerp(settings.EngineFilterAirQ, settings.EngineFilterHullQ, Clamp01(hullShare));
             float airDistanceGain = SixDirectionSourceModel.EvaluateDistanceGain(distance, settings.EngineFilterAirRange, settings.EngineFilterAirDistanceCurve);
@@ -163,6 +173,8 @@ namespace RealisticSoundPlus.AudioEngineV2
             bool fallback = listener.VanillaFallback;
             float listenerAtmosphere = ResolveCameraAtmosphere(listenerPosition);
             float sourceAtmosphere = ExteriorSoundTransmission.GetAtmosphericPressure(sourcePosition);
+            // Ease raw density through the shared perceptual curve so the vacuum->air cutoff blend (and the <=0.01
+            // vacuum gate) opens gradually across a descent instead of snapping bright in the lowest atmosphere band.
             float airPressure = Clamp01(Math.Min(listenerAtmosphere, sourceAtmosphere));
             float airTransmission = ResolveEnvironmentAirTransmission(settings, sourceAtmosphere, airPressure, out _, out _);
 
@@ -385,25 +397,45 @@ namespace RealisticSoundPlus.AudioEngineV2
             hullWeight = hullContact ? 1f : 0f;
         }
 
+        // The env muffle no longer rides the air/hull WEIGHT blend - that was a no-op without hull contact and only
+        // ever shifted tone. It is now a DIRECT cutoff darkening (ResolveEngineEnvMuffle / ApplyEngineEnvMuffle). This
+        // stub returns full transmission so the existing path-weight math is unchanged.
         private static float ResolveEnvironmentAirTransmission(RealisticSoundPlusSettings settings, float sourceAtmosphere, float airPressure, out float airEnvironmentOcclusion, out bool active)
         {
             airEnvironmentOcclusion = 0f;
             active = false;
-            if (settings == null || settings.EngineFilterAirEnvironmentOcclusionContribution <= 0f)
-                return 1f;
+            return 1f;
+        }
 
-            if (sourceAtmosphere <= 0.01f || airPressure <= 0.01f)
-                return 1f;
+        // NEW engine env muffle: additional muffling of the engine AIR sound, driven DIRECTLY by the environment
+        // probe's FinalMuffling at the player's CURRENT position, scaled by the menu slider. 0 = no added muffle;
+        // higher MULTIPLIES the env muffle into the engine cutoff. Atmosphere-gated (the air leg needs air to carry).
+        private static float ResolveEngineEnvMuffle(RealisticSoundPlusSettings settings, float airPressure, out bool active)
+        {
+            active = false;
+            float scalar = settings?.EngineFilterAirEnvironmentOcclusionContribution ?? 0f;
+            if (scalar <= 0f || airPressure <= 0.01f)
+                return 0f;
 
             if (!V2PlayerEnvironmentTelemetry.TryGetLatest(out V2PlayerEnvironmentSample env))
-                return 1f;
+                return 0f;
 
-            float apertureOcclusion = Clamp01(1f - env.ApertureFraction);
-            float finalOcclusion = Clamp01(env.FinalMuffling);
-            float environmentOcclusion = Math.Max(finalOcclusion, apertureOcclusion);
-            airEnvironmentOcclusion = Clamp01(environmentOcclusion * settings.EngineFilterAirEnvironmentOcclusionContribution);
-            active = airEnvironmentOcclusion > 0.001f;
-            return Clamp01(1f - airEnvironmentOcclusion);
+            float muffle = Clamp01(env.FinalMuffling * scalar);
+            active = muffle > 0.001f;
+            return muffle;
+        }
+
+        // Darken the engine cutoff toward its most-muffled air tone (the air-far cutoff) by the env-muffle amount, in
+        // log space so the sweep sounds even. amount 1 collapses the engine to the air-far cutoff.
+        private static float ApplyEngineEnvMuffle(float cutoff, RealisticSoundPlusSettings settings, float engineEnvMuffle)
+        {
+            if (engineEnvMuffle <= 0.001f)
+                return cutoff;
+
+            float floor = Math.Max(RspDynamicAudioFilters.MinFilterFrequency, settings.EngineFilterAirFarFrequency);
+            double logCutoff = Math.Log(Math.Max(1f, cutoff));
+            double logFloor = Math.Log(Math.Max(1f, floor));
+            return (float)Math.Exp(logCutoff + (logFloor - logCutoff) * Clamp01(engineEnvMuffle));
         }
 
         private static void LogFallbackAirRecovery(V2EngineFilterSample sample)
@@ -465,6 +497,20 @@ namespace RealisticSoundPlus.AudioEngineV2
         private static float Lerp(float from, float to, float amount)
         {
             return from + (to - from) * Clamp01(amount);
+        }
+
+        // Interpolate a cutoff frequency in LOG space by t (0 -> darkFreq, 1 -> brightFreq). Used to slide the air
+        // cutoff from the vacuum frequency up to its bright distance value as pressure rises, so the sweep is even.
+        private static float LogLerpFrequency(float darkFreq, float brightFreq, float t)
+        {
+            if (t <= 0f)
+                return darkFreq;
+            if (t >= 1f)
+                return brightFreq;
+
+            float fromLog = (float)Math.Log(Math.Max(1f, darkFreq));
+            float toLog = (float)Math.Log(Math.Max(1f, brightFreq));
+            return (float)Math.Exp(fromLog + (toLog - fromLog) * t);
         }
 
         private static float Clamp01(float value)
